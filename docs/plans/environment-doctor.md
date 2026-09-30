@@ -8,10 +8,11 @@ this document does not claim a published doctor or a completed onboarding journe
 The current implementation slice covers static inspection, host/runtime/installed
 SDK preflight, a standard editor walkthrough and setup status, explicit project
 selection, workspace/configuration cancellation, and report review/copy. The local
-.NET tool and the private VSIX doctor use the same result schema. Opt-in evaluated
-project/feed diagnostics, native-prerequisite observations and the remaining
-target/tool identity reporting still belong to #248; the fresh installed-editor
-journey remains #249. Keep those boundaries visible when reporting this slice.
+.NET tool and the private VSIX static doctor use the same result schema. The editor
+also has an explicit trusted-project report backed by the existing requirements
+producer, including authoritative target/tool identity and fresh active-evidence
+reuse. Standalone CLI parity, optional feed diagnostics and native-prerequisite
+observations still belong to #248; the fresh installed-editor journey remains #249.
 
 ## Boundaries
 
@@ -37,7 +38,7 @@ or installation.
 
 ## Results and presentation
 
-One versioned result format drives CLI text, JSON and VS Code presentation. Checks
+The static versioned result format drives CLI text, JSON and VS Code presentation. Checks
 carry a stable code, severity, capability, status, scope, observed evidence,
 expected requirement and remedy. Capability readiness is independent: editor,
 managed build/run, package access and native publication can differ. Exit states
@@ -47,6 +48,15 @@ checks that did not run are not promoted to passes.
 Reports exclude document contents and credential values. Home-directory prefixes
 and credential-bearing URLs are redacted before display/export. Export is explicit
 and presents the report for review before copying or saving it.
+
+The editor's explicit project report is a separate bounded
+`trusted-project-doctor` result. It reports requirements evaluation and verified
+tool delivery, while leaving semantic readiness, build, native publication and
+feed access unverified. It contains no project paths, raw exception messages or
+credential fields. A server override remains explicitly unauthenticated as a
+release artifact even when its compiler and protocol match. Cache inspection
+creates no directories. Canceling the report leaves an existing language server
+running; stale success and failure results are discarded.
 
 The extension performs a small host/runtime preflight before attempting to run
 the .NET doctor. This handles the missing-runtime case that the managed tool cannot
@@ -83,13 +93,12 @@ journey is tracked separately in [#249](https://github.com/RichiCoder1/lucent/is
 
 The remaining #248 work proceeds in this order:
 
-1. Add an explicit trusted-project check using the verified language server's
-   existing requirements operation. Extend that producer with authoritative target
-   framework/RID identity, and reuse fresh evaluated evidence where available.
-   Project evaluation remains a separate action from static environment checks;
-   the action explains that MSBuild can execute project-supplied tooling. Standalone
-   CLI support must use an explicitly supplied trusted server, not workspace
-   executable discovery.
+1. Complete standalone CLI parity for the editor's trusted-project check, using an
+   explicitly supplied trusted server rather than workspace executable discovery.
+   The producer's single-framework/effective-RID identity, editor command, active
+   evidence reuse and read-only cache inspection are implemented. Project
+   evaluation remains a separate action from static environment checks; the action
+   explains that MSBuild can execute project-supplied tooling.
 2. Add an optional NuGet adapter for effective configuration and bounded online
    feed observations. Use official NuGet configuration/protocol APIs for hierarchy,
    disabled sources and source mapping. Keep these dependencies and network work
@@ -103,7 +112,7 @@ The remaining #248 work proceeds in this order:
 
 Each adapter must retain cancellation and workspace-generation checks, present its
 scope explicitly, and leave unperformed checks as `notChecked`. These are remaining
-implementation tasks, not capabilities established by the current static slice.
+implementation tasks, not capabilities established by the static or editor slices.
 
 Use focused tests for capability classification, malformed/missing configuration,
 bounded process output, cancellation, stale results and seeded-secret redaction.

@@ -24,7 +24,7 @@ function loadEnvironmentUi(verify, runDoctor) {
     return module.exports;
 }
 
-function fixture({ trusted = true, folders = 1, verify, runDoctor, openDocument, copyChoice } = {}) {
+function fixture({ trusted = true, folders = 1, verify, runDoctor, openDocument, copyChoice, checkTrustedProject } = {}) {
     const events = [];
     const clipboard = [];
     const commands = new Map();
@@ -72,10 +72,11 @@ function fixture({ trusted = true, folders = 1, verify, runDoctor, openDocument,
         return runDoctor ? runDoctor(...args) : { schemaVersion: 1, kind: "environment-doctor", status: "available" };
     };
     const { createEnvironmentCommands } = loadEnvironmentUi(verifyBoundary, doctorBoundary);
-    const environment = createEnvironmentCommands(vscode, context, manifest);
+    const environment = createEnvironmentCommands(vscode, context, manifest, checkTrustedProject);
     return { events, clipboard, commands, calls, subscriptions, environment,
         cancelProgress: () => cancelProgress?.(),
         check: () => commands.get("lucentLui.checkEnvironment")(),
+        checkProject: () => commands.get("lucentLui.checkTrustedProject")(),
         copy: () => commands.get("lucentLui.copyEnvironmentReport")(),
         dispose: () => subscriptions.at(-1).dispose() };
 }
@@ -89,6 +90,40 @@ test("trusted and Restricted Mode commands use only the verified static doctor",
         assert.deepEqual(ui.events, ["open-preview", "show-preview"]);
     }
 });
+
+test("explicit trusted command is trust gated and does not invoke static doctor", async () => {
+    let calls = 0;
+    const checkTrustedProject = async () => { calls++; return { kind: "trusted-project-doctor", scope: "trusted-project" }; };
+    const restricted = fixture({ trusted: false, checkTrustedProject });
+    await restricted.checkProject();
+    assert.equal(calls, 0);
+    const trusted = fixture({ checkTrustedProject });
+    await trusted.checkProject();
+    assert.equal(calls, 1);
+    assert.equal(trusted.calls.doctor, 0);
+    await trusted.copy();
+    assert.equal(JSON.parse(trusted.clipboard[0]).scope, "trusted-project");
+});
+
+test("trusted command cancellation suppresses late results and failures export only stable reasons", async () => {
+    const pending = deferred();
+    let signal;
+    const ui = fixture({ checkTrustedProject: operationSignal => { signal = operationSignal; return pending.promise; } });
+    const check = ui.checkProject();
+    ui.cancelProgress();
+    assert.equal(signal.aborted, true);
+    pending.resolve({ kind: "trusted-project-doctor" });
+    await check;
+    assert.equal(ui.events.includes("show-preview"), false);
+    await ui.copy();
+    assert.equal(ui.clipboard.length, 0);
+    const failure = fixture({ checkTrustedProject: () => { const error = new Error("SECRET C:\\Users\\private"); error.doctorReason = "SECRET-code"; throw error; } });
+    await failure.checkProject();
+    await failure.copy();
+    assert.equal(failure.clipboard[0].includes("SECRET"), false);
+    assert.equal(JSON.parse(failure.clipboard[0]).reason, "requirements-unavailable");
+});
+
 
 test("unverified payload never executes and its error cannot export raw details", async () => {
     const ui = fixture({ verify: () => { throw new Error("token=PRIVATE C:\\Users\\private"); } });

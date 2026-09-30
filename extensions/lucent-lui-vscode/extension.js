@@ -6,7 +6,7 @@ const os = require("node:os");
 const { isDeepStrictEqual } = require("node:util");
 const vscode = require("vscode");
 const { verifyBundledServer } = require("./server-bundle");
-const { readProjectRequirements, assertCompatibleCompiler, verifyRequirementInputs } = require("./project-requirements");
+const { readProjectRequirements, assertCompatibleCompiler, verifyRequirementInputs, trustedProjectReport } = require("./project-requirements");
 const { selectApprovedEntry, resolveCachedServer, importApprovedArchive, importDownloadedRelease } = require("./server-cache");
 const { acquireApprovedRelease } = require("./server-acquisition");
 const { preflightDotnet } = require("./doctor-client");
@@ -298,14 +298,14 @@ async function bootstrapServer(context, folder, signal, dotnetPath) {
     return { server, bundled, identity, configured };
 }
 
-async function cacheOptions(context, requirement, signal) {
+async function cacheOptions(context, requirement, signal, verifiedDotnetPath) {
     if (releaseCatalog.schemaVersion !== 1 || !Array.isArray(releaseCatalog.releases)) {
         throw new Error("The installed Lucent release catalog is unsupported.");
     }
     if (!context.globalStorageUri?.fsPath || (context.globalStorageUri.scheme && context.globalStorageUri.scheme !== "file")) {
         throw new Error("Lucent tooling cache requires file storage on the workspace host.");
     }
-    const dotnetPath = await new Promise((resolve, reject) => {
+    const dotnetPath = verifiedDotnetPath ?? await new Promise((resolve, reject) => {
         childProcess.execFile("where.exe", ["dotnet.exe"], { timeout: 10000, maxBuffer: 65536, windowsHide: true, signal }, (error, output) => {
             const host = output?.trim().split(/\r?\n/)[0];
             if (error || !host || !path.isAbsolute(host)) reject(new Error("The .NET host could not be located for Lucent tooling installation."));
@@ -423,7 +423,74 @@ async function installMatchingServer(context, current, controller) {
     return finishToolingInstall(requirement, result, current, controller);
 }
 
-async function activateTrusted(context, isActive, onStarted, onState, onSelected) {
+async function selectVerifiedProjectTools(context, selection, signal, current) {
+    const { folder, projectPath } = selection;
+    let stage = "host-unavailable";
+    try {
+        const preflight = await preflightDotnet({ workspacePath: folder?.uri.fsPath ?? os.tmpdir(), requireSdk: !!projectPath, signal });
+        if (!current()) return;
+        if (preflight.status !== "available") throw new Error("Lucent requires an available .NET host, .NET 10 runtime and project SDK. Run Lucent: Check Environment for setup details.");
+        const dotnetPath = preflight.dotnetPath;
+        stage = "server-unavailable";
+        let { bundled, server, identity, configured } = await bootstrapServer(context, folder, signal, dotnetPath);
+        if (!current()) return;
+        let requirements, cached;
+        if (projectPath) {
+            stage = "requirements-unavailable";
+            requirements = await readProjectRequirements(server, projectPath, signal, undefined, dotnetPath);
+            if (!current()) return;
+            if (!configured && selectApprovedEntry(requirements, releaseCatalog.releases, clientRelease).status === "approved") {
+                const options = await cacheOptions(context, requirements, signal, dotnetPath);
+                if (!current()) return;
+                cached = await resolveCachedServer(options);
+                if (!current()) return;
+                if (cached.status === "selected") {
+                    server = cached.serverPath;
+                    bundled = undefined;
+                    identity = await identifyServer(server, signal, dotnetPath);
+                    if (!current()) return;
+                    if (!isDeepStrictEqual(identity, cached.identity)) throw new Error("The cached server reported a different identity.");
+                }
+            }
+            assertCompatibleCompiler(requirements, identity);
+            stage = "inputs-changed";
+            await verifyRequirementInputs(requirements, signal);
+            if (!current()) return;
+        }
+        stage = "server-changed";
+        if (bundled) verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
+        if (!current()) return;
+        return { bundled, server, identity, configured, cached, dotnetPath, requirements, selection };
+    } catch (error) {
+        error.doctorReason = stage;
+        throw error;
+    }
+}
+
+async function reverifyProjectTools(context, evidence, signal, current) {
+    try { await verifyRequirementInputs(evidence.requirements, signal); }
+    catch (error) { error.doctorReason = "inputs-changed"; throw error; }
+    if (!current()) return;
+    try {
+        if (evidence.bundled) verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
+        if (evidence.cached?.status === "selected") {
+            const options = await cacheOptions(context, evidence.requirements, signal, evidence.dotnetPath);
+            if (!current()) return;
+            const cached = await resolveCachedServer(options);
+            if (!current()) return;
+            if (cached.status !== "selected" || cached.serverPath !== evidence.server || !isDeepStrictEqual(cached.identity, evidence.identity)) {
+                throw new Error("The selected server changed.");
+            }
+        }
+        const identity = await identifyServer(evidence.server, signal, evidence.dotnetPath);
+        if (!current()) return;
+        if (!isDeepStrictEqual(identity, evidence.identity)) throw new Error("The selected server changed.");
+        assertCompatibleCompiler(evidence.requirements, identity);
+        return evidence;
+    } catch (error) { error.doctorReason = "server-changed"; throw error; }
+}
+
+async function activateTrusted(context, isActive, onStarted, onState, onSelected, onEvidence) {
     if (!vscode.workspace.isTrusted || !isActive()) return;
     let selection;
     try { selection = await selectProject(); }
@@ -439,52 +506,27 @@ async function activateTrusted(context, isActive, onStarted, onState, onSelected
     const controller = new AbortController();
     const subscriptions = [];
     let activeStop = { dispose: () => {
+        onEvidence(undefined);
         controller.abort();
         for (const subscription of subscriptions.splice(0).reverse()) subscription.dispose();
     } };
     onStarted(activeStop);
     const current = () => isActive() && !controller.signal.aborted && vscode.workspace.isTrusted;
     const report = (kind, message) => { if (isActive()) onState({ kind, projectPath, message }, { notify: true }); };
-    let bundled, server, identity, configured;
-    let cached;
-    let dotnetPath;
+    let evidence;
     try {
-        const preflight = await preflightDotnet({ workspacePath: folder?.uri.fsPath ?? os.tmpdir(), requireSdk: !!projectPath, signal: controller.signal });
-        if (!current()) return;
-        if (preflight.status !== "available") {
-            report("missing-tools", preflight.reason === "dotnet-sdk-missing"
-                ? "Lucent project services require a .NET SDK on the workspace host. Run Lucent: Check Environment for setup details."
-                : "Lucent requires an available .NET host and .NET 10 runtime. Run Lucent: Check Environment for setup details.");
-            activeStop.dispose();
-            return;
-        }
-        dotnetPath = preflight.dotnetPath;
-        ({ bundled, server, identity, configured } = await bootstrapServer(context, folder, controller.signal, dotnetPath));
+        evidence = await selectVerifiedProjectTools(context, selection, controller.signal, current);
     }
     catch (error) {
         const shouldReport = current();
         activeStop.dispose();
-        if (shouldReport) report("mismatch", error.message);
+        if (shouldReport) report(error.doctorReason === "host-unavailable" ? "missing-tools" : "mismatch", error.message);
         return;
     }
-    if (!current()) return;
-    let requirements;
-    if (projectPath) {
-        try {
-            requirements = await readProjectRequirements(server, projectPath, controller.signal);
-            if (!current()) return;
-            if (!configured && selectApprovedEntry(requirements, releaseCatalog.releases, clientRelease).status === "approved") {
-                cached = await resolveCachedServer(await cacheOptions(context, requirements, controller.signal));
-                if (!current()) return;
-                if (cached.status === "selected") {
-                    server = cached.serverPath;
-                    bundled = undefined;
-                    identity = await identifyServer(server, controller.signal, dotnetPath);
-                    if (!current()) return;
-                    if (!isDeepStrictEqual(identity, cached.identity)) throw new Error("The cached server reported a different identity.");
-                }
-            }
-            assertCompatibleCompiler(requirements, identity);
+    if (!evidence || !current()) return;
+    const { bundled, server, identity, cached, dotnetPath, requirements } = evidence;
+    try {
+        if (projectPath) {
             const watchedInputs = new Map();
             for (const input of requirements.inputs) {
                 const directory = path.dirname(input.path);
@@ -504,22 +546,13 @@ async function activateTrusted(context, isActive, onStarted, onState, onSelected
             }
             await verifyRequirementInputs(requirements, controller.signal);
             if (!current()) return;
-        } catch (error) {
-            const shouldReport = current();
-            activeStop.dispose();
-            if (shouldReport) report("mismatch", error.message);
-            return;
         }
-    }
-    if (bundled) {
-        try {
-            if (!isDeepStrictEqual(identity, bundled.identity)) throw new Error("The bundled server reported a different identity.");
-            verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
-        } catch (error) {
-            activeStop.dispose();
-            report("mismatch", `Bundled Lucent language server rejected: ${error.message}`);
-            return;
-        }
+        if (bundled) verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
+    } catch (error) {
+        const shouldReport = current();
+        activeStop.dispose();
+        if (shouldReport) report("mismatch", error.message);
+        return;
     }
     if (!current()) { activeStop.dispose(); return; }
     const log = vscode.window.createOutputChannel("Lucent LUI", { log: true });
@@ -587,6 +620,7 @@ async function activateTrusted(context, isActive, onStarted, onState, onSelected
     const stop = { dispose: () => {
         if (stopped) return;
         stopped = true;
+        onEvidence(undefined);
         controller.abort();
         for (const subscription of subscriptions.splice(0).reverse()) subscription.dispose();
         rpc.notifications.clear();
@@ -669,6 +703,7 @@ async function activateTrusted(context, isActive, onStarted, onState, onSelected
         throw error;
     }
     if (stopped || !isActive()) { stop.dispose(); return; }
+    if (requirements) onEvidence({ ...evidence, owner: stop });
     rpc.notify("initialized", {});
     onState({ kind: projectPath ? "ready" : "no-project", projectPath,
         message: projectPath ? `Language services are active. ${delivery} server source ${identity.sourceCommit.slice(0, 8)}; protocol ${identity.protocol.major}.${identity.protocol.minor}.` : undefined });
@@ -880,18 +915,56 @@ async function activateTrusted(context, isActive, onStarted, onState, onSelected
 
 async function activate(context) {
     const ui = createOnboardingUi(vscode, context);
-    const environment = createEnvironmentCommands(vscode, context, manifest);
+    const environment = createEnvironmentCommands(vscode, context, manifest, checkTrustedProject);
     let currentStop;
+    let projectEvidence;
     let importController;
     let selectedFolder;
     let state = { kind: "checking" };
     let disposed = false;
     let generation = 0;
     let semanticRequested = false;
+    async function checkTrustedProject(signal, operationCurrent) {
+        const ticket = generation;
+        const folders = () => JSON.stringify((vscode.workspace.workspaceFolders ?? []).map(folder => [folder.uri.scheme, folder.uri.fsPath]));
+        const initialFolders = folders();
+        const current = () => operationCurrent() && !disposed && !signal.aborted && vscode.workspace.isTrusted
+            && ticket === generation && folders() === initialFolders;
+        if (!current()) return;
+        const selection = await selectProject();
+        if (!current()) return;
+        if (!selection?.projectPath) {
+            const error = new Error("Select a Lucent project first.");
+            error.doctorReason = "project-not-selected";
+            throw error;
+        }
+        const configuration = vscode.workspace.getConfiguration("lucentLui", selection.folder?.uri);
+        const projectSetting = configuration.get("projectPath");
+        const serverSetting = configuration.get("serverPath");
+        const selectedCurrent = () => current()
+            && vscode.workspace.getConfiguration("lucentLui", selection.folder?.uri).get("projectPath") === projectSetting
+            && vscode.workspace.getConfiguration("lucentLui", selection.folder?.uri).get("serverPath") === serverSetting;
+        const saved = projectEvidence;
+        const reusable = saved && saved.owner === currentStop && saved.selection.projectPath === selection.projectPath
+            && saved.selection.folder?.uri.fsPath === selection.folder?.uri.fsPath;
+        const evidenceCurrent = () => selectedCurrent()
+            && (!reusable || projectEvidence === saved && saved.owner === currentStop);
+        try {
+            const evidence = reusable
+                ? await reverifyProjectTools(context, saved, signal, evidenceCurrent)
+                : await selectVerifiedProjectTools(context, selection, signal, evidenceCurrent);
+            if (!evidence || !evidenceCurrent()) return;
+            return trustedProjectReport(evidence, reusable ? "reused" : "evaluated");
+        } catch (error) {
+            if (!evidenceCurrent()) return;
+            throw error;
+        }
+    }
     const update = (next, options) => { state = next; ui.update(next, options); };
     const restart = () => {
         semanticRequested = true;
         const ticket = ++generation;
+        projectEvidence = undefined;
         environment.cancel();
         importController?.abort();
         currentStop?.dispose();
@@ -908,14 +981,16 @@ async function activate(context) {
         return activateTrusted(context, isCurrent, stop => {
             if (isCurrent()) currentStop = stop;
             else stop.dispose();
-        }, (next, options) => { if (isCurrent()) update(next, options); }, folder => { if (isCurrent()) selectedFolder = folder; }).then(stop => {
+        }, (next, options) => { if (isCurrent()) update(next, options); }, folder => { if (isCurrent()) selectedFolder = folder; }, evidence => {
+            if (isCurrent()) { projectEvidence = evidence; if (!evidence) environment.cancel(); }
+        }).then(stop => {
             if (isCurrent()) currentStop = stop;
             else stop?.dispose();
         }, error => {
             if (isCurrent()) throw error;
         });
     };
-    context.subscriptions.push({ dispose: () => { disposed = true; generation++; environment.cancel(); importController?.abort(); currentStop?.dispose(); } });
+    context.subscriptions.push({ dispose: () => { disposed = true; projectEvidence = undefined; generation++; environment.cancel(); importController?.abort(); currentStop?.dispose(); } });
     context.subscriptions.push(vscode.commands.registerCommand("lucentLui.restartLanguageServices", restart));
     if (vscode.workspace.onDidOpenTextDocument) context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
         if (document?.languageId !== "lui" || semanticRequested || disposed) return;
@@ -973,6 +1048,7 @@ async function activate(context) {
         })
     );
     if (vscode.workspace.onDidChangeWorkspaceFolders) context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(event => {
+        projectEvidence = undefined;
         environment.cancel();
         if (!event.removed?.length || disposed) return;
         importController?.abort();
@@ -987,6 +1063,7 @@ async function activate(context) {
         if (disposed || !event.affectsConfiguration("lucentLui.projectPath", selectedFolder?.uri)
             && !event.affectsConfiguration("lucentLui.serverPath", selectedFolder?.uri)) return;
         environment.cancel();
+        projectEvidence = undefined;
         if (semanticRequested && vscode.workspace.isTrusted) void restart().catch(() => {}); // Startup reports its own failure once.
     }));
     if (!vscode.workspace.isTrusted) {

@@ -4,7 +4,7 @@ const path = require("node:path");
 const { verifyManagedToolFiles } = require("./managed-tool");
 const { runDoctor } = require("./doctor-client");
 
-function createEnvironmentCommands(vscode, context, manifest) {
+function createEnvironmentCommands(vscode, context, manifest, checkTrustedProject) {
     let controller;
     let generation = 0;
     let disposed = false;
@@ -12,8 +12,9 @@ function createEnvironmentCommands(vscode, context, manifest) {
     const cancel = () => { generation++; controller?.abort(); controller = undefined; report = undefined; };
     const current = (ticket, operation) => !disposed && generation === ticket && !operation.signal.aborted;
 
-    async function preview(value, ticket) {
+    async function preview(value, ticket, operation) {
         const document = await vscode.workspace.openTextDocument({ language: "json", content: JSON.stringify(value, null, 2) });
+        if (operation?.signal.aborted) { if (report === value) report = undefined; return; }
         if (!disposed && ticket === generation) await vscode.window.showTextDocument(document, { preview: true });
     }
 
@@ -48,11 +49,11 @@ function createEnvironmentCommands(vscode, context, manifest) {
             });
             if (!result || !current(ticket, operation)) return;
             report = result;
-            await preview(result, ticket);
+            await preview(result, ticket, operation);
         } catch {
             if (current(ticket, operation)) {
                 report = { schemaVersion: 1, kind: "environment-doctor-client", status: "unavailable", capability: "environment-doctor", reason: "doctor-payload-unavailable" };
-                await preview(report, ticket);
+                await preview(report, ticket, operation);
             }
         } finally { if (controller === operation) controller = undefined; }
     }
@@ -70,8 +71,43 @@ function createEnvironmentCommands(vscode, context, manifest) {
         }
     }
 
+    async function checkProject() {
+        if (disposed) return;
+        cancel();
+        const ticket = generation;
+        const operation = controller = new AbortController();
+        if (!vscode.workspace.isTrusted) {
+            await vscode.window.showInformationMessage("Trust this workspace before checking its Lucent project. MSBuild evaluation may execute project-supplied tooling.");
+            return;
+        }
+        try {
+            const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+                title: "Checking trusted Lucent project (MSBuild may execute project tooling; no restore or install)", cancellable: true
+            }, async (_progress, token) => {
+                const subscription = token.onCancellationRequested(() => operation.abort());
+                try {
+                    if (token.isCancellationRequested) operation.abort();
+                    if (!current(ticket, operation)) return;
+                    return await checkTrustedProject?.(operation.signal, () => current(ticket, operation));
+                } finally { subscription.dispose(); }
+            });
+            if (!result || !current(ticket, operation) || !vscode.workspace.isTrusted) return;
+            report = result;
+            await preview(result, ticket, operation);
+        } catch (error) {
+            if (current(ticket, operation) && vscode.workspace.isTrusted) {
+                const reasons = ["project-not-selected", "host-unavailable", "server-unavailable", "requirements-unavailable", "inputs-changed", "server-changed"];
+                report = { schemaVersion: 1, kind: "trusted-project-doctor", scope: "trusted-project", status: "unavailable",
+                    reason: reasons.includes(error?.doctorReason) ? error.doctorReason : "requirements-unavailable",
+                    semanticReadiness: "notChecked", managedBuildReadiness: "notChecked" };
+                await preview(report, ticket, operation);
+            }
+        } finally { if (controller === operation) controller = undefined; }
+    }
+
     context.subscriptions.push(
         vscode.commands.registerCommand("lucentLui.checkEnvironment", check),
+        vscode.commands.registerCommand("lucentLui.checkTrustedProject", checkProject),
         vscode.commands.registerCommand("lucentLui.copyEnvironmentReport", copyReport),
         { dispose() { disposed = true; cancel(); } }
     );

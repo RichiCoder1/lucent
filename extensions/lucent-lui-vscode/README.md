@@ -13,9 +13,19 @@ evaluating a project, contacting feeds or changing settings. It is available in
 Restricted Mode. The report distinguishes editor, managed build, restore and native
 capabilities; unperformed checks remain **notChecked**. **Lucent: Review and Copy
 Environment Report** previews the report before explicitly copying it for sharing.
-Opening setup or environment commands alone does not start project evaluation.
+Opening setup or the static environment commands alone does not start project evaluation.
 Language services start when a `.lui` document is opened, or through an explicit
 project selection or language-service restart.
+
+**Lucent: Check Trusted Project** separately evaluates the selected project's
+requirements through the verified server. MSBuild may execute project-supplied
+tooling. This command does not request restore, install tools or start/restart
+language services. An active project's evidence is reused only after its inputs
+and selected server are checked again. The report includes the evaluated target
+framework/RID and tool identity; older servers that omit target identity report
+it as **notChecked**. A successful requirements check does not establish a
+successful build, native publication or feed access. The same review/copy command
+previews this report without including project paths or raw failure messages.
 
 The **Lucent** status item shows the current setup state and applicable actions.
 **Lucent: Select Project** chooses an owning folder and `.csproj`, writes only that

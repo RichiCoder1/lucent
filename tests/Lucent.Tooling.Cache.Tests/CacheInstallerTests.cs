@@ -11,6 +11,23 @@ namespace Lucent.Tooling.Cache.Tests;
 public sealed class CacheInstallerTests
 {
     [TestMethod]
+    public async Task AbsentCacheVerificationDoesNotCreateDirectoriesOrRunServer()
+    {
+        using var fixture = new ServerFixture();
+        var runner = new FakeIdentity(fixture.Identity);
+        Assert.IsFalse(Directory.Exists(fixture.CacheRoot));
+        var failure = await Assert.ThrowsExactlyAsync<CacheException>(() =>
+            new CacheInstaller(runner).ExecuteAsync(
+                fixture.Request("verify"),
+                CancellationToken.None
+            )
+        );
+        Assert.AreEqual("cache_missing", failure.Code);
+        Assert.IsFalse(Directory.Exists(fixture.CacheRoot));
+        Assert.AreEqual(0, runner.Calls);
+    }
+
+    [TestMethod]
     public async Task InstallAndOfflineVerifyPreserveImmutableServerPayload()
     {
         using var fixture = new ServerFixture();

@@ -128,6 +128,10 @@ but its managed solution build exposed concurrent preparation processes writing
 the same referenced project's generated editorconfig. The original failure is
 retained in `artifacts/ci105-failure/managed.log`. Preparation-owned compiler-options
 files are being implemented; preserve project hooks and stable input identities.
+CI 105's package verification and artifact upload passed, but the job reached its
+30-minute limit during NuGet cache saving. The job budget is now 40 minutes to
+include cleanup overhead; verification requirements are unchanged. Publication
+was skipped. Both job logs are retained under `artifacts/ci105-failure`.
 The owner approved deleting only the failed repository-local test cache; that
 710 MB directory has been removed, preserving the normal C: cache and failure logs.
 
@@ -144,7 +148,7 @@ The owner approved deleting only the failed repository-local test cache; that
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
 | Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
 | Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
-| Environment doctor #248 | Static CLI and VS Code onboarding pass review, 89 extension tests, six CLI contracts, local tool install and extracted VSIX invocation | Publish the first slice; finish trusted-project, optional feed and native-prerequisite diagnostics before closing |
+| Environment doctor #248 | Static CLI/VSIX proof passes; explicit editor project inspection, authoritative targets and read-only cache pass real-project/cache contracts and 99 Node tests; two Astra race findings corrected | Publish reviewed slices; finish CLI project parity, optional feed and native-prerequisite diagnostics before closing |
 | Windows keypad #326 | Published in 101.1 and closed; three focused contracts pass in both managed and NativeAOT runs | No remaining issue work; no physical main-arrow claim |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
@@ -166,19 +170,22 @@ The package-only Issue Browser replay build is under
 `artifacts/issue221-package101-replay`, with exact package/executable hashes in
 `prepared.json`; its final two-process native replay is recorded beside it.
 
-Light Notes now restores and builds against `0.3.0-dev.94.1`. Its new
+Light Notes now restores and builds against `0.3.0-dev.101.1`. Its new
 command buttons, Field-aware TextArea, placeholder colors and metadata contrast
 were exercised on 93.1 with native typing and a real bounded SQLite writer delay. The
 latest text survived a new process. Evidence is in
 `artifacts/notes12-native/computer-use-proof.md` and Notes' consumer evidence.
-Its source update remains uncommitted until the next framework package fixes the
-known constrained-height failure. Diagnostic DLL substitution isolated the cause
-but is not consumer delivery proof; do not close #323 with that boundary outstanding.
-101.1 is now available. Its two pin edits are prepared in
-`artifacts/notes101-adoption/pins.patch`. The owner subsequently approved the
-separate-repository update, lock refresh, verification and commit/push. Both pins
-are now 101.1; package-consumer verification is underway. The earlier rejected
-write applied no edits and remains a separate attempt.
+The owner approved the separate-repository 101.1 update, lock refresh and delivery.
+Commit `8d5cdaa` is pushed to Notes main. All six locked restores, 102 managed tests,
+formatting and NativeAOT publication pass. The unchanged 520-pixel regression and
+a native 480-by-520 editor check now keep all footer commands inside the frame;
+typed content persists in the isolated test database. All seven consumed Lucent
+packages match fresh official-feed downloads byte for byte. Evidence is under
+`artifacts/notes101-adoption`, including the native walkthrough and exact binary
+identity. Notes CI is running at
+https://github.com/RichiCoder1/light-notes/actions/runs/36776465450.
+Earlier diagnostic DLL substitution and the rejected write are preserved as
+separate attempts; neither is being relabeled as consumer proof.
 
 Fresh Component Browser NativeAOT presentation observations are recorded under
 `artifacts/review323-native-final/walkthrough.md`. The final Issue Browser binary

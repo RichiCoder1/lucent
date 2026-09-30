@@ -6,7 +6,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 const crypto = require("node:crypto");
 const os = require("node:os");
-const { readProjectRequirements, validateRequirements, assertCompatibleCompiler, verifyRequirementInputs } = require("./project-requirements");
+const { readProjectRequirements, validateRequirements, assertCompatibleCompiler, verifyRequirementInputs, trustedProjectReport } = require("./project-requirements");
 
 const loaded = { exports: {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "extension.js"), "utf8"), {
@@ -142,6 +142,147 @@ test("Check Environment cold activation stays static until a Lucent editor opens
     assert.equal(server.lastRequest.method, "initialize");
     harness.context.subscriptions.forEach(resource => resource.dispose());
     server.emit("exit", 0, null);
+});
+
+function trustedCommandBoundary(controller = new AbortController()) {
+    return { createEnvironmentCommands(vscode, context, _manifest, check) {
+        let ticket = 0;
+        context.subscriptions.push(vscode.commands.registerCommand("lucentLui.checkTrustedProject", () => {
+            const captured = ticket;
+            return check(controller.signal, () => captured === ticket && !controller.signal.aborted);
+        }));
+        return { cancel() { ticket++; } };
+    } };
+}
+
+test("cold explicit project check evaluates using the absolute host without starting or acquiring tools", async () => {
+    let reads = 0;
+    const server = new MockProcess();
+    const host = path.resolve("host/dotnet.exe");
+    const harness = failureHarness(server, { openLui: false, dependencies: {
+        environmentUi: trustedCommandBoundary(),
+        readRequirements: async (_server, projectPath, _signal, _execute, dotnetPath) => {
+            reads++;
+            assert.equal(dotnetPath, host);
+            return { projectPath, compiler: { sha256: "3".repeat(64), sourceCommit: null }, state: "development-source", inputs: [] };
+        },
+        acquisition: { acquireApprovedRelease: () => assert.fail("doctor must not acquire tools") },
+        cache: { importApprovedArchive: () => assert.fail("doctor must not install tools") }
+    } });
+    await harness.activate();
+    const report = await harness.command("lucentLui.checkTrustedProject");
+    assert.equal(report.evaluation, "evaluated");
+    assert.equal(report.target.status, "notChecked");
+    assert.equal(reads, 1);
+    assert.equal(harness.identityChecks, 1);
+    assert.equal(harness.spawnCount, 0);
+    assert.equal(harness.watchers.length, 0);
+    assert.equal(server.lastRequest, undefined);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("active project check reuses fresh evidence but rejects changed inputs without restarting services", async () => {
+    let reads = 0;
+    let changed = false;
+    const server = new MockProcess();
+    const harness = failureHarness(server, { dependencies: {
+        environmentUi: trustedCommandBoundary(),
+        readRequirements: async (_server, projectPath) => {
+            reads++;
+            return { projectPath, compiler: { sha256: "3".repeat(64), sourceCommit: null }, state: "development-source", inputs: [] };
+        },
+        verifyInputs: async () => { if (changed) throw new Error("SECRET-input-path"); }
+    } });
+    await harness.activate();
+    const report = await harness.command("lucentLui.checkTrustedProject");
+    assert.equal(report.evaluation, "reused");
+    assert.equal(reads, 1);
+    assert.equal(harness.identityChecks, 2);
+    changed = true;
+    await assert.rejects(harness.command("lucentLui.checkTrustedProject"), { doctorReason: "inputs-changed" });
+    assert.equal(reads, 1);
+    assert.equal(harness.spawnCount, 1);
+    assert.equal(server.notifications.some(item => item.method === "exit"), false);
+    assert.equal(harness.resources.some(resource => resource.disposed), false);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    server.emit("exit", 0, null);
+});
+
+test("canceling an active project check leaves language services running and rejects its late result", async () => {
+    const controller = new AbortController();
+    let finish;
+    let checking = false;
+    const server = new MockProcess();
+    const harness = failureHarness(server, { dependencies: {
+        environmentUi: trustedCommandBoundary(controller),
+        verifyInputs: () => checking ? new Promise(resolve => { finish = resolve; }) : Promise.resolve()
+    } });
+    await harness.activate();
+    checking = true;
+    const check = harness.command("lucentLui.checkTrustedProject");
+    while (!finish) await new Promise(resolve => setImmediate(resolve));
+    controller.abort();
+    finish();
+    assert.equal(await check, undefined);
+    assert.equal(harness.spawnCount, 1);
+    assert.equal(server.notifications.some(item => item.method === "exit"), false);
+    assert.equal(harness.resources.some(resource => resource.disposed), false);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    server.emit("exit", 0, null);
+});
+
+test("folder additions invalidate a pending explicit project check", async () => {
+    let finish;
+    const harness = failureHarness(new MockProcess(), { openLui: false, dependencies: {
+        environmentUi: trustedCommandBoundary(),
+        readRequirements: (_server, projectPath) => new Promise(resolve => { finish = () => resolve({
+            projectPath, compiler: { sha256: "3".repeat(64), sourceCommit: null }, state: "development-source", inputs: []
+        }); })
+    } });
+    await harness.activate();
+    const check = harness.command("lucentLui.checkTrustedProject");
+    while (!finish) await new Promise(resolve => setImmediate(resolve));
+    harness.foldersChanged({ added: [{ uri: { scheme: "file", fsPath: path.resolve("another") } }], removed: [] });
+    finish();
+    assert.equal(await check, undefined);
+    assert.equal(harness.spawnCount, 0);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("a rejected explicit check is discarded when another root's selected project changes", async () => {
+    const folders = ["active", "checked"].map(name => ({
+        name, uri: { scheme: "file", fsPath: path.resolve("workspace", name) }
+    }));
+    let selected = 0;
+    let checkedProject = "host/Host.csproj";
+    let rejectProbe;
+    const server = new MockProcess();
+    const harness = failureHarness(server, { folders, dependencies: {
+        environmentUi: trustedCommandBoundary(),
+        window: { showQuickPick: async items => items[selected] },
+        readRequirements: (_server, projectPath) => selected === 0
+            ? Promise.resolve({ projectPath, compiler: { sha256: "3".repeat(64), sourceCommit: null }, inputs: [] })
+            : new Promise((_resolve, reject) => { rejectProbe = reject; })
+    } });
+    harness.workspace.getConfiguration = (_section, uri) => ({ get: key => key === "projectPath"
+        ? uri?.fsPath === folders[1].uri.fsPath ? checkedProject : "host/Host.csproj"
+        : path.resolve("server.dll") });
+    await harness.activate();
+    try {
+        selected = 1;
+        const check = harness.command("lucentLui.checkTrustedProject");
+        while (!rejectProbe) await new Promise(resolve => setImmediate(resolve));
+        checkedProject = "replacement/Replacement.csproj";
+        harness.configurationChanged("lucentLui.projectPath", folders[1]);
+        rejectProbe(new Error("A stale project failure must not become a report."));
+        assert.equal(await check, undefined);
+        assert.equal(harness.spawnCount, 1);
+        assert.equal(server.notifications.some(item => item.method === "exit"), false);
+        assert.deepEqual(harness.messages, []);
+    } finally {
+        harness.context.subscriptions.forEach(resource => resource.dispose());
+        server.emit("exit", 0, null);
+    }
 });
 
 test("activation preserves current diagnostics and clears closed documents", async () => {
@@ -373,6 +514,48 @@ test("requirements reject malformed provenance and never infer semantic readines
     assertCompatibleCompiler(good, { compiler: good.compiler, sourceCommit: good.compiler.sourceCommit });
     assert.throws(() => assertCompatibleCompiler(good, { compiler: { ...good.compiler, sha256: "c".repeat(64) }, sourceCommit: good.compiler.sourceCommit }), /compiler differs/);
     assert.throws(() => assertCompatibleCompiler(good, { compiler: good.compiler, sourceCommit: "c".repeat(40) }), /compiler differs/);
+});
+
+test("target identity accepts old producers and unset RID but rejects present malformed tokens", t => {
+    const value = requirementFixture(t);
+    assert.equal(validateRequirements(value, value.projectPath), value);
+    for (const target of [{ framework: "net10.0-windows", runtimeIdentifier: null }, { framework: "net10.0", runtimeIdentifier: "win-x64" }]) {
+        value.projects[0].target = target;
+        assert.equal(validateRequirements(value, value.projectPath), value);
+    }
+    for (const target of [null, {}, { framework: "net10.0" }, { framework: "n".repeat(129), runtimeIdentifier: null },
+        { framework: " net10.0", runtimeIdentifier: null }, { framework: "net10.0", runtimeIdentifier: "../secret" },
+        { framework: 42, runtimeIdentifier: null }, { framework: "net10.0", runtimeIdentifier: "" }]) {
+        value.projects[0].target = target;
+        assert.throws(() => validateRequirements(value, value.projectPath), /target identity/);
+    }
+});
+
+test("trusted report allowlist excludes producer paths versions inputs and seeded errors", t => {
+    const value = requirementFixture(t);
+    value.compiler.informationalVersion = "SECRET-version-token";
+    value.packages.push({ path: "SECRET-package-path", version: "SECRET-package-version" });
+    value.error = { message: "SECRET-error" };
+    const identity = { sourceCommit: "b".repeat(40), server: { sha256: "c".repeat(64) }, compiler: value.compiler,
+        protocol: { id: "lucent-lui", major: 1, minor: 0 }, language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+        runtimeOptions: "SECRET-options" };
+    const evidence = { requirements: value, identity, configured: "SECRET-server-path" };
+    const report = trustedProjectReport(evidence, "evaluated");
+    assert.equal(report.target.status, "notChecked");
+    assert.equal(report.releaseAuthentication, "notChecked");
+    assert.equal(report.managedBuildReadiness, "notChecked");
+    assert.equal(JSON.stringify(report).includes("SECRET"), false);
+    assert.equal(JSON.stringify(report).includes(value.projectPath), false);
+    value.projects[0].target = { framework: "net10.0-windows", runtimeIdentifier: null };
+    assert.deepEqual(trustedProjectReport(evidence, "reused").target,
+        { status: "observed", framework: "net10.0-windows", runtimeIdentifier: null });
+});
+
+test("requirements transport executes the preflight's absolute host", async t => {
+    const value = requirementFixture(t);
+    const host = path.resolve("verified-host/dotnet.exe");
+    await readProjectRequirements("server.dll", value.projectPath, undefined,
+        (command, _args, _options, callback) => { assert.equal(command, host); callback(null, JSON.stringify(value)); }, host);
 });
 
 test("requirement input proof detects same-length edits and newly created control files", async t => {
@@ -630,7 +813,8 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
         installMatching: () => commands.get("lucentLui.installMatchingServer")(),
         command: name => commands.get(name)(),
         foldersChanged: event => onFoldersChanged(event),
-        configurationChanged: name => onConfigurationChanged({ affectsConfiguration: setting => setting === name }),
+        configurationChanged: (name, folder) => onConfigurationChanged({ affectsConfiguration: (setting, uri) =>
+            setting === name && (!folder || uri?.fsPath === folder.uri.fsPath) }),
         status: () => statusItem,
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
@@ -762,7 +946,7 @@ test("bundled server verifies workspace-host bytes and exact identity before ini
     });
     await harness.activate();
     assert.equal(harness.spawnCount, 1, JSON.stringify({ messages: harness.messages, roots }));
-    assert.deepEqual(roots, [path.resolve("extension-host/server"), path.resolve("extension-host/server")]);
+    assert.deepEqual(roots, Array(3).fill(path.resolve("extension-host/server")));
     assert.ok(server.notifications.some(notification => notification.method === "initialized"));
     harness.context.subscriptions.forEach(resource => resource.dispose());
 
@@ -779,6 +963,29 @@ test("bundled server verifies workspace-host bytes and exact identity before ini
     assert.equal(mismatch.spawnCount, 0);
     assert.equal(evaluatedMismatch, false);
     assert.match(mismatch.messages[0], /different identity/);
+
+    let inputScans = 0;
+    let bundleChanged = false;
+    const changedBundle = failureHarness(new MockProcess(), {
+        identity, serverPath: null,
+        dependencies: {
+            packageRelease,
+            verifyInputs: async () => { if (++inputScans === 2) bundleChanged = true; },
+            bundleVerifier: root => {
+                if (bundleChanged) throw new Error("Bundled server bytes changed during input verification.");
+                return { serverPath: path.join(root, "Lucent.Lui.LanguageServer.dll"), identity };
+            }
+        }
+    });
+    try {
+        await changedBundle.activate();
+        assert.equal(inputScans, 2);
+        assert.equal(changedBundle.spawnCount, 0);
+        assert.match(changedBundle.messages[0], /Bundled server bytes changed/);
+        assert.ok(changedBundle.watchers.every(watcher => watcher.disposed === 1));
+    } finally {
+        changedBundle.context.subscriptions.forEach(resource => resource.dispose());
+    }
 });
 
 test("missing protocol minor and incompatible language fail the project-free identity check", async () => {

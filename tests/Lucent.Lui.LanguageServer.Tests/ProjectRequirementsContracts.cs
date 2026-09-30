@@ -13,9 +13,8 @@ public sealed class ProjectRequirementsContracts
     {
         var root = Path.GetFullPath("../../../../..", AppContext.BaseDirectory);
         var fixture = Path.Combine(
-            root,
-            "artifacts",
-            "project-requirements-tests",
+            Path.GetTempPath(),
+            "lucent-project-requirements-tests",
             Guid.NewGuid().ToString("N")
         );
         var application = Path.Combine(fixture, "Application");
@@ -37,11 +36,16 @@ public sealed class ProjectRequirementsContracts
             "Lucent.Lui.Compiler",
             "Lucent.Lui.Compiler.csproj"
         );
-        await File.WriteAllTextAsync(
-            imported,
-            "<Project><PropertyGroup><DefineConstants>FIRST</DefineConstants></PropertyGroup></Project>"
-        );
+        await File.WriteAllTextAsync(imported, ImportedProperties("FIRST", "win-x64"));
         await File.WriteAllTextAsync(central, Central("17.14.28"));
+        await File.WriteAllTextAsync(
+            Path.Combine(fixture, "NuGet.Config"),
+            """
+            <configuration><packageSources><clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources></configuration>
+            """
+        );
         var waitCommand =
             $"powershell -NoProfile -NonInteractive -Command &quot;[System.IO.File]::WriteAllText('{racePid}', [string]$PID); while (-not [System.IO.File]::Exists('{raceRelease}')) {{ Start-Sleep -Milliseconds 20 }}&quot;";
         await File.WriteAllTextAsync(
@@ -50,7 +54,7 @@ public sealed class ProjectRequirementsContracts
             <Project Sdk="Microsoft.NET.Sdk">
               <Import Project="../Shared/Custom.props" />
               <PropertyGroup>
-                <TargetFramework>net10.0</TargetFramework>
+                <SelfContained>false</SelfContained>
                 <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
                 <NuGetAudit>false</NuGetAudit>
                 <NuGetLockFilePath>../Shared/custom.lock.json</NuGetLockFilePath>
@@ -82,6 +86,7 @@ public sealed class ProjectRequirementsContracts
             "development-source",
             firstJson.RootElement.GetProperty("state").GetString()
         );
+        AssertTarget(firstJson.RootElement, project, "win-x64");
         var firstHash = InputHash(firstJson.RootElement, imported);
         Assert.AreEqual(64, firstHash.Length);
         Assert.AreEqual(
@@ -125,14 +130,51 @@ public sealed class ProjectRequirementsContracts
             File.Move(savedLock, customLock);
         }
 
-        await File.WriteAllTextAsync(
-            imported,
-            "<Project><PropertyGroup><DefineConstants>OTHER</DefineConstants></PropertyGroup></Project>"
-        );
+        await File.WriteAllTextAsync(imported, ImportedProperties("OTHER", "win-x64"));
         var second = await Requirements(root, fixture, project);
         Assert.AreEqual(0, second.ExitCode, second.Error + second.Output);
         using var secondJson = JsonDocument.Parse(second.Output);
+        AssertTarget(secondJson.RootElement, project, "win-x64");
         Assert.AreNotEqual(firstHash, InputHash(secondJson.RootElement, imported));
+
+        await File.WriteAllTextAsync(imported, ImportedProperties("OTHER", null));
+        var staleTarget = await Requirements(root, fixture, project);
+        Assert.AreEqual(3, staleTarget.ExitCode, staleTarget.Error + staleTarget.Output);
+        using (var staleTargetJson = JsonDocument.Parse(staleTarget.Output))
+            Assert.AreEqual(
+                "stale-restore",
+                staleTargetJson.RootElement.GetProperty("error").GetProperty("code").GetString()
+            );
+        var targetRestore = await Run(root, fixture, "restore", project, "--ignore-failed-sources");
+        Assert.AreEqual(0, targetRestore.ExitCode, targetRestore.Error);
+        var noRuntime = await Requirements(root, fixture, project);
+        Assert.AreEqual(0, noRuntime.ExitCode, noRuntime.Error + noRuntime.Output);
+        using (var noRuntimeJson = JsonDocument.Parse(noRuntime.Output))
+            AssertTarget(noRuntimeJson.RootElement, project, null);
+
+        // A property can change between restore-graph and direct evaluation. Invalid
+        // identities must be rejected before they become authoritative report data.
+        await File.WriteAllTextAsync(
+            imported,
+            ImportedProperties("OTHER", null)
+                .Replace(
+                    "<RuntimeIdentifier></RuntimeIdentifier>",
+                    "<RuntimeIdentifier Condition=\"'$(RestoreGraphOutputPath)' == ''\">win x64</RuntimeIdentifier>",
+                    StringComparison.Ordinal
+                )
+        );
+        var malformedTarget = await Requirements(root, fixture, project);
+        Assert.AreEqual(
+            3,
+            malformedTarget.ExitCode,
+            malformedTarget.Error + malformedTarget.Output
+        );
+        using (var malformedTargetJson = JsonDocument.Parse(malformedTarget.Output))
+            Assert.AreEqual(
+                "project-unsupported",
+                malformedTargetJson.RootElement.GetProperty("error").GetProperty("code").GetString()
+            );
+        await File.WriteAllTextAsync(imported, ImportedProperties("OTHER", null));
 
         await File.WriteAllTextAsync(central, Central("17.14.29"));
         var stale = await Requirements(root, fixture, project);
@@ -151,10 +193,7 @@ public sealed class ProjectRequirementsContracts
             try
             {
                 await WaitForFile(raceStarted, race);
-                await File.WriteAllTextAsync(
-                    imported,
-                    "<Project><PropertyGroup><DefineConstants>THIRD</DefineConstants></PropertyGroup></Project>"
-                );
+                await File.WriteAllTextAsync(imported, ImportedProperties("THIRD", "win-arm64"));
                 await File.WriteAllTextAsync(raceRelease, "release");
                 var result = await Finish(race);
                 Assert.AreEqual(3, result.ExitCode, result.Error + result.Output);
@@ -175,6 +214,7 @@ public sealed class ProjectRequirementsContracts
         File.Delete(raceRelease);
         File.Delete(raceStarted);
         File.Delete(racePid);
+        await File.WriteAllTextAsync(imported, ImportedProperties("OTHER", null));
         using (var cancelled = StartRequirements(root, fixture, project, cancelOnStdin: true))
         {
             try
@@ -205,6 +245,29 @@ public sealed class ProjectRequirementsContracts
                     cancelled.Kill(entireProcessTree: true);
             }
         }
+    }
+
+    private static string ImportedProperties(string constant, string? runtimeIdentifier) =>
+        $"""
+            <Project><PropertyGroup>
+              <TargetFramework>net10.0</TargetFramework>
+              <DefineConstants>{constant}</DefineConstants>
+              <RuntimeIdentifier>{runtimeIdentifier}</RuntimeIdentifier>
+              <RuntimeIdentifiers>{(
+                runtimeIdentifier is null ? "win-x64;win-arm64" : ""
+            )}</RuntimeIdentifiers>
+            </PropertyGroup></Project>
+            """;
+
+    private static void AssertTarget(JsonElement root, string project, string? runtimeIdentifier)
+    {
+        var target = root.GetProperty("projects")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("projectPath").GetString() == project)
+            .GetProperty("target");
+        Assert.AreEqual("net10.0", target.GetProperty("framework").GetString());
+        Assert.AreEqual(runtimeIdentifier, target.GetProperty("runtimeIdentifier").GetString());
+        Assert.IsFalse(root.GetProperty("semanticReady").GetBoolean());
     }
 
     private static string Central(string version) =>

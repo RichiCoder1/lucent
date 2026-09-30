@@ -80,6 +80,9 @@
       "command": "lucentLui.checkEnvironment",
       "title": "Lucent: Check Environment"
     }, {
+      "command": "lucentLui.checkTrustedProject",
+      "title": "Lucent: Check Trusted Project (MSBuild Evaluation)"
+    }, {
       "command": "lucentLui.copyEnvironmentReport",
       "title": "Lucent: Review and Copy Environment Report"
     }, {

@@ -21,19 +21,30 @@ public sealed class CacheInstaller(IServerIdentityRunner identityRunner)
         var expected = request.Expected!;
         var sha = expected.Artifact!.Sha256!;
         var root = Path.GetFullPath(request.CacheRoot!);
-        EnsureDirectory(root);
         var generations = Path.Combine(root, "generations");
         var staging = Path.Combine(root, ".staging");
         var locks = Path.Combine(root, "locks");
+        var generation = Path.Combine(generations, sha);
+        if (request.Operation == "verify")
+        {
+            // Inspection must never create cache state, including on a cold host.
+            foreach (var existing in new[] { root, generations })
+                if (
+                    !Directory.Exists(existing)
+                    || (File.GetAttributes(existing) & FileAttributes.ReparsePoint) != 0
+                )
+                    throw new CacheException(
+                        "cache_missing",
+                        "The approved server generation is not installed."
+                    );
+            return await VerifyGenerationAsync(generation, request, cancellationToken);
+        }
+        EnsureDirectory(root);
         EnsureDirectory(generations);
         EnsureDirectory(staging);
         EnsureDirectory(locks);
         if (request.Operation == "install-release")
             return await InstallReleaseAsync(request, staging, cancellationToken);
-        var generation = Path.Combine(generations, sha);
-        if (request.Operation == "verify")
-            return await VerifyGenerationAsync(generation, request, cancellationToken);
-
         await using var held = await AcquireLockAsync(
             Path.Combine(locks, sha + ".lock"),
             cancellationToken

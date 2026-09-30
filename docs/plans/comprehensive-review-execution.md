@@ -452,9 +452,19 @@ release-fixture body checks. The later script environment cleanup has its separa
 15-observation proof. Exact locations and hashes are in
 `artifacts/issue248-activation/final-producer-location.json`.
 
+The next slice adds explicit trusted-project inspection in VS Code using the
+existing requirements producer, evaluated single-target framework/effective RID,
+fresh active-evidence reuse and bounded tool identity reporting. Read-only cache
+verification now leaves an absent cache absent. The expanded real-project
+requirements contract and 14 cache contracts pass. Astra review found two editor
+races: a bundle could change during the final input scan, and a rejected probe
+for another workspace root could publish after that root's settings changed.
+Both focused regressions failed before correction and pass afterward; all 99
+extension tests pass. Evidence is under `artifacts/issue248-trusted-review`.
+
 These are development checks, not publication or a completed #248/#249 journey.
-The [doctor plan](environment-doctor.md) records the remaining trusted-project,
-optional feed and native-toolchain diagnostics.
+The [doctor plan](environment-doctor.md) records the remaining CLI trusted-project
+parity, optional feed and native-toolchain diagnostics.
 
 ### Browser follow-up evidence
 

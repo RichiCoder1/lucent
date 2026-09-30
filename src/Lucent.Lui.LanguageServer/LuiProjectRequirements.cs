@@ -192,6 +192,11 @@ internal static partial class LuiProjectRequirements
                         {
                             projectPath = Path.GetFullPath(file),
                             state = "development-source",
+                            target = new
+                            {
+                                framework = evaluated.TargetFramework,
+                                runtimeIdentifier = evaluated.RuntimeIdentifier,
+                            },
                             sdk = (object?)null,
                         }
                     );
@@ -220,6 +225,11 @@ internal static partial class LuiProjectRequirements
                     {
                         projectPath = Path.GetFullPath(file),
                         state = "package",
+                        target = new
+                        {
+                            framework = evaluated.TargetFramework,
+                            runtimeIdentifier = evaluated.RuntimeIdentifier,
+                        },
                         sdk = new
                         {
                             id = "Lucent.Lui.Sdk",
@@ -529,9 +539,8 @@ internal static partial class LuiProjectRequirements
             .GetProperty("originalTargetFrameworks")
             .EnumerateArray()
             .Select(item => item.GetString())
-            .Where(item => !string.IsNullOrWhiteSpace(item))
             .ToArray();
-        if (frameworks.Length != 1)
+        if (frameworks.Length != 1 || !ValidTargetIdentity(frameworks[0]))
             throw new RequirementFailure(
                 "project-unsupported",
                 "Project requirements currently need one selected target framework per project."
@@ -542,6 +551,17 @@ internal static partial class LuiProjectRequirements
             ["TargetFramework"] = frameworks[0]!,
         };
         var evaluated = collection.LoadProject(projectPath, globals, null);
+        var framework = evaluated.GetPropertyValue("TargetFramework");
+        var runtimeIdentifier = evaluated.GetPropertyValue("RuntimeIdentifier");
+        if (
+            !ValidTargetIdentity(framework)
+            || !framework.Equals(frameworks[0], StringComparison.OrdinalIgnoreCase)
+            || runtimeIdentifier.Length != 0 && !ValidTargetIdentity(runtimeIdentifier)
+        )
+            throw new RequirementFailure(
+                "project-unsupported",
+                "The evaluated target identity is malformed or differs from the selected restore framework."
+            );
         var imports = evaluated
             .Imports.Select(import => Path.GetFullPath(import.ImportedProject.FullPath))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -600,11 +620,25 @@ internal static partial class LuiProjectRequirements
             foreach (var import in compilerProject.Imports)
                 inputs.Add(Path.GetFullPath(import.ImportedProject.FullPath));
         }
-        return new(imports, compilerTargets);
+        return new(
+            imports,
+            compilerTargets,
+            framework,
+            runtimeIdentifier.Length == 0 ? null : runtimeIdentifier
+        );
     }
 
+    private static bool ValidTargetIdentity(string? value) =>
+        value is { Length: > 0 and <= 128 }
+        && char.IsAsciiLetterOrDigit(value[0])
+        && value.All(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-'
+        );
+
     private static bool SameEvaluation(EvaluatedProject first, EvaluatedProject second) =>
-        first
+        first.TargetFramework == second.TargetFramework
+        && first.RuntimeIdentifier == second.RuntimeIdentifier
+        && first
             .Imports.Order(StringComparer.OrdinalIgnoreCase)
             .SequenceEqual(
                 second.Imports.Order(StringComparer.OrdinalIgnoreCase),
@@ -956,7 +990,12 @@ internal static partial class LuiProjectRequirements
 
     private sealed record SdkPackage(string Version, string Commit, string Hash);
 
-    private sealed record EvaluatedProject(string[] Imports, List<string> CompilerProjectTargets);
+    private sealed record EvaluatedProject(
+        string[] Imports,
+        List<string> CompilerProjectTargets,
+        string TargetFramework,
+        string? RuntimeIdentifier
+    );
 
     private sealed record EvaluatedLockSelection(string[] Paths, bool Required);
 

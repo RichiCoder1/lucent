@@ -7,6 +7,7 @@ const path = require("node:path");
 
 const HASH = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
+const TARGET = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_INPUT_BYTES = 256 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 
@@ -38,6 +39,12 @@ function validateRequirements(value, projectPath) {
     }
     if (!selectedProject) throw new Error("The Lucent project requirements omit the selected project.");
     for (const project of value.projects) {
+        if (Object.hasOwn(project, "target") && (!project.target || !TARGET.test(project.target.framework)
+            || typeof project.target.framework !== "string"
+            || project.target.runtimeIdentifier !== null && (typeof project.target.runtimeIdentifier !== "string"
+                || !TARGET.test(project.target.runtimeIdentifier)))) {
+            throw new Error("The Lucent project target identity is invalid.");
+        }
         if (project.state !== value.state || typeof project.projectPath !== "string" || !path.isAbsolute(project.projectPath)) {
             throw new Error("The Lucent project requirement graph is incomplete or mixed.");
         }
@@ -51,7 +58,7 @@ function validateRequirements(value, projectPath) {
     return value;
 }
 
-function readProjectRequirements(serverPath, projectPath, signal, execute = childProcess.execFile) {
+function readProjectRequirements(serverPath, projectPath, signal, execute = childProcess.execFile, dotnetPath = "dotnet") {
     return new Promise((resolve, reject) => {
         let child;
         let timeout;
@@ -79,7 +86,7 @@ function readProjectRequirements(serverPath, projectPath, signal, execute = chil
             try { child?.stdin?.end("cancel\n"); } catch { /* The exit callback owns closed-pipe failure. */ }
         };
         if (signal?.aborted) { finish(cancellationError()); return; }
-        child = execute("dotnet", [serverPath, "--project-requirements", "--trusted-project", projectPath], {
+        child = execute(dotnetPath, [serverPath, "--project-requirements", "--trusted-project", projectPath], {
             cwd: path.dirname(projectPath),
             env: { ...process.env, LUCENT_REQUIREMENTS_CANCEL_STDIN: "1" },
             maxBuffer: 2 * 1024 * 1024,
@@ -152,4 +159,23 @@ async function verifyRequirementInputs(requirements, signal) {
     }
 }
 
-module.exports = { readProjectRequirements, validateRequirements, assertCompatibleCompiler, verifyRequirementInputs };
+function trustedProjectReport(evidence, evaluation) {
+    const { requirements, identity, bundled, cached, configured } = evidence;
+    const project = requirements.projects?.find(item => path.resolve(item.projectPath) === path.resolve(requirements.projectPath));
+    const target = project?.target;
+    return {
+        schemaVersion: 1, kind: "trusted-project-doctor", scope: "trusted-project", status: "available",
+        evaluation, projectState: requirements.state, requirements: "passed",
+        semanticReadiness: "notChecked", managedBuildReadiness: "notChecked", nativeReadiness: "notChecked", feedAccess: "notChecked",
+        target: target ? { status: "observed", framework: target.framework, runtimeIdentifier: target.runtimeIdentifier }
+            : { status: "notChecked" },
+        delivery: configured ? "explicit-override" : cached?.status === "selected" ? "cache" : bundled ? "bundled" : "explicit-override",
+        releaseAuthentication: !configured && (bundled || cached?.status === "selected") ? "verified" : "notChecked",
+        server: { sha256: identity.server.sha256, sourceCommit: identity.sourceCommit, compilerSha256: identity.compiler.sha256,
+            protocol: { id: "lucent-lui", major: identity.protocol.major, minor: identity.protocol.minor },
+            language: { id: identity.language.id, version: identity.language.version, featureLevel: identity.language.featureLevel } },
+        compiler: { sha256: requirements.compiler.sha256, sourceCommit: requirements.compiler.sourceCommit }
+    };
+}
+
+module.exports = { readProjectRequirements, validateRequirements, assertCompatibleCompiler, verifyRequirementInputs, trustedProjectReport };

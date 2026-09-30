@@ -56,13 +56,19 @@ are corrected in pushed `6bc288ea`, with focused checks passing. CI 103 failed
 formatting and repeated the published-server cache failure. The template harness
 restored absent environment variables as empty strings, changing .NET's cache to a
 relative path; lossless cleanup now passes a focused reproduction and 15 checks.
-The formatting fix is prepared. `101.1` remains the latest confirmed release.
+The formatting and environment cleanup fixes are pushed. CI 104 passed the
+published-server check, then exposed an unreferenced Node timeout; `f2064144`
+corrects it. CI 105 passes the editor suites but exposed a shared generated
+editorconfig write during parallel application preparation. Its ownership fix is
+underway. `101.1` remains the latest confirmed release.
 Read-only environment doctor #248's static CLI, verified tool delivery and standard
-VS Code onboarding surfaces pass review and local package proof. Its 89 extension
-tests include static-only command activation and scoped project selection. Default
-checks preserve explicit unverified capabilities; the accepted issue is not yet
-complete. The [doctor plan](plans/environment-doctor.md)
-orders its remaining trusted-project, optional feed and native-prerequisite checks.
+VS Code onboarding surfaces pass review and local package proof. Explicit editor
+project inspection now adds evaluated target/tool identity and fresh evidence
+reuse. The real-project contract, 14 cache tests and 99 extension tests pass,
+including two corrected review races. Default checks preserve explicit unverified
+capabilities; the accepted issue is not yet complete. The
+[doctor plan](plans/environment-doctor.md) orders its remaining CLI project parity,
+optional feed and native-prerequisite checks.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
