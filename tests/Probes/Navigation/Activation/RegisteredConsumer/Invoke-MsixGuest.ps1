@@ -10,6 +10,7 @@ $installedPackage = $null
 $identityValidated = $false
 $installAttempted = $false
 $signatureVerified = $false
+$installedExecutableSha256 = $null
 $shellProcesses = @()
 $runError = $null
 $cleanupErrors = [Collections.Generic.List[string]]::new()
@@ -52,7 +53,7 @@ try {
     $packageInput = Join-Path $guestInput 'fixture.msix'
     $signToolInput = Join-Path $guestInput 'signtool.exe'
     $guestScript = Join-Path $guestInput 'Invoke-MsixGuest.ps1'
-    if ((Get-FileHash -LiteralPath $packageInput -Algorithm SHA256).Hash -ne $session.packageSha256 -or (Get-FileHash -LiteralPath $signToolInput -Algorithm SHA256).Hash -ne $session.signToolSha256 -or (Get-FileHash -LiteralPath $guestScript -Algorithm SHA256).Hash -ne $session.guestScriptSha256) { throw 'Sandbox input hash mismatch.' }
+    if ((Get-FileHash -LiteralPath $packageInput -Algorithm SHA256).Hash -ne $session.unsignedInputMsixSha256 -or (Get-FileHash -LiteralPath $signToolInput -Algorithm SHA256).Hash -ne $session.signToolSha256 -or (Get-FileHash -LiteralPath $guestScript -Algorithm SHA256).Hash -ne $session.guestScriptSha256) { throw 'Sandbox input hash mismatch.' }
     if (Get-AppxPackage -Name $session.packageIdentity) { throw 'Unique MSIX identity already installed in guest.' }
     if (Test-Path -LiteralPath ("Registry::HKEY_CLASSES_ROOT\" + $session.protocolScheme)) { throw 'Unique protocol already associated in guest.' }
     $identityValidated = $true
@@ -77,6 +78,8 @@ try {
     $installedPackage = @(Get-AppxPackage -Name $session.packageIdentity | Where-Object { $_.Name -eq $session.packageIdentity })
     if ($installedPackage.Count -ne 1) { throw 'Guest package installation did not establish one exact identity.' }
     $installedPackage = $installedPackage[0]
+    $installedExecutableSha256 = (Get-FileHash -LiteralPath (Join-Path $installedPackage.InstallLocation 'Consumer.exe') -Algorithm SHA256).Hash
+    if ($installedExecutableSha256 -ne $session.publishedExecutableSha256) { throw 'Installed package executable differs from the package-only published fixture.' }
     $scheme = $session.protocolScheme
     $installedManifest = Get-AppxPackageManifest -Package $installedPackage.PackageFullName
     $protocolNodes = @($installedManifest.SelectNodes("//*[local-name()='Application' and @Executable='Consumer.exe']//*[local-name()='Protocol' and @Name='$scheme']"))
@@ -151,12 +154,13 @@ finally {
         runError = $runError
         cleanupErrors = @($cleanupErrors)
         packageIdentity = if ($null -ne $session) { $session.packageIdentity } else { $null }
-        packageSha256 = if ($null -ne $session) { $session.packageSha256 } else { $null }
+        unsignedInputMsixSha256 = if ($null -ne $session) { $session.unsignedInputMsixSha256 } else { $null }
         packageManifestSha256 = if ($null -ne $session) { $session.packageManifestSha256 } else { $null }
         publishedExecutableSha256 = if ($null -ne $session) { $session.publishedExecutableSha256 } else { $null }
+        installedExecutableSha256 = $installedExecutableSha256
         guestScriptSha256 = if ($null -ne $session) { $session.guestScriptSha256 } else { $null }
         signerThumbprint = if ($null -ne $certificate) { $certificate.Thumbprint } else { $null }
-        signedPackageSha256 = if ($signatureVerified) { (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash } else { $null }
+        signedGuestMsixSha256 = if ($signatureVerified) { (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash } else { $null }
     }
     $temporary = Join-Path $guestOutput ('guest-result-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     $result | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary
