@@ -86,9 +86,10 @@ try {
     & dotnet publish Consumer.csproj -c Release --no-restore -o publish -warnaserror
     if ($LASTEXITCODE) { throw 'Package-only NativeAOT publish failed.' }
     $published = Join-Path $proof 'publish'
-    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json | Where-Object { $_.package -ne 'Lucent.Platform.Windows.Activation' })) {
-        if ($notice.output -and -not (Test-Path -LiteralPath (Join-Path $published $notice.output) -PathType Leaf)) {
-            throw "Missing published dependency notice: $($notice.output)"
+    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json -AsHashtable | Where-Object { $_.package -ne 'Lucent.Platform.Windows.Activation' })) {
+        $noticeOutput = $notice['output']
+        if ($noticeOutput -and -not (Test-Path -LiteralPath (Join-Path $published $noticeOutput) -PathType Leaf)) {
+            throw "Missing published dependency notice: $noticeOutput"
         }
     }
     foreach ($file in 'SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll', 'notices/SDL3-CS.txt', 'notices/Microsoft.Extensions-LICENSE.txt', 'notices/R3-LICENSE.txt') {
