@@ -356,9 +356,15 @@ an excluded-root document-symbol path. Commit `76bd62e9` passes 25 Node contract
 the review additionally exercised out-of-order identities and late callbacks.
 Bundled server delivery and its CI wiring pass independent source review in the
 15-file snapshot `artifacts/issue247-bundled-review-source-2/source-manifest.json`.
-Both Node test files now run in CI and release checks; all 29 cases pass. Real
-server/archive/VSIX producer verification remains pending. Cache/import and
-authenticated acquisition remain separate planned work.
+Both Node test files now run in CI and release checks; all 29 cases pass. Commit
+`e3f63d26` contains the reviewed slice. The actual producer passes at `03116311`:
+locked restore, server publication/archive, VSIX, identical standalone/bundled
+inventory, extracted runtime verifier and exact server identity, plus 65 release
+fixtures. Evidence under `artifacts/issue247-producer-03116311` is explicitly a dirty
+development snapshot, not CI release evidence. The VSIX is 14,968,359 bytes with 184
+server files. One local verification took about 66 ms; this is characterization,
+not a performance budget or general startup claim. Evaluated project matching,
+cache/import and authenticated acquisition remain separate planned work.
 
 Template source is committed as `053b5357` after independent review. The review
 found and corrected the default assembly name for library names containing spaces:
@@ -372,4 +378,22 @@ Right commands arrived as SDL keypad 2/6 events, while Tab mapped and moved focu
 It does not establish physical main-arrow delivery. Temporary source tracing was
 removed after isolated NativeAOT publication, and exact artifact/source hashes are
 recorded in `artifacts/issue245/sdl-key-attribution.md`. The independent Windows
-Num Lock-off keypad mapping gap is tracked as #326.
+Num Lock-off keypad mapping gap is corrected in `28f13dc0` for #326. Three focused
+contracts pass in both managed and NativeAOT runs. The published test executable
+hash and logs are recorded alongside the attribution evidence; no new desktop input
+claim is made.
+
+Commit `03116311` also corrects the two observed browser layout follow-ups. Header
+actions stay together at 760- and 1282-pixel widths in both densities. Stock Select
+popups account for label typography and control padding, cache stable measurement,
+shrink after item changes, and clamp to the screen. Fourteen Core list contracts
+and two browser contracts pass. Fresh NativeAOT browser builds are retained under
+`artifacts/review323-layout-final`. The first Component publish attempts overlapped
+after log setup failed, making their route-output mismatch inconclusive; one later
+serial publish matched foreign generated output and completed. The failed snapshot
+is preserved in `artifacts/issue323-component-preparation-failure`.
+
+The owner paused Computer Use following another Escape interruption before the new
+Issue Browser window could be inspected. Its untouched test process was stopped and
+the Node session reset. The new geometry walkthroughs remain pending; prior native
+observations are not relabeled as verification of these new binaries.

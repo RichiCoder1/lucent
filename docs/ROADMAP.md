@@ -13,7 +13,10 @@ Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320,
 publication; Light Notes is integrating its presentation APIs. Measured
 repeated-work #324 is closed, with the final projection correction published.
 Presentation #323 has a further CommandScope/app shrink correction awaiting
-package delivery; representative browser walkthroughs resumed after the app restart.
+package delivery. Representative browser walkthroughs ran after the app restart;
+the owner has now paused Computer Use again. Follow-up header and stock Select
+geometry fixes pass focused contracts and have fresh NativeAOT builds awaiting
+visual review.
 Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
 is not claimed. Standard Num Lock-off keypad navigation is tracked in #326.
 Navigation #205 now has an
@@ -33,8 +36,8 @@ and managed tests, then failed optional notice metadata access; the focused
 correction is committed and publication remains pending. Reviewed templates #246
 pass generation checks and a Unicode library-name diagnostic, with coherent package
 consumer proof pending. Editor #247's bundled server and CI test wiring have passed
-source review; actual producer proof, immutable cache/import and authenticated
-acquisition remain.
+source review and actual producer proof. Evaluated project matching, immutable
+cache/import and authenticated acquisition remain.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
