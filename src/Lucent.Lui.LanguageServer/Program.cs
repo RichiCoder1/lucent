@@ -528,12 +528,13 @@ internal static class Program
                             format.Diagnostics.Select(item => item.Id + ": " + item.Message)
                         )
                     );
+                var formatLines = new ProtocolLineIndex(formatText);
                 return new HandlerResult(
                     null,
                     format
                         .Edits.Select(edit => new
                         {
-                            range = Range(formatText, edit.Span),
+                            range = Range(formatLines, edit.Span),
                             newText = edit.NewText,
                         })
                         .ToArray()
@@ -710,9 +711,10 @@ internal static class Program
                 var symbolText = await project
                     .GetTextAsync(symbolUri, CancellationToken.None)
                     .ConfigureAwait(false);
+                var symbolLines = new ProtocolLineIndex(symbolText ?? "");
                 return new HandlerResult(
                     null,
-                    symbols?.Select(symbol => DocumentSymbol(symbol, symbolText ?? ""))
+                    symbols?.Select(symbol => DocumentSymbol(symbol, symbolLines))
                 );
             case "textDocument/semanticTokens/full":
                 if (project is null)
@@ -744,6 +746,7 @@ internal static class Program
                     .ConfigureAwait(false);
                 if (diagnostics is null)
                     return new HandlerResult(null, new { kind = "unchanged" });
+                var diagnosticLines = new ProtocolLineIndex(diagnosticText ?? "");
                 return new HandlerResult(
                     null,
                     new
@@ -751,7 +754,7 @@ internal static class Program
                         kind = "full",
                         items = diagnostics.Select(diagnostic => new
                         {
-                            range = Range(diagnosticText ?? "", diagnostic.Span),
+                            range = Range(diagnosticLines, diagnostic.Span),
                             severity = diagnostic.Severity,
                             code = diagnostic.Code,
                             source = diagnostic.Source,
@@ -825,6 +828,7 @@ internal static class Program
             .ConfigureAwait(false);
         if (diagnostics is null)
             return;
+        var lines = new ProtocolLineIndex(text);
         WriteNotification(
             "textDocument/publishDiagnostics",
             new
@@ -833,7 +837,7 @@ internal static class Program
                 version,
                 diagnostics = diagnostics.Select(diagnostic => new
                 {
-                    range = Range(text, diagnostic.Span),
+                    range = Range(lines, diagnostic.Span),
                     severity = diagnostic.Severity,
                     code = diagnostic.Code,
                     source = diagnostic.Source,
@@ -862,20 +866,23 @@ internal static class Program
             );
     }
 
-    private static object DocumentSymbol(LuiDocumentSymbol symbol, string text) =>
+    private static object DocumentSymbol(LuiDocumentSymbol symbol, ProtocolLineIndex lines) =>
         new
         {
             name = symbol.Name,
             kind = symbol.Kind,
-            range = Range(text, symbol.Span),
-            selectionRange = Range(text, symbol.SelectionSpan),
-            children = symbol.Children.Select(child => DocumentSymbol(child, text)),
+            range = Range(lines, symbol.Span),
+            selectionRange = Range(lines, symbol.SelectionSpan),
+            children = symbol.Children.Select(child => DocumentSymbol(child, lines)),
         };
 
-    private static object Range(string text, LuiSpan span)
+    private static object Range(string text, LuiSpan span) =>
+        Range(new ProtocolLineIndex(text), span);
+
+    private static object Range(ProtocolLineIndex lines, LuiSpan span)
     {
-        var start = Position(text, Math.Clamp(span.Start, 0, text.Length));
-        var end = Position(text, Math.Clamp(span.End, 0, text.Length));
+        var start = lines.Position(Math.Clamp(span.Start, 0, lines.Length));
+        var end = lines.Position(Math.Clamp(span.End, 0, lines.Length));
         return new
         {
             start = new { line = start.Line, character = start.Character },
@@ -885,8 +892,9 @@ internal static class Program
 
     private static object Location(LuiNavigationTarget target)
     {
-        var start = Position(target.Text, target.Span.Start);
-        var end = Position(target.Text, target.Span.End);
+        var lines = new ProtocolLineIndex(target.Text);
+        var start = lines.Position(target.Span.Start);
+        var end = lines.Position(target.Span.End);
         return new
         {
             uri = target.Uri.AbsoluteUri,
@@ -909,15 +917,17 @@ internal static class Program
                 .GetResult();
             if (text is null)
                 return null!;
+            var lines = new ProtocolLineIndex(text);
             changes[document.Uri.AbsoluteUri] = document
-                .Spans.Select(span => new { range = Range(text, span), newText = document.NewText })
+                .Spans.Select(span => new
+                {
+                    range = Range(lines, span),
+                    newText = document.NewText,
+                })
                 .ToArray();
         }
         return new { changes };
     }
-
-    private static (int Line, int Character) Position(string text, int offset) =>
-        new ProtocolLineIndex(text).Position(offset);
 
     private static int FormattingOffset(string text, JsonElement position)
     {
@@ -980,6 +990,7 @@ internal static class Program
             .ConfigureAwait(false);
         if (diagnostics is null || project.CompletionEpoch != lint.Epoch)
             return Unavailable("The project changed during analysis.");
+        var lines = new ProtocolLineIndex(document.Text);
         var range =
             resolve ? (LuiSpan?)null
             : parameters.TryGetProperty("range", out var requestedRange)
@@ -1023,7 +1034,7 @@ internal static class Program
                     {
                         new
                         {
-                            range = Range(document.Text, diagnostic.Span),
+                            range = Range(lines, diagnostic.Span),
                             code = diagnostic.Code,
                             message = diagnostic.Message,
                             severity = diagnostic.Severity,
@@ -1053,7 +1064,7 @@ internal static class Program
                                     edits = fix
                                         .Edits.Select(edit => new
                                         {
-                                            range = Range(document.Text, edit.Span),
+                                            range = Range(lines, edit.Span),
                                             newText = edit.NewText,
                                         })
                                         .ToArray(),

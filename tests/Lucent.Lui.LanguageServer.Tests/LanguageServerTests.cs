@@ -921,7 +921,7 @@ public component MenuButton() {
             );
             await File.WriteAllTextAsync(
                 helperPath,
-                "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString(); public static ComponentRecipe UseCard() => Components.Card(\"\", \"\");\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; [LucentComponent] public static int ChoiceInvalid() => 1; }"
+                "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString(); public static ComponentRecipe UseCard() => Components.Card(\"\", \"\");\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; [LucentComponent] public static ComponentRecipe UniqueChoice(string first) => null!; [LucentComponent] public static int ChoiceInvalid() => 1; }"
             );
             var source =
                 "namespace Sample;\r\nusing Lucent.Core;\r\nusing static Sample.Components;\r\nusing static Sample.ImportedComponents;\r\nstyle WidgetStyle { Background: Brush.Solid(default); }\r\ninternal component Widget(int count) { <Card content={Helpers.Format(count)} name=\"widget\" /> }";
@@ -1975,16 +1975,32 @@ public component MenuButton() {
             );
             context.ReplaceText(sourceUri, malformedImportedChoice);
             Assert(
-                (
-                    await context.DefinitionAsync(
-                        sourceUri,
-                        malformedImportedChoice.IndexOf("Choice", StringComparison.Ordinal),
-                        CancellationToken.None
-                    )
+                await context.DefinitionAsync(
+                    sourceUri,
+                    malformedImportedChoice.IndexOf("Choice", StringComparison.Ordinal),
+                    CancellationToken.None
                 )
-                    ?.Uri
-                    .LocalPath == helperPath,
-                "a map-bound imported component lost definition navigation beside malformed C#."
+                    is null,
+                "an ambiguous imported component chose an arbitrary overload beside malformed C#."
+            );
+            var malformedUniqueChoice = malformedImportedChoice.Replace(
+                "<Choice",
+                "<UniqueChoice",
+                StringComparison.Ordinal
+            );
+            context.ReplaceText(sourceUri, malformedUniqueChoice);
+            var uniqueRecoveredDefinition = await context.DefinitionAsync(
+                sourceUri,
+                malformedUniqueChoice.IndexOf("UniqueChoice", StringComparison.Ordinal),
+                CancellationToken.None
+            );
+            Assert(
+                uniqueRecoveredDefinition?.Uri.LocalPath == helperPath
+                    && uniqueRecoveredDefinition.Text.Substring(
+                        uniqueRecoveredDefinition.Span.Start,
+                        uniqueRecoveredDefinition.Span.Length
+                    ) == "UniqueChoice",
+                "a unique map-bound imported component lost exact definition navigation beside malformed C#."
             );
             context.ReplaceText(sourceUri, source);
             var incompleteChoice = source.Replace(

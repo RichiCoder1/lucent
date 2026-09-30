@@ -1,8 +1,90 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lucent.Lui.Compiler;
+
+if (args is ["parse"] or ["parse", _])
+{
+    var root =
+        args.Length == 2 ? Path.GetFullPath(args[1]) : FindRepositoryRoot(AppContext.BaseDirectory);
+    var compilerSha256 = Convert.ToHexString(
+        SHA256.HashData(File.ReadAllBytes(typeof(LuiParser).Assembly.Location))
+    );
+    var inputs = new List<(string Name, string Source)>();
+    foreach (var rows in new[] { 40, 400 })
+        inputs.Add(
+            (
+                $"markup-{rows}",
+                "internal component Rows() {\n    <Column>\n"
+                    + string.Concat(
+                        Enumerable
+                            .Range(0, rows)
+                            .Select(row => $"        <Text content=\"Row {row}\" />\n")
+                    )
+                    + "    </Column>\n}\n"
+            )
+        );
+    inputs.Add(
+        (
+            "islands-400",
+            "internal component Rows() {\n    <Column>\n"
+                + string.Concat(
+                    Enumerable
+                        .Range(0, 400)
+                        .Select(row => $"        <Text content={{\"Row \" + {row}}} />\n")
+                )
+                + "    </Column>\n}\n"
+        )
+    );
+    foreach (
+        var file in new[]
+        {
+            "apps/Lucent.AuthoringSample/Shell.lui",
+            "apps/Lucent.ComponentBrowser/ComponentDetail.lui",
+        }
+    )
+        inputs.Add((file, File.ReadAllText(Path.Combine(root, file))));
+    foreach (var (name, source) in inputs)
+    {
+        var cold = Stopwatch.StartNew();
+        var document = LuiParser.Parse(source);
+        cold.Stop();
+        Check(document.Diagnostics.Count == 0, name + " has parse diagnostics.");
+        for (var index = 0; index < 3; index++)
+            _ = LuiParser.Parse(source);
+        var watch = new Stopwatch();
+        var values = new double[15];
+        var allocation = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < values.Length; index++)
+        {
+            watch.Restart();
+            _ = LuiParser.Parse(source);
+            values[index] = watch.Elapsed.TotalMilliseconds;
+        }
+        var bytes = (GC.GetAllocatedBytesForCurrentThread() - allocation) / values.Length;
+        Array.Sort(values);
+        Console.WriteLine(
+            JsonSerializer.Serialize(
+                new
+                {
+                    name,
+                    compilerSha256,
+                    sourceLength = source.Length,
+                    sourceSha256 = Convert.ToHexString(
+                        SHA256.HashData(Encoding.UTF8.GetBytes(source))
+                    ),
+                    iterations = values.Length,
+                    coldMs = cold.Elapsed.TotalMilliseconds,
+                    medianMs = values[values.Length / 2],
+                    allocatedBytes = bytes,
+                }
+            )
+        );
+    }
+    return 0;
+}
 
 if (args is ["format"] or ["format", _])
 {
@@ -63,7 +145,7 @@ if (args is ["format"] or ["format", _])
 if (args is not [var measure])
 {
     Console.Error.WriteLine(
-        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename>\n       Lucent.Lui.Tooling.Benchmarks format [source-root]"
+        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename|documentSymbols>\n       Lucent.Lui.Tooling.Benchmarks <format|parse> [source-root]"
     );
     return 2;
 }
@@ -81,7 +163,13 @@ try
     var project = new Uri(Path.Combine(fixtureRoot, "Measure.csproj"));
     var document = new Uri(Path.Combine(fixtureRoot, "Widget.lui"));
     var source =
-        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget(int count) { <Row><Text content={Helpers.Format(count)} /></Row> }";
+        measure == "documentSymbols"
+            ? "namespace Sample; using Lucent.Core; using static Lucent.Core.Components;\ninternal component Widget() {\n<Row>\n"
+                + string.Concat(
+                    Enumerable.Range(0, 400).Select(row => $"<Text content=\"Row {row}\" />\n")
+                )
+                + "</Row>\n}"
+            : "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget(int count) { <Row><Text content={Helpers.Format(count)} /></Row> }";
     await File.WriteAllTextAsync(
         project.LocalPath,
         "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\""
@@ -114,6 +202,55 @@ try
 
     switch (measure)
     {
+        case "documentSymbols":
+            var symbolParameters = new { textDocument = new { uri = VsCodeUri(document) } };
+            using (
+                var warm = await lsp.RequestAsync("textDocument/documentSymbol", symbolParameters)
+            ) { }
+            var samples = new double[15];
+            stopwatch.Start();
+            for (var index = 0; index < samples.Length; index++)
+            {
+                var watch = Stopwatch.StartNew();
+                using var symbols = await lsp.RequestAsync(
+                    "textDocument/documentSymbol",
+                    symbolParameters
+                );
+                samples[index] = watch.Elapsed.TotalMilliseconds;
+                var children = symbols.RootElement.GetProperty("result")[0].GetProperty("children");
+                Check(
+                    children.GetArrayLength() == 1
+                        && children[0].GetProperty("name").GetString() == "Row"
+                        && children[0].GetProperty("children").GetArrayLength() == 400,
+                    "document-symbol measurement lost the markup rows."
+                );
+            }
+            stopwatch.Stop();
+            Array.Sort(samples);
+            Console.WriteLine(
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        measure,
+                        iterations = samples.Length,
+                        sourceSha256 = Convert.ToHexString(
+                            SHA256.HashData(Encoding.UTF8.GetBytes(source))
+                        ),
+                        serverSha256 = Convert.ToHexString(
+                            SHA256.HashData(
+                                File.ReadAllBytes(
+                                    Path.Combine(
+                                        AppContext.BaseDirectory,
+                                        "Lucent.Lui.LanguageServer.dll"
+                                    )
+                                )
+                            )
+                        ),
+                        medianMs = samples[samples.Length / 2],
+                    }
+                )
+            );
+            break;
         case "warmCompletion":
             using (
                 var warm = await lsp.RequestAsync(

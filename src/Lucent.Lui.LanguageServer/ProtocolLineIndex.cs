@@ -7,6 +7,8 @@ internal sealed class ProtocolLineIndex
     private readonly int[] ends;
     private readonly int length;
 
+    internal int Length => length;
+
     internal ProtocolLineIndex(string text)
     {
         length = text.Length;

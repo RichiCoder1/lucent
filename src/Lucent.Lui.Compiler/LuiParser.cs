@@ -561,7 +561,7 @@ public static class LuiParser
                 {
                     result.Add(Requirement());
                 }
-                else if (memberPrefix && TryMember(out var member))
+                else if (memberPrefix && Current != '<' && TryMember(out var member))
                 {
                     result.Add(member);
                 }
@@ -2284,7 +2284,7 @@ public static class LuiParser
         {
             var start = position;
             var depth = 1;
-            foreach (var token in SyntaxFactory.ParseTokens(text.Substring(position)))
+            foreach (var token in SyntaxFactory.ParseTokens(text, offset: position))
             {
                 if (token.IsKind(SyntaxKind.OpenBraceToken))
                     depth++;
@@ -2329,7 +2329,7 @@ public static class LuiParser
         {
             var end = 0;
             var identifier = true;
-            foreach (var token in SyntaxFactory.ParseTokens(source.Substring(start)))
+            foreach (var token in SyntaxFactory.ParseTokens(source, offset: start))
             {
                 if (token.IsKind(SyntaxKind.EndOfFileToken))
                     break;
@@ -2382,20 +2382,37 @@ public static class LuiParser
     {
         private static readonly char[] NewlineCharacters = new[] { '\r', '\n' };
 
+        private static IEnumerable<(SyntaxToken Token, SyntaxToken Next)> Tokens(
+            string source,
+            int start
+        )
+        {
+            // The offset selects source text; token positions still start at zero.
+            // Keep just one lookahead token so an island does not lex the whole document.
+            using var tokens = SyntaxFactory.ParseTokens(source, offset: start).GetEnumerator();
+            if (!tokens.MoveNext())
+                yield break;
+            var token = tokens.Current;
+            while (tokens.MoveNext())
+            {
+                yield return (token, tokens.Current);
+                token = tokens.Current;
+            }
+            yield return (token, default);
+        }
+
         internal static int StyleEnd(string source, int start)
         {
-            var tokens = SyntaxFactory
-                .ParseTokens(source.Substring(start))
-                .Where(token => !token.IsKind(SyntaxKind.EndOfFileToken))
-                .ToArray();
             var parens = 0;
             var brackets = 0;
             var braces = 0;
             var conditionals = 0;
             var previousEnd = 0;
-            for (var i = 0; i < tokens.Length; i++)
+            var first = true;
+            foreach (var (token, next) in Tokens(source, start))
             {
-                var token = tokens[i];
+                if (token.IsKind(SyntaxKind.EndOfFileToken))
+                    return source.Length;
                 var kind = token.Kind();
                 var top = parens == 0 && brackets == 0 && braces == 0;
                 if (
@@ -2403,7 +2420,7 @@ public static class LuiParser
                 )
                     return start + token.SpanStart;
                 var newline =
-                    i != 0
+                    !first
                     && source
                         .Substring(start + previousEnd, token.SpanStart - previousEnd)
                         .IndexOfAny(NewlineCharacters) >= 0;
@@ -2411,8 +2428,7 @@ public static class LuiParser
                     conditionals++;
                 if (top && kind == SyntaxKind.ColonToken && conditionals != 0)
                     conditionals--;
-                var nextIsColon =
-                    i + 1 < tokens.Length && tokens[i + 1].IsKind(SyntaxKind.ColonToken);
+                var nextIsColon = next.IsKind(SyntaxKind.ColonToken);
                 if (
                     top
                     && conditionals == 0
@@ -2436,6 +2452,7 @@ public static class LuiParser
                 else if (kind == SyntaxKind.CloseBraceToken && braces > 0)
                     braces--;
                 previousEnd = token.Span.End;
+                first = false;
             }
             return source.Length;
         }
@@ -2448,21 +2465,13 @@ public static class LuiParser
             var parens = 0;
             var brackets = 0;
             var braces = 0;
-            var tokens = SyntaxFactory.ParseTokens(source.Substring(start)).ToArray();
-            for (var index = 0; index < tokens.Length; index++)
+            foreach (var (token, next) in Tokens(source, start))
             {
-                var token = tokens[index];
                 if (token.IsKind(SyntaxKind.EndOfFileToken))
                     return source.Length;
                 var kind = token.Kind();
                 var atTop = parens == 0 && brackets == 0 && braces == 0;
-                if (
-                    stopAtKeyed
-                    && atTop
-                    && token.ValueText == "keyed"
-                    && index + 1 < tokens.Length
-                    && tokens[index + 1].ValueText == "by"
-                )
+                if (stopAtKeyed && atTop && token.ValueText == "keyed" && next.ValueText == "by")
                     return start + token.SpanStart;
                 if (
                     atTop
@@ -2522,10 +2531,8 @@ public static class LuiParser
             var parens = 0;
             var brackets = 0;
             var braces = 0;
-            var tokens = SyntaxFactory.ParseTokens(source.Substring(start)).ToArray();
-            for (var index = 0; index < tokens.Length; index++)
+            foreach (var (token, next) in Tokens(source, start))
             {
-                var token = tokens[index];
                 if (token.IsKind(SyntaxKind.EndOfFileToken))
                     return IsCompleteExpression(source, start, source.Length);
 
@@ -2537,8 +2544,7 @@ public static class LuiParser
                     && stopAtKeyed
                     && atTop
                     && token.ValueText == "keyed"
-                    && index + 1 < tokens.Length
-                    && tokens[index + 1].ValueText == "by"
+                    && next.ValueText == "by"
                 )
                     return IsCompleteExpression(source, start, tokenStart);
 
@@ -2582,22 +2588,14 @@ public static class LuiParser
             var parens = 0;
             var brackets = 0;
             var braces = 0;
-            var tokens = SyntaxFactory.ParseTokens(source.Substring(start)).ToArray();
-            for (var index = 0; index < tokens.Length; index++)
+            foreach (var (token, next) in Tokens(source, start))
             {
-                var token = tokens[index];
                 if (token.IsKind(SyntaxKind.EndOfFileToken))
                     return IsCompleteExpression(source, start, source.Length);
 
                 var kind = token.Kind();
                 var atTop = parens == 0 && brackets == 0 && braces == 0;
-                if (
-                    stopAtKeyed
-                    && atTop
-                    && token.ValueText == "keyed"
-                    && index + 1 < tokens.Length
-                    && tokens[index + 1].ValueText == "by"
-                )
+                if (stopAtKeyed && atTop && token.ValueText == "keyed" && next.ValueText == "by")
                     return IsCompleteExpression(source, start, start + token.SpanStart);
 
                 if (atTop && kind == SyntaxKind.LessThanToken && start + token.SpanStart > lessThan)
