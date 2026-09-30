@@ -6,6 +6,45 @@ function Get-LuiReleasePolicy {
     Get-Content -LiteralPath (Join-Path $PSScriptRoot '../eng/lui-release-policy.json') -Raw | ConvertFrom-Json -AsHashtable
 }
 
+function Get-LuiNuGetDoctorNoticeNames {
+    $prefix = 'tools/net10.0/any/nuget/'
+    $required = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-notices.json') -Raw | ConvertFrom-Json | Where-Object package -eq 'Lucent.Tools')
+    if ($required.Count -eq 0) { throw 'NuGet doctor notice policy is missing.' }
+    foreach ($notice in $required) {
+        if (!$notice.entry.StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Invalid NuGet doctor notice policy path.' }
+        $name = $notice.entry.Substring($prefix.Length)
+        $name
+    }
+}
+
+function Assert-LuiNuGetDoctorNotices([string[]] $Names) {
+    foreach ($name in Get-LuiNuGetDoctorNoticeNames) {
+        if ($name -cnotin $Names) { throw "Required NuGet doctor notice is missing: $name" }
+    }
+}
+
+function Assert-LuiNuGetDoctorPayload([string[]] $Names, $Dependencies) {
+    Assert-LuiNuGetDoctorNotices $Names
+    $expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($name in @('Lucent.Tools.NuGet.dll', 'Lucent.Tools.NuGet.deps.json', 'Lucent.Tools.NuGet.runtimeconfig.json', 'notices/provenance.json') + @(Get-LuiNuGetDoctorNoticeNames)) { $null = $expected.Add($name) }
+    $target = $Dependencies['targets'][$Dependencies['runtimeTarget']['name']]
+    if (!$target) { throw 'NuGet doctor dependency target is missing.' }
+    foreach ($library in $target.Values) {
+        foreach ($section in @('runtime', 'native', 'runtimeTargets', 'resources')) {
+            if (!$library.ContainsKey($section)) { continue }
+            foreach ($entry in $library[$section].GetEnumerator()) {
+                if ($entry.Key.EndsWith('/_._')) { continue }
+                $name = if ($section -eq 'runtimeTargets') { $entry.Key }
+                    elseif ($section -eq 'resources') { $entry.Value['locale'] + '/' + [IO.Path]::GetFileName($entry.Key) }
+                    else { [IO.Path]::GetFileName($entry.Key) }
+                Assert-LuiRelativePath $name
+                $null = $expected.Add($name)
+            }
+        }
+    }
+    Assert-LuiSame @($Names | Sort-Object -CaseSensitive) @($expected | Sort-Object -CaseSensitive) 'NuGet doctor payload declared runtime and notice closure'
+}
+
 function ConvertTo-LuiCanonicalNode($Value) {
     if ($Value -is [Collections.IDictionary]) {
         $result = [ordered]@{}
@@ -267,6 +306,34 @@ function Get-LuiVsix([string] $Path) {
             Assert-LuiDependencyFiles $archive ($doctorPrefix + 'Lucent.Tools.deps.json')
         }
         elseif (@($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/doctor/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Extension contains an undeclared doctor.' }
+        if ($manifest['files'] -contains 'nuget-doctor/**' -and !$manifest['lucentNuGetDoctor']) { throw 'Extension has no bundled NuGet doctor.' }
+        if ($manifest['lucentNuGetDoctor']) {
+            $nugetDoctor = $manifest['lucentNuGetDoctor']
+            if ($nugetDoctor['schemaVersion'] -ne 1 -or $nugetDoctor['entryPoint'] -cne 'Lucent.Tools.NuGet.dll' -or $nugetDoctor['sourceCommit'] -cne $compatibility['sourceCommit']) { throw 'Unsupported or mismatched NuGet doctor identity.' }
+            $prefix = 'extension/nuget-doctor/'
+            $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            $total = 0L
+            foreach ($file in $nugetDoctor['files']) {
+                $name = [string]$file['fileName']
+                Assert-LuiRelativePath $name
+                if (!$names.Add($name)) { throw 'Duplicate NuGet doctor inventory path.' }
+                $bytes = Read-LuiArchiveBytes $archive ($prefix + $name)
+                $total += $bytes.Length
+                if ($bytes.Length -le 0 -or $file['bytes'] -ne $bytes.Length -or $file['sha256'] -cne (Get-LuiBytesHash $bytes)) { throw 'NuGet doctor bytes differ from the packaged inventory.' }
+            }
+            if ($names.Count -gt 128 -or $total -gt 128MB) { throw 'NuGet doctor payload exceeds its bound.' }
+            foreach ($required in @('Lucent.Tools.NuGet.dll', 'Lucent.Tools.NuGet.deps.json', 'Lucent.Tools.NuGet.runtimeconfig.json')) {
+                if (!$names.Contains($required)) { throw "NuGet doctor inventory omitted $required" }
+            }
+            Assert-LuiNuGetDoctorPayload @($names) (Read-LuiArchiveJson $archive ($prefix + 'Lucent.Tools.NuGet.deps.json'))
+            Assert-LuiSame @($archive.Entries.Keys | Where-Object { $_.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } | Sort-Object -CaseSensitive) @($names | ForEach-Object { $prefix + $_ } | Sort-Object -CaseSensitive) 'NuGet doctor payload'
+            $version = Get-LuiAssemblyVersion (Read-LuiArchiveBytes $archive ($prefix + 'Lucent.Tools.NuGet.dll'))
+            if ($version -notmatch ('\+' + [regex]::Escape($nugetDoctor['sourceCommit']) + '(\.|$)')) { throw 'NuGet doctor assembly source identity mismatch.' }
+            $runtime = Read-LuiArchiveJson $archive ($prefix + 'Lucent.Tools.NuGet.runtimeconfig.json')
+            if ($runtime['runtimeOptions']['tfm'] -cne 'net10.0' -or $runtime['runtimeOptions']['framework']['name'] -cne 'Microsoft.NETCore.App') { throw 'Unsupported NuGet doctor runtime.' }
+            Assert-LuiDependencyFiles $archive ($prefix + 'Lucent.Tools.NuGet.deps.json')
+        }
+        elseif (@($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/nuget-doctor/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Extension contains an undeclared NuGet doctor.' }
         $declared = @(@{ path = $manifest['main']; json = $false })
         if ($null -ne $bundle) { $declared += @{ path = './server-bundle.js'; json = $false } }
         foreach ($file in @('project-requirements.js', 'server-cache.js', 'server-acquisition.js', 'managed-tool.js', 'doctor-client.js', 'onboarding-ui.js', 'environment-ui.js', 'release-catalog.json')) {
@@ -423,4 +490,4 @@ function New-LuiReleaseSet {
     return $descriptor
 }
 
-Export-ModuleMember -Function Get-LuiReleasePolicy, ConvertTo-LuiCanonicalJson, Get-LuiBytesHash, Get-LuiAssemblyVersion, Assert-LuiRelativePath, Resolve-LuiArtifactPath, Get-LuiArtifact, Open-LuiArchive, Read-LuiArchiveBytes, Read-LuiArchiveJson, Get-LuiServerArchive, Get-LuiServerBundle, Get-LuiVsix, Get-LuiPackageInventory, Assert-LuiReleaseSet, Write-LuiImmutableJson, New-LuiReleaseSet
+Export-ModuleMember -Function Get-LuiReleasePolicy, Assert-LuiNuGetDoctorPayload, ConvertTo-LuiCanonicalJson, Get-LuiBytesHash, Get-LuiAssemblyVersion, Assert-LuiRelativePath, Resolve-LuiArtifactPath, Get-LuiArtifact, Open-LuiArchive, Read-LuiArchiveBytes, Read-LuiArchiveJson, Get-LuiServerArchive, Get-LuiServerBundle, Get-LuiVsix, Get-LuiPackageInventory, Assert-LuiReleaseSet, Write-LuiImmutableJson, New-LuiReleaseSet

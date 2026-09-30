@@ -35,6 +35,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Tasks.Sources;
 
 namespace $transportNamespace
 {
@@ -75,8 +76,53 @@ namespace $transportNamespace
                 response.Content = new StreamContent(StalledBody);
                 return Task.FromResult(response);
             }
+            if (_mode == "deferred" && requestNumber == 1)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StreamContent(new DeferredStream())
+                });
+            }
 
             throw new InvalidOperationException("Unexpected catalog fixture request.");
+        }
+    }
+
+    // Completes only after the consumer registers a continuation. Calling GetResult
+    // on its incomplete ValueTask fails independently of machine or disk speed.
+    public sealed class DeferredStream : Stream, IValueTaskSource<int>
+    {
+        private ManualResetValueTaskSourceCore<int> _pending;
+        private Memory<byte> _buffer;
+        private bool _started;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_started) return new ValueTask<int>(0);
+            _started = true;
+            _buffer = buffer;
+            return new ValueTask<int>(this, _pending.Version);
+        }
+        public int GetResult(short token) => _pending.GetResult(token);
+        public ValueTaskSourceStatus GetStatus(short token) => _pending.GetStatus(token);
+        public void OnCompleted(Action<object> continuation, object state, short token, ValueTaskSourceOnCompletedFlags flags)
+        {
+            _pending.OnCompleted(continuation, state, token, flags);
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                new byte[] { 0x43, 0x41, 0x54 }.AsMemory().CopyTo(_buffer);
+                _pending.SetResult(3);
+            });
         }
     }
 
@@ -291,6 +337,13 @@ try {
     $redirectBytes = [IO.File]::ReadAllBytes($redirectPath)
     Assert-True ($redirectBytes.Length -eq 3 -and $redirectBytes[0] -eq 0x43 -and $redirectBytes[1] -eq 0x41 -and $redirectBytes[2] -eq 0x54) 'Redirect transport wrote unexpected artifact bytes.'
     Write-Output 'PASS redirect strips bearer authorization'
+
+    $deferredPath = Join-Path $fixtureRoot 'deferred-artifact.zip'
+    $deferredHandler = [Activator]::CreateInstance($transportHandlerType, @('deferred'))
+    Save-LuiActionsArtifact 811 'fixture-token' $deferredPath $deferredHandler ([TimeSpan]::FromSeconds(5))
+    $deferredBytes = [IO.File]::ReadAllBytes($deferredPath)
+    Assert-True ($deferredBytes.Length -eq 3 -and $deferredBytes[0] -eq 0x43 -and $deferredBytes[1] -eq 0x41 -and $deferredBytes[2] -eq 0x54) 'Deferred ValueTask transfer wrote unexpected bytes.'
+    Write-Output 'PASS incomplete ValueTask source is awaited before consuming its result'
 
     $existingPath = Join-Path $fixtureRoot 'existing-artifact.zip'
     $existingBytes = [byte[]]@(0x50, 0x52, 0x45)

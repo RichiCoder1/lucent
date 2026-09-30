@@ -301,11 +301,11 @@ function Save-LuiActionsArtifact(
                 [byte[]]$buffer = [byte[]]::new(81920)
                 $readBuffer = [Memory[byte]]::new($buffer, 0, $buffer.Length)
                 [long]$total = 0
-                while (($read = $input.ReadAsync($readBuffer, $deadline.Token).GetAwaiter().GetResult()) -gt 0) {
+                while (($read = $input.ReadAsync($readBuffer, $deadline.Token).AsTask().GetAwaiter().GetResult()) -gt 0) {
                     $total += $read
                     if ($total -gt 512MB) { throw 'GitHub artifact exceeds the supported encoded size.' }
                     $writeBuffer = [ReadOnlyMemory[byte]]::new($buffer, 0, $read)
-                    $output.WriteAsync($writeBuffer, $deadline.Token).GetAwaiter().GetResult()
+                    $null = $output.WriteAsync($writeBuffer, $deadline.Token).AsTask().GetAwaiter().GetResult()
                 }
                 if ($total -le 0) { throw 'GitHub artifact download was empty.' }
             }

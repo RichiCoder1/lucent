@@ -10,7 +10,50 @@
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference
+      Include="../Lucent.Tools.NuGet/Lucent.Tools.NuGet.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+    />
     <InternalsVisibleTo Include="Lucent.Tools.Tests" />
     <None Include="README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
+  <Target Name="CollectNuGetDoctorPayload" DependsOnTargets="ResolveProjectReferences">
+    <MSBuild
+      Projects="../Lucent.Tools.NuGet/Lucent.Tools.NuGet.csproj"
+      Targets="GetNuGetDoctorPayload"
+      Properties="Configuration=$(Configuration);TargetFramework=net10.0"
+      RebaseOutputs="true"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="NuGetDoctorPayload" />
+    </MSBuild>
+    <Error
+      Condition="'@(NuGetDoctorPayload)' == ''"
+      Text="The optional NuGet doctor payload is unavailable."
+    />
+  </Target>
+  <Target
+    Name="CopyNuGetDoctorPayload"
+    AfterTargets="Build"
+    DependsOnTargets="CollectNuGetDoctorPayload"
+  >
+    <Copy
+      SourceFiles="@(NuGetDoctorPayload)"
+      DestinationFiles="@(NuGetDoctorPayload->'$(OutDir)nuget/%(PayloadPath)')"
+      SkipUnchangedFiles="true"
+    />
+  </Target>
+  <Target
+    Name="PublishNuGetDoctorPayload"
+    BeforeTargets="ComputeFilesToPublish"
+    DependsOnTargets="CollectNuGetDoctorPayload"
+  >
+    <ItemGroup>
+      <ResolvedFileToPublish Include="@(NuGetDoctorPayload)">
+        <RelativePath>nuget/%(NuGetDoctorPayload.PayloadPath)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 </Project>

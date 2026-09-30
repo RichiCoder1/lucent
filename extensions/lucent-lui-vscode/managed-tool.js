@@ -65,4 +65,63 @@ async function verifyManagedToolFiles(directory, manifest, sourceCommit, toolNam
     return path.join(directory, manifest.entryPoint);
 }
 
-module.exports = { verifyManagedToolFiles, hashFile };
+async function verifyNuGetDoctorFiles(directory, manifest, sourceCommit, signal) {
+    const required = ["Lucent.Tools.NuGet.dll", "Lucent.Tools.NuGet.deps.json", "Lucent.Tools.NuGet.runtimeconfig.json"];
+    if (!path.isAbsolute(directory) || manifest?.schemaVersion !== 1
+        || manifest.entryPoint !== required[0] || manifest.sourceCommit !== sourceCommit
+        || !COMMIT.test(sourceCommit) || !Array.isArray(manifest.files)
+        || manifest.files.length < required.length || manifest.files.length > 128) {
+        throw new Error("NuGet doctor manifest is unsupported.");
+    }
+    const listed = new Map();
+    let total = 0;
+    for (const entry of manifest.files) {
+        const name = entry?.fileName;
+        if (typeof name !== "string" || name.length > 256
+            || !name.split("/").every(part => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(part) && part !== "." && part !== "..")
+            || listed.has(name.toLowerCase()) || !Number.isSafeInteger(entry.bytes)
+            || entry.bytes <= 0 || !HASH.test(entry.sha256)) {
+            throw new Error("Invalid NuGet doctor inventory entry.");
+        }
+        total += entry.bytes;
+        if (total > MAX_TOOL_BYTES) throw new Error("NuGet doctor exceeds its size limit.");
+        listed.set(name.toLowerCase(), entry);
+    }
+    if (required.some(name => listed.get(name.toLowerCase())?.fileName !== name)) {
+        throw new Error("NuGet doctor manifest omits required files.");
+    }
+    const actualNames = [];
+    function inspect(relative = "") {
+        const current = path.join(directory, relative);
+        const stat = fs.lstatSync(current);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("NuGet doctor directory is not regular.");
+        for (const item of fs.readdirSync(current, { withFileTypes: true })) {
+            if (signal?.aborted) throw Object.assign(new Error("Canceled"), { name: "AbortError" });
+            const name = relative ? `${relative}/${item.name}` : item.name;
+            if (item.isSymbolicLink()) throw new Error("NuGet doctor payload contains a link.");
+            if (item.isDirectory()) {
+                if (![...listed.values()].some(entry => entry.fileName.startsWith(`${name}/`))) {
+                    throw new Error("NuGet doctor has an undeclared directory.");
+                }
+                inspect(name);
+            } else if (item.isFile()) actualNames.push(name);
+            else throw new Error("NuGet doctor payload is not regular.");
+            if (actualNames.length > 128) throw new Error("NuGet doctor has too many files.");
+        }
+    }
+    inspect();
+    if (!isDeepStrictEqual(actualNames.sort(), manifest.files.map(entry => entry.fileName).sort())) {
+        throw new Error("NuGet doctor has missing or undeclared files.");
+    }
+    for (const entry of manifest.files) {
+        const file = path.join(directory, entry.fileName);
+        if (fs.lstatSync(file).size !== entry.bytes) throw new Error("NuGet doctor file size differs from inventory.");
+        const actual = await hashFile(file, entry.bytes, signal);
+        if (actual.bytes !== entry.bytes || actual.sha256 !== entry.sha256) {
+            throw new Error("NuGet doctor file hash differs from inventory.");
+        }
+    }
+    return path.join(directory, manifest.entryPoint);
+}
+
+module.exports = { verifyManagedToolFiles, verifyNuGetDoctorFiles, hashFile };

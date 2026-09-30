@@ -8,7 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { PassThrough } = require("node:stream");
 const { test } = require("node:test");
-const { preflightDotnet, runDoctor, decodeDoctorResult } = require("./doctor-client");
+const { preflightDotnet, runDoctor, runFeedDoctor, decodeDoctorResult, decodeNativeDoctorResult, decodeFeedDoctorResult } = require("./doctor-client");
 
 const CHECKS = [
     ["global-json", "build", "pass"], ["dotnet-sdk", "build", "pass"], ["sdk-selection", "build", "notChecked"],
@@ -63,12 +63,57 @@ function fixture(t) {
     };
 }
 
+function nativeReport(status = "available") {
+    const codes = status === "unavailable" ? ["native-prerequisites"]
+        : ["native-visual-studio", "native-cpp-x64", "native-windows-sdk", "native-prerequisites", "native-publish"];
+    return { schemaVersion: 1, kind: "native-prerequisites-doctor", scope: "installed-windows-x64-toolchain", status,
+        capabilities: [{ name: "native", status: status === "available" ? "observed" : "notChecked" }],
+        checks: codes.map(code => {
+            const state = status === "unavailable" || code === "native-publish" ? "notChecked"
+                : code === "native-prerequisites" && status === "blocked" ? "fail" : "pass";
+            return { code, capability: "native", status: state, scope: "installed-windows-x64-toolchain",
+                severity: state === "fail" ? "error" : state === "notChecked" ? "warning" : "info",
+                summary: "Installed registration observation.", expected: "Registered Windows x64 components.", evidence: null, remedy: null };
+        }) };
+}
+
+test("native mode invokes only the explicit native flag after verified host runtime preflight", async t => {
+    const input = fixture(t);
+    for (const [status, code] of [["available", 0], ["blocked", 1], ["unavailable", 2]]) {
+        const result = nativeReport(status);
+        const fake = fakeSpawn([runtimeResponse(), { code, stdout: JSON.stringify(result) }]);
+        assert.deepEqual(await runDoctor(runOptions(input, { mode: "native", spawn: fake.spawn })), result);
+        assert.deepEqual(fake.calls[1].args, [path.resolve(input.verifiedDoctorDllPath), "doctor", "--json", "--native-prerequisites"]);
+        assert.equal(fake.calls[1].options.cwd, os.tmpdir());
+        assert.equal(fake.calls.length, 2);
+    }
+});
+
+test("native result validation is separate from static validation and cannot certify publication", () => {
+    const result = nativeReport();
+    assert.equal(decodeDoctorResult(JSON.stringify(result), 0), null);
+    assert.equal(decodeNativeDoctorResult(JSON.stringify(report()), 0), null);
+    assert.equal(decodeNativeDoctorResult(JSON.stringify(result), 1), null);
+    for (const mutate of [
+        value => { value.capabilities[0].status = "available"; },
+        value => { value.checks.at(-1).status = "pass"; value.checks.at(-1).severity = "info"; },
+        value => { value.checks[0].scope = "static-offline"; },
+        value => { value.checks[0].code = "native-platform"; },
+        value => { value.checks.push(value.checks[0]); },
+    ]) {
+        const value = structuredClone(result);
+        mutate(value);
+        assert.equal(decodeNativeDoctorResult(JSON.stringify(value), 0), null);
+    }
+});
+
 function fakeSpawn(responses = []) {
     const calls = [];
     const spawn = (program, args, options) => {
         const child = new EventEmitter();
         child.stdout = new PassThrough();
         child.stderr = new PassThrough();
+        child.stdin = new PassThrough();
         child.killCount = 0;
         child.kill = () => {
             child.killCount++;
@@ -105,6 +150,71 @@ function runOptions(input, overrides = {}) {
         ...overrides
     };
 }
+
+function feedReport(request, status = "observed") {
+    return { schemaVersion: 1, kind: "nuget-feed-doctor", scope: request.online ? "online-observation" : "effective-configuration",
+        generation: request.generation, status, reason: status === "observed" ? "none" : "configuration-load", sources: [],
+        authenticationPolicy: "anonymous-no-credentials", restoreReadiness: "notChecked", privateAvailability: "notChecked",
+        configuredAuthentication: "notChecked", configurationScope: "windows-local-fixed" };
+}
+
+test("feed payload invocation uses only the verified DLL and bounded stdin JSON to EOF", async t => {
+    const input = fixture(t);
+    let received;
+    const fake = fakeSpawn([runtimeResponse(), child => {
+        let text = "";
+        child.stdin.on("data", chunk => { text += chunk; });
+        child.stdin.on("end", () => {
+            received = JSON.parse(text);
+            child.stdout.end(JSON.stringify(feedReport(received)));
+            child.stderr.end();
+            setImmediate(() => child.emit("close", 0));
+        });
+    }]);
+    const options = runOptions(input, { packageId: "Lucent.Core", version: "0.3.0-dev.101.1", online: false, generation: "feed-current", spawn: fake.spawn });
+    const result = await runFeedDoctor(options);
+    assert.equal(result.status, "observed");
+    assert.deepEqual(received, { workspace: path.resolve(input.workspacePath), packageId: "Lucent.Core", version: "0.3.0-dev.101.1", online: false, generation: "feed-current" });
+    assert.deepEqual(fake.calls[1].args, [path.resolve(input.verifiedDoctorDllPath)]);
+    assert.deepEqual(fake.calls[1].options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.equal(fake.calls[1].child.stdin.writableEnded, true);
+    assert.equal(fake.calls[1].options.cwd, os.tmpdir());
+});
+
+test("feed decoder rejects stale generations, raw fields and impossible offline success claims", () => {
+    const request = { online: false, generation: "feed-current" };
+    const report = feedReport(request);
+    assert.deepEqual(decodeFeedDoctorResult(JSON.stringify(report), 0, request), report);
+    assert.equal(decodeDoctorResult(JSON.stringify(report), 0), null);
+    for (const mutate of [
+        value => { value.generation = "stale"; },
+        value => { value.sourceName = "SECRET https://private.invalid"; },
+        value => { value.reason = "SECRET C:\\private"; },
+        value => { value.privateAvailability = "available"; },
+        value => { value.sources = [{ source: 1, selection: "eligible", kind: "http", reachability: "reachable", authentication: "notExercised", release: "available", reason: "none" }]; },
+    ]) {
+        const value = structuredClone(report);
+        mutate(value);
+        assert.equal(decodeFeedDoctorResult(JSON.stringify(value), 0, request), null);
+    }
+    assert.equal(decodeFeedDoctorResult(JSON.stringify(report), 1, request), null);
+});
+
+test("feed cancellation waits for owned process close and discards late stdout", async t => {
+    const input = fixture(t);
+    let child;
+    let started;
+    const ready = new Promise(resolve => { started = resolve; });
+    const fake = fakeSpawn([runtimeResponse(), value => { child = value; started(); }]);
+    const controller = new AbortController();
+    const running = runFeedDoctor(runOptions(input, { packageId: "Lucent.Core", version: "1.0.0", generation: "current", spawn: fake.spawn, signal: controller.signal }));
+    await ready;
+    controller.abort();
+    await assert.rejects(running, { name: "AbortError" });
+    assert.equal(child.killCount, 1);
+    child.stdout.end(JSON.stringify(feedReport({ generation: "current", online: false })));
+    child.stderr.end();
+});
 
 function trackedSignal(controller) {
     const listeners = new Set();

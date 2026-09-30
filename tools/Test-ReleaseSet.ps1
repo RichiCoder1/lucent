@@ -283,6 +283,36 @@ if ($manifest['lucentCacheHelper']) {
     Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
     Expect-Rejected 'vsix-no-helper-manifest' { Get-LuiVsix $path } 'no bundled helper'
 }
+if ($manifest['lucentNuGetDoctor']) {
+    $changed = Copy-Json $manifest
+    $changed.lucentNuGetDoctor.files = @($changed.lucentNuGetDoctor.files | Where-Object fileName -cne 'notices/NuGet-LICENSE.txt')
+    $path = Join-Path $rejections 'vsix-missing-required-nuget-notice.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed; 'extension/nuget-doctor/notices/NuGet-LICENSE.txt' = $null }
+    Expect-Rejected 'vsix-missing-required-nuget-notice' { Get-LuiVsix $path } 'Required NuGet doctor notice'
+    $changed = Copy-Json $manifest
+    $staleBytes = [Text.Encoding]::UTF8.GetBytes('obsolete local build output')
+    $changed.lucentNuGetDoctor.files += @{ fileName = 'obsolete.dll'; bytes = $staleBytes.Length; sha256 = Get-LuiBytesHash $staleBytes }
+    $path = Join-Path $rejections 'vsix-inventoried-stale-nuget-output.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed; 'extension/nuget-doctor/obsolete.dll' = $staleBytes }
+    Expect-Rejected 'vsix-inventoried-stale-nuget-output' { Get-LuiVsix $path } 'NuGet doctor payload declared runtime and notice closure'
+    foreach ($case in @(
+        @{ name = 'vsix-tampered-nuget-dependency'; entry = 'extension/nuget-doctor/NuGet.Protocol.dll'; bytes = [byte[]]@(1); pattern = 'NuGet doctor bytes' },
+        @{ name = 'vsix-extra-nuget-dependency'; entry = 'extension/nuget-doctor/extra.dll'; bytes = [byte[]]@(1); pattern = 'NuGet doctor payload' }
+    )) {
+        $path = Join-Path $rejections ($case.name + '.vsix')
+        Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+        Replace-Entries $path @{ $case.entry = $case.bytes }
+        Expect-Rejected $case.name { Get-LuiVsix $path } $case.pattern
+    }
+    $changed = Copy-Json $manifest
+    $changed.Remove('lucentNuGetDoctor')
+    $path = Join-Path $rejections 'vsix-no-nuget-doctor-manifest.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
+    Expect-Rejected 'vsix-no-nuget-doctor-manifest' { Get-LuiVsix $path } 'no bundled NuGet doctor'
+}
 if ($manifest['lucentDoctor']) {
     foreach ($case in @(
         @{ name = 'vsix-missing-doctor'; entry = 'extension/doctor/Lucent.Tools.dll'; bytes = $null; pattern = 'doctor payload' },

@@ -79,8 +79,18 @@ foreach ($name in $names) {
             }
         }
         if ($name -eq 'Lucent.Tools') {
+            $toolRoot = 'tools/net10.0/any/'
+            $allowedRootFiles = @('Lucent.Tools.dll', 'Lucent.Tools.deps.json', 'Lucent.Tools.runtimeconfig.json', 'Lucent.Tools.pdb', 'DotnetToolSettings.xml')
+            foreach ($entryName in $zip.Entries.FullName) {
+                if ($entryName.StartsWith($toolRoot, [StringComparison]::Ordinal) -and -not $entryName.StartsWith($toolRoot + 'nuget/', [StringComparison]::Ordinal)) {
+                    if ($entryName.Substring($toolRoot.Length) -cnotin $allowedRootFiles) { throw "Lucent.Tools package mixed optional adapter files into the static tool: $entryName" }
+                }
+            }
             foreach ($required in @('tools/net10.0/any/Lucent.Tools.dll', 'tools/net10.0/any/Lucent.Tools.deps.json', 'tools/net10.0/any/Lucent.Tools.runtimeconfig.json', 'tools/net10.0/any/DotnetToolSettings.xml')) {
                 if (-not $zip.GetEntry($required)) { throw "Lucent.Tools package omitted tool payload: $required" }
+            }
+            foreach ($required in @('Lucent.Tools.NuGet.dll', 'Lucent.Tools.NuGet.deps.json', 'Lucent.Tools.NuGet.runtimeconfig.json', 'NuGet.Configuration.dll', 'NuGet.Protocol.dll')) {
+                if (-not $zip.GetEntry("tools/net10.0/any/nuget/$required")) { throw "Lucent.Tools package omitted optional NuGet doctor payload: $required" }
             }
         }
     } finally { $zip.Dispose() }

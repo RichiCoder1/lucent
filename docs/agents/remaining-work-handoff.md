@@ -19,7 +19,7 @@ Component Browser compact header has been checked in dark and light themes;
 the official 101.1 Issue Browser restart replay now passes in two processes.
 Its Status popup exposed a missing scrollbar gutter in shared Select measurement.
 The correction passes four real-Skia scale cases and a fresh managed Windows app
-smoke in comfortable/compact density. It awaits publication. Both test apps were
+smoke in comfortable/compact density and is published in 107.1. Both test apps were
 closed and the Computer Use connection ended. Earlier Escape
 interruptions remain failed attempts and are not walkthrough evidence.
 Earlier representative Component Browser and Issue Browser
@@ -112,7 +112,11 @@ template failure path restores an absolute default cache, and 15 focused cleanup
 observations pass. Evidence and failed logs are in `artifacts/ci103-package-failure`.
 The full nested published-server replay remains for CI because local D: capacity
 blocked the isolated cache restore; do not claim a completed local pipeline.
-`101.1` remains the latest confirmed publication; #246/#247 await official delivery.
+CI 107 later passed all three jobs and published `0.3.0-dev.107.1` from
+`8e8c0788`. Its complete artifact and descriptor are independently authenticated;
+#246/#247 and #323 are closed and marked Done. The retained artifact/catalog path
+is recorded in `artifacts/ci107-catalog-location.txt`. Earlier failed attempts below
+remain diagnostic history, not the current release state.
 
 Commit `18e1d549` pushed the static environment doctor and reviewed onboarding
 slice. CI 104 passed the previously failing published-server checks, then both
@@ -152,8 +156,8 @@ resolves and requires its actual payload. An isolated solution reproduces the ol
 failure; the corrected build and forced-cancellation test pass. Missing payload and
 early producer failure now report directly. The job also reached its 25-minute
 cleanup deadline; its budget is 40 minutes, with test thresholds unchanged.
-Failed evidence is under `artifacts/ci106-failure`. Publication was skipped;
-`101.1` remains the latest confirmed release.
+Failed evidence is under `artifacts/ci106-failure`. CI106 publication was skipped;
+CI107 subsequently passed and published the correction in 107.1.
 
 | Work | Current boundary | Next action |
 | --- | --- | --- |
@@ -161,14 +165,14 @@ Failed evidence is under `artifacts/ci106-failure`. Publication was skipped;
 | Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
 | Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
 | Notes #12 | Published correction and real delayed-write Ctrl+S/typing/reopen pass; closed and Project Done | Presentation adoption remains separate |
-| Presentation #323 | Official 101.1 Notes consumer passes the 520-pixel regression, native save/persistence and CI; additional Select scrollbar-gutter correction passes real-Skia and Windows smoke; header follow-up passes | Publish the gutter correction |
+| Presentation #323 | Official 101.1 Notes consumer and browser follow-ups pass; Select gutter correction is published in authenticated 107.1 | Closed; no remaining issue work |
 | Repeated work #324 | All retained improvements published in 94.1; measured deferrals recorded; closed and Project Done | No new work required |
 | Restoration #221 | Published codec/journal ownership and reviewed app persistence; final official 101.1 package-only NativeAOT restart reopens issue #9999 in a new process | Complete; evidence under `artifacts/issue221-package101-replay` |
 | Activation #222 / parent #205 | Official 101.1 registered transport and real visible host behavior pass, including guard/focus/attention/minimize/close/ownership cleanup | Complete; separate transport and visible evidence under `artifacts/issue222-unpackaged` and `artifacts/issue222-visible` |
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
-| Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
-| Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
-| Environment doctor #248 | Static CLI/VSIX proof passes; explicit editor checks pass real-project/cache contracts and 99 Node tests; standalone project CLI passes 32 Tools contracts and real development invocation | Publish reviewed slices; finish optional feed and native-prerequisite diagnostics before closing |
+| Templates #246 | Published in 107.1; official template consumer and NativeAOT checks pass | Closed; fresh installed-editor journey remains #249 |
+| Editor lifecycle #247 | Official CI107 server/VSIX delivery authenticated; reviewed cache/import/acquisition behavior passes | Closed; visual VS Code sign-in remains part of #249 |
+| Environment doctor #248 | Static/trusted-project checks published in 107.1; native/feed additions pass contracts, review, real tool installation, full VSIX production and 83 release contracts | Commit/publish the additions; fresh installed-editor journey belongs to #249 |
 | Windows keypad #326 | Published in 101.1 and closed; three focused contracts pass in both managed and NativeAOT runs | No remaining issue work; no physical main-arrow claim |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
@@ -260,7 +264,7 @@ receipt. Final `artifacts/templates-proof/ci101-release-final/evidence.json` pro
 installation of the exact descriptor-bound template package, all generated builds
 and semantic/capture/library checks, and NativeAOT publication without launch.
 Its candidate is explicitly local development, combining CI101 inputs and the
-new template package; official template publication awaits the next CI run.
+new template package. Subsequent CI107 provides the official template publication.
 #247's bundled delivery
 passes the actual producer checks at
 `03116311`, recorded in `artifacts/issue247-producer-03116311/evidence.json` as a dirty
@@ -312,6 +316,18 @@ The development server is an explicit unauthenticated override. Evidence is unde
 `C:/Users/richa/AppData/Local/Temp/lucent-cli-trusted-project`, preserving earlier
 old-server, stale-restore and compiler-mismatch failures. #248 remains
 open; these local checks do not establish publication or a completed #249 journey.
+
+The native/feed additions subsequently pass 50 Tools contracts, the 23-contract
+adapter checkpoint plus two scratch/isolation follow-ups, and 110 editor tests.
+Final independent review has no findings. A real fresh tool installation verifies
+static/native/offline/anonymous operations without workspace or package-cache
+changes. SDK-declared adapter files exclude planted stale DLL/JSON files; missing
+required runtime files fail closed. Full VSIX production and 83 release contracts
+pass. Evidence is on C: via `artifacts/doctor-vsix-current.txt`; the development
+VSIX SHA-256 is `418ACBE80ED19FE858EEDDA72EE3A0BF6D24F08837C03DA89406384837B52214`.
+The first producer attempt supplied an apphost-enabled doctor and was correctly
+rejected; the passing invocation uses the existing CI recipe's `UseAppHost=false`.
+These additions await commit/publication; #249 remains a separate editor journey.
 
 The local CI 103 reproduction exhausted its restore space with D: at about 145 MB
 free. The owner subsequently authorized removing only the failed repository-local

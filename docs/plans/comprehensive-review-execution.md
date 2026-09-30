@@ -431,7 +431,7 @@ cleanup preserves absence and existing values; a real template failure path and
 15 observations across the four affected script cleanup blocks pass. The full
 nested published-server replay is deferred to CI after local restore exhausted D:
 space. Logs and the reproduction are under `artifacts/ci103-package-failure`.
-`101.1` remains the latest confirmed release, so #246/#247 remain open pending
+At that checkpoint, `101.1` remained the latest confirmed release and #246/#247 remained open pending
 official publication.
 
 ### Environment doctor — #248
@@ -463,8 +463,20 @@ Both focused regressions failed before correction and pass afterward; all 99
 extension tests pass. Evidence is under `artifacts/issue248-trusted-review`.
 
 These are development checks, not publication or a completed #248/#249 journey.
-The [doctor plan](environment-doctor.md) records the remaining CLI trusted-project
+The [doctor plan](environment-doctor.md) records the later CLI trusted-project
 parity, optional feed and native-toolchain diagnostics.
+
+Those additions now pass 50 Tools contracts, the 23-contract NuGet adapter
+checkpoint with two later scratch/isolation checks, and 110 editor contracts.
+The adapter uses official NuGet parsing/protocol APIs behind a separate process;
+default inspection stays BCL-only and offline. Review corrections isolate temporary
+locks, hold immutable configuration inputs, exclude undeclared output files, and
+require all six upstream notices. Final independent review has no findings.
+Fresh installed-tool checks pass static/native/offline/anonymous observations and
+confirm unchanged workspace/package-cache snapshots. The complete development
+VSIX and 83 release-set contracts pass; retained output is located by
+`artifacts/doctor-vsix-current.txt`. This is development delivery proof, with
+publication and #249's visual editor journey still separate.
 
 ### Browser follow-up evidence
 
@@ -497,6 +509,19 @@ scales pass afterward, alongside 14 existing Core list contracts. A fresh manage
 Windows app keeps every popup label on one line in comfortable and compact density;
 Closed and All statuses produce the expected 3,333/10,000 fixture counts. Exact
 source/binary identities and the failed trimmed-publish attempt are retained under
-`artifacts/issue221-package101-replay`. Publication remains separate. Earlier Escape
+`artifacts/issue221-package101-replay`. CI107 subsequently passes all verification
+and publication jobs; its independently authenticated 107.1 artifact delivers the
+gutter correction, closing #323. Earlier Escape
 interruptions remain failed attempts. Both test apps were closed and the Computer
 Use connection ended.
+
+CI107 also delivers the template and editor lifecycle work, closing #246/#247.
+The complete release descriptor SHA-256 is
+`99419635d7e8db84906e23df49794194527be6c2039683e8ab130b3844a1d951`;
+`artifacts/ci107-catalog-location.txt` records the retained authenticated artifact.
+The local catalog downloader initially consumed incomplete ValueTask stream I/O
+synchronously. Converting each operation to a Task before waiting fixes the actual
+transfer; an independent deferred-stream regression rejects the prior code. Failed
+downloads and the isolated pre-fix fixture remain beside the successful acquisition.
+The installed-editor journey is still #249, and the optional native/feed doctor
+additions are not part of 107.1.

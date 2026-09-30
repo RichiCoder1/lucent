@@ -40,5 +40,11 @@
   { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/Roslyn-Workspaces-Common-NOTICES.rtf" },
   { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/Roslyn-Workspaces-MSBuild-NOTICES.rtf" },
   { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/MSBuild-NOTICES.txt" },
-  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/dotnet-Cryptography-NOTICES.txt" }
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/dotnet-Cryptography-NOTICES.txt" },
+  { "package": "Lucent.Tools", "entry": "tools/net10.0/any/nuget/notices/NuGet-LICENSE.txt" },
+  { "package": "Lucent.Tools", "entry": "tools/net10.0/any/nuget/notices/Newtonsoft.Json-LICENSE.md" },
+  { "package": "Lucent.Tools", "entry": "tools/net10.0/any/nuget/notices/system.security.cryptography.pkcs-LICENSE.TXT" },
+  { "package": "Lucent.Tools", "entry": "tools/net10.0/any/nuget/notices/system.security.cryptography.pkcs-THIRD-PARTY-NOTICES.TXT" },
+  { "package": "Lucent.Tools", "entry": "tools/net10.0/any/nuget/notices/system.security.cryptography.protecteddata-LICENSE.TXT" },
+  { "package": "Lucent.Tools", "entry": "tools/net10.0/any/nuget/notices/system.security.cryptography.protecteddata-THIRD-PARTY-NOTICES.TXT" }
 ]

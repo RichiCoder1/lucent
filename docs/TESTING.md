@@ -20,6 +20,16 @@ When adding, changing or removing tests, follow the [test-authoring and coverage
 
 The affected-file helper includes relevant downstream suites and falls back to all managed tests for shared or unrecognized changes. Documentation-only changes need content and link inspection. Select additional checks by behavior; a path-based selection does not establish that published interaction or packaging works.
 
+Environment diagnostics have two managed owners: `Lucent.Tools.Tests` covers static,
+trusted-project and native-toolchain classification, bounded process execution and
+the feed client protocol; `Lucent.Tools.NuGet.Tests` covers effective configuration,
+read-only input handling and anonymous HTTP observations against local fixtures.
+The latter does not contact public or private feeds. The extension's doctor and
+environment tests own command selection, Workspace Trust, cancellation, stale-result
+rejection and review/copy behavior. Keep NuGet policy tests in the adapter suite
+rather than duplicating them in the client. Tool-package and VSIX inventory checks
+own the actual delivered dependency and notice closure.
+
 Managed runs write per-test results and durations to `artifacts/test/managed/<project>/results.trx`; CI retains these reports for five days, including failed runs. Test execution requires at least one matching test, so an empty filter fails without a separate discovery process.
 
 `./tools/Verify-Formatting.ps1` checks all authored C# with the pinned CSharpier

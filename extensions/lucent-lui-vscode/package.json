@@ -44,6 +44,7 @@
     "release-catalog.json",
     "tooling-cache/**",
     "doctor/**",
+    "nuget-doctor/**",
     "onboarding/**",
     "server/**",
     "language-configuration.json",
@@ -79,6 +80,15 @@
     }, {
       "command": "lucentLui.checkEnvironment",
       "title": "Lucent: Check Environment"
+    }, {
+      "command": "lucentLui.checkNativePrerequisites",
+      "title": "Lucent: Check Windows Native Prerequisites"
+    }, {
+      "command": "lucentLui.checkFeedConfiguration",
+      "title": "Lucent: Check NuGet Feed Configuration"
+    }, {
+      "command": "lucentLui.checkAnonymousFeedAccess",
+      "title": "Lucent: Check Anonymous Feed Access"
     }, {
       "command": "lucentLui.checkTrustedProject",
       "title": "Lucent: Check Trusted Project (MSBuild Evaluation)"

@@ -20,6 +20,7 @@
   <Project Path="src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" />
   <Project Path="src/Lucent.Tooling.Cache/Lucent.Tooling.Cache.csproj" />
   <Project Path="src/Lucent.Tools/Lucent.Tools.csproj" />
+  <Project Path="src/Lucent.Tools.NuGet/Lucent.Tools.NuGet.csproj" />
   <Project Path="tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj" />
   <Project Path="src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
   <Project Path="src/Lucent.Platform.Windows.Activation/Lucent.Platform.Windows.Activation.csproj" />
@@ -36,6 +37,7 @@
   <Project Path="tests/Lucent.Tooling.Cache.Tests/Lucent.Tooling.Cache.Tests.csproj" />
   <Project Path="tests/Lucent.Tools.Tests/Lucent.Tools.Tests.csproj" />
   <Project Path="tests/Lucent.Tools.Tests/CancellationProducer/CancellationProducer.csproj" />
+  <Project Path="tests/Lucent.Tools.NuGet.Tests/Lucent.Tools.NuGet.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.Sdk.Fixtures/AssetWorkspaceProbe/AssetWorkspaceProbe.csproj" />
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
   <Project Path="tests/Lucent.ComponentBrowser.Tests/Lucent.ComponentBrowser.Tests.csproj" />

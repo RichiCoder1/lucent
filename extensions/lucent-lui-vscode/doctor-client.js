@@ -194,7 +194,7 @@ async function stopChild(child, { spawn, closePromise }) {
     return signalSent && await waitForProcessGroupExit(processId, deadline);
 }
 
-function runProcess(program, args, { spawn, signal, timeoutMs, maxOutputBytes, environment }) {
+function runProcess(program, args, { spawn, signal, timeoutMs, maxOutputBytes, environment, input }) {
     return new Promise(resolve => {
         if (signal?.aborted) { resolve({ kind: "cancelled" }); return; }
         let child;
@@ -230,7 +230,7 @@ function runProcess(program, args, { spawn, signal, timeoutMs, maxOutputBytes, e
                 shell: false,
                 detached: process.platform !== "win32",
                 windowsHide: true,
-                stdio: ["ignore", "pipe", "pipe"]
+                stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
             });
         } catch {
             finish({ kind: "spawn-error" });
@@ -273,6 +273,13 @@ function runProcess(program, args, { spawn, signal, timeoutMs, maxOutputBytes, e
         });
         signal?.addEventListener("abort", onAbort, { once: true });
         if (signal?.aborted) onAbort();
+        if (input !== undefined && !stopping && !settled) {
+            if (!child.stdin || typeof child.stdin.end !== "function") terminate("stdin-error");
+            else {
+                child.stdin.once("error", () => terminate("stdin-error"));
+                try { child.stdin.end(input, "utf8"); } catch { terminate("stdin-error"); }
+            }
+        }
     });
 }
 
@@ -346,6 +353,105 @@ function decodeDoctorResult(output, exitCode) {
     return result;
 }
 
+function decodeNativeDoctorResult(output, exitCode) {
+    let result;
+    try { result = JSON.parse(output); } catch { return null; }
+    const scope = "installed-windows-x64-toolchain";
+    if (!isRecord(result) || result.schemaVersion !== 1 || result.kind !== "native-prerequisites-doctor"
+        || result.scope !== scope) return null;
+    if (result.status === "unavailable" && Object.hasOwn(result, "error")) {
+        return hasExactKeys(result, ["schemaVersion", "kind", "scope", "status", "error"])
+            && isRecord(result.error) && hasExactKeys(result.error, ["code", "message"])
+            && exitCode === 2 && result.error.code === "doctor-invocation"
+            && validText(result.error.message, 512, true) ? { kind: "invocation-unavailable" } : null;
+    }
+    const exits = { available: 0, blocked: 1, unavailable: 2 };
+    if (!Object.hasOwn(exits, result.status) || exits[result.status] !== exitCode
+        || !hasExactKeys(result, ["schemaVersion", "kind", "scope", "status", "capabilities", "checks"])
+        || !Array.isArray(result.capabilities) || result.capabilities.length !== 1
+        || !isRecord(result.capabilities[0]) || !hasExactKeys(result.capabilities[0], ["name", "status"])
+        || result.capabilities[0].name !== "native"
+        || result.capabilities[0].status !== (result.status === "available" ? "observed" : "notChecked")
+        || !Array.isArray(result.checks)) return null;
+    const expectedCodes = result.status === "unavailable" ? ["native-prerequisites"]
+        : ["native-visual-studio", "native-cpp-x64", "native-windows-sdk", "native-prerequisites", "native-publish"];
+    if (result.checks.length !== expectedCodes.length) return null;
+    const checks = new Map();
+    for (const item of result.checks) {
+        if (!isRecord(item) || !hasExactKeys(item, ["code", "capability", "status", "summary", "evidence", "remedy", "expected", "scope", "severity"])
+            || !expectedCodes.includes(item.code) || checks.has(item.code) || item.capability !== "native"
+            || !CHECK_STATES.has(item.status) || item.scope !== scope
+            || item.severity !== (item.status === "fail" ? "error" : item.status === "notChecked" ? "warning" : "info")
+            || !validText(item.summary, 512, true) || !validText(item.expected, 512, true)
+            || (item.evidence !== null && !validText(item.evidence, MAX_DOCTOR_OUTPUT_BYTES))
+            || (item.remedy !== null && !validText(item.remedy, 512))) return null;
+        checks.set(item.code, item.status);
+    }
+    if (result.status === "unavailable") return checks.get("native-prerequisites") === "notChecked" ? result : null;
+    if (checks.get("native-publish") !== "notChecked"
+        || checks.get("native-prerequisites") !== (result.status === "available" ? "pass" : "fail")) return null;
+    const components = ["native-visual-studio", "native-cpp-x64", "native-windows-sdk"];
+    if (components.some(code => !["pass", "fail"].includes(checks.get(code)))
+        || (result.status === "available" && components.some(code => checks.get(code) !== "pass"))) return null;
+    return result;
+}
+
+function validFeedIdentity(packageId, version, generation) {
+    return typeof packageId === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(packageId)
+        && typeof version === "string" && /^[0-9][0-9A-Za-z.+-]{0,127}$/.test(version)
+        && typeof generation === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(generation);
+}
+
+function decodeFeedDoctorResult(output, exitCode, { online, generation }) {
+    let result;
+    try { result = JSON.parse(output); } catch { return null; }
+    const scope = online ? "online-observation" : "effective-configuration";
+    if (!isRecord(result) || !hasExactKeys(result, ["schemaVersion", "kind", "scope", "generation", "status", "reason", "sources", "authenticationPolicy", "restoreReadiness", "privateAvailability", "configuredAuthentication", "configurationScope"])
+        || result.schemaVersion !== 1 || result.kind !== "nuget-feed-doctor" || result.scope !== scope
+        || result.generation !== generation || result.authenticationPolicy !== "anonymous-no-credentials"
+        || result.restoreReadiness !== "notChecked" || result.privateAvailability !== "notChecked"
+        || result.configuredAuthentication !== "notChecked" || result.configurationScope !== "windows-local-fixed"
+        || !["observed", "invalid-request", "configuration-unavailable", "stale", "timed-out", "unsupported-host", "unavailable"].includes(result.status)
+        || !["none", "invalid-request", "configuration-load", "unsupported-defaults", "unsupported-host", "stale-inputs", "deadline", "cancelled", "invocation-failed"].includes(result.reason)
+        || exitCode !== (result.status === "observed" ? 0 : 1)
+        || !Array.isArray(result.sources) || result.sources.length > 32
+        || (result.status !== "observed" && result.sources.length !== 0)
+        || (result.status === "observed" && result.reason !== "none")) return null;
+    for (const [index, source] of result.sources.entries()) {
+        if (!isRecord(source) || !hasExactKeys(source, ["source", "selection", "kind", "reachability", "authentication", "release", "reason"])
+            || source.source !== index + 1 || !["eligible", "disabled", "mapping-excluded"].includes(source.selection)
+            || !["http", "local"].includes(source.kind)
+            || !["notChecked", "reachable", "unreachable", "inconclusive", "timed-out", "unsupported"].includes(source.reachability)
+            || !["notChecked", "notExercised", "unknown", "authRequired", "forbidden"].includes(source.authentication)
+            || !["notChecked", "available", "notFoundInAnonymousView", "unknown"].includes(source.release)
+            || !["none", "unsupported-source", "unsupported-resource", "unsupported-redirect", "unreachable", "invalid-response", "deadline", "http-status"].includes(source.reason)
+            || ((!online || source.selection !== "eligible")
+                && (source.reachability !== "notChecked" || source.authentication !== "notChecked"
+                    || source.release !== "notChecked" || source.reason !== "none"))) return null;
+    }
+    return result;
+}
+
+async function runFeedDoctor({ verifiedDoctorDllPath, workspacePath, packageId, version, online = false,
+    generation, signal, timeoutMs = 65_000, spawn = childProcess.spawn, environment = process.env } = {}) {
+    if (signal?.aborted) throw abortError();
+    if (typeof verifiedDoctorDllPath !== "string" || !path.isAbsolute(verifiedDoctorDllPath)
+        || typeof workspacePath !== "string" || !path.isAbsolute(workspacePath) || workspacePath.length > 2048
+        || typeof online !== "boolean" || !validFeedIdentity(packageId, version, generation)) return unavailable("invalid-request");
+    const preflight = await preflightDotnet({ workspacePath, signal, timeoutMs, spawn, environment });
+    if (preflight.status !== "available") return preflight;
+    const input = JSON.stringify({ workspace: path.resolve(workspacePath), packageId, version, online, generation });
+    if (input.length > 16_384) return unavailable("invalid-request");
+    const invocation = await runProcess(preflight.dotnetPath, [path.resolve(verifiedDoctorDllPath)], {
+        spawn, signal, timeoutMs: normalizedTimeout(timeoutMs), maxOutputBytes: 64 * 1024, environment, input
+    });
+    if (invocation.kind === "cancelled") throw abortError();
+    if (invocation.kind === "timeout") return unavailable("doctor-timeout");
+    if (invocation.kind === "output-too-large") return unavailable("doctor-output-too-large");
+    if (invocation.kind !== "exit") return unavailable("doctor-invocation-failed");
+    return decodeFeedDoctorResult(invocation.stdout, invocation.code, { online, generation }) ?? unavailable("doctor-result-invalid");
+}
+
 function parseRuntimeList(output) {
     return output.split(/\r?\n/).some(line => {
         const match = /^Microsoft\.NETCore\.App\s+(\d+)\./.exec(line.trim());
@@ -391,11 +497,12 @@ async function preflightDotnet({ workspacePath, signal, timeoutMs, requireSdk = 
 }
 
 // The caller must verify this DLL before invocation; this module does not locate or ship a doctor payload.
-async function runDoctor({ verifiedDoctorDllPath, workspacePath, signal, timeoutMs, spawn = childProcess.spawn,
+async function runDoctor({ verifiedDoctorDllPath, workspacePath, mode = "static", signal, timeoutMs, spawn = childProcess.spawn,
     environment = process.env } = {}) {
     if (signal?.aborted) throw abortError();
     if (typeof verifiedDoctorDllPath !== "string" || !path.isAbsolute(verifiedDoctorDllPath)
-        || typeof workspacePath !== "string" || !path.isAbsolute(workspacePath)) return unavailable("invalid-request");
+        || typeof workspacePath !== "string" || !path.isAbsolute(workspacePath)
+        || !["static", "native"].includes(mode)) return unavailable("invalid-request");
 
     const workspace = path.resolve(workspacePath);
     const timeout = normalizedTimeout(timeoutMs);
@@ -404,7 +511,9 @@ async function runDoctor({ verifiedDoctorDllPath, workspacePath, signal, timeout
     if (preflight.status !== "available") return preflight;
 
     const doctorDll = path.resolve(verifiedDoctorDllPath);
-    const invocation = await runProcess(preflight.dotnetPath, [doctorDll, "doctor", "--json", "--workspace", workspace], {
+    const arguments_ = mode === "native" ? [doctorDll, "doctor", "--json", "--native-prerequisites"]
+        : [doctorDll, "doctor", "--json", "--workspace", workspace];
+    const invocation = await runProcess(preflight.dotnetPath, arguments_, {
         spawn, signal, timeoutMs: timeout, maxOutputBytes: MAX_DOCTOR_OUTPUT_BYTES, environment
     });
     if (invocation.kind === "cancelled") throw abortError();
@@ -412,10 +521,11 @@ async function runDoctor({ verifiedDoctorDllPath, workspacePath, signal, timeout
     if (invocation.kind === "output-too-large") return unavailable("doctor-output-too-large");
     if (invocation.kind !== "exit") return unavailable("doctor-invocation-failed");
     if (![0, 1, 2].includes(invocation.code)) return unavailable("doctor-invocation-failed");
-    const result = decodeDoctorResult(invocation.stdout, invocation.code);
+    const result = mode === "native" ? decodeNativeDoctorResult(invocation.stdout, invocation.code)
+        : decodeDoctorResult(invocation.stdout, invocation.code);
     if (result?.kind === "invocation-unavailable") return unavailable("doctor-invocation-failed");
-    if (invocation.code === 2) return unavailable("doctor-invocation-failed");
+    if (invocation.code === 2 && mode !== "native") return unavailable("doctor-invocation-failed");
     return result ?? unavailable("doctor-result-invalid");
 }
 
-module.exports = { preflightDotnet, runDoctor, decodeDoctorResult };
+module.exports = { preflightDotnet, runDoctor, runFeedDoctor, decodeDoctorResult, decodeNativeDoctorResult, decodeFeedDoctorResult };

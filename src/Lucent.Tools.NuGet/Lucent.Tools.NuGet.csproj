@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <NuGetDoctorNotice Include="notices/**/*" />
+    <None
+      Update="@(NuGetDoctorNotice)"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+    />
+    <PackageReference Include="NuGet.Configuration" />
+    <PackageReference Include="NuGet.Protocol" />
+    <InternalsVisibleTo Include="Lucent.Tools.NuGet.Tests" />
+  </ItemGroup>
+  <Target
+    Name="GetNuGetDoctorPayload"
+    DependsOnTargets="GetTargetPath;ResolveReferences"
+    Returns="@(NuGetDoctorPayload)"
+  >
+    <ItemGroup>
+      <NuGetDoctorPayload Include="$(TargetPath);$(ProjectDepsFilePath);$(ProjectRuntimeConfigFilePath)" />
+      <NuGetDoctorPayload Include="@(ReferenceCopyLocalPaths)">
+        <PayloadPath>%(ReferenceCopyLocalPaths.DestinationSubDirectory)%(ReferenceCopyLocalPaths.Filename)%(ReferenceCopyLocalPaths.Extension)</PayloadPath>
+      </NuGetDoctorPayload>
+      <NuGetDoctorPayload Include="@(NuGetDoctorNotice)">
+        <PayloadPath>notices/%(NuGetDoctorNotice.RecursiveDir)%(NuGetDoctorNotice.Filename)%(NuGetDoctorNotice.Extension)</PayloadPath>
+      </NuGetDoctorPayload>
+      <NuGetDoctorPayload
+        Update="@(NuGetDoctorPayload)"
+        Condition="'%(NuGetDoctorPayload.PayloadPath)' == ''"
+      >
+        <PayloadPath>%(NuGetDoctorPayload.Filename)%(NuGetDoctorPayload.Extension)</PayloadPath>
+      </NuGetDoctorPayload>
+    </ItemGroup>
+    <Error
+      Condition="'$(TargetPath)' == '' or '$(ProjectDepsFilePath)' == '' or '$(ProjectRuntimeConfigFilePath)' == ''"
+      Text="The optional NuGet doctor runtime payload paths are unavailable."
+    />
+    <Error
+      Condition="!Exists('%(NuGetDoctorPayload.Identity)')"
+      Text="The declared optional NuGet doctor payload is incomplete: %(NuGetDoctorPayload.PayloadPath)."
+    />
+  </Target>
+</Project>

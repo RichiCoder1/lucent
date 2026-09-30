@@ -17,8 +17,8 @@ Presentation #323's CommandScope correction and app shrink fix pass the official
 consumer checks, including the unchanged 520-pixel regression. Browser header
 checks pass in dark/light themes. The additional Select scrollbar-gutter correction
 passes four real-Skia scale cases and a managed Windows browser walkthrough;
-publication remains. UI testing is authorized, and completed Computer Use sessions
-are closed after each walkthrough.
+the correction is published in `0.3.0-dev.107.1`, closing #323. UI testing is
+authorized, and completed Computer Use sessions are closed after each walkthrough.
 Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
 is not claimed. Standard Num Lock-off keypad navigation is delivered in 101.1; #326 is closed.
 Navigation #205's [implementation plan](plans/navigation-restoration-activation.md)
@@ -47,7 +47,7 @@ has been independently authenticated, closing #245. Templates #246 pass the offi
 101.1 generated-app/library/test consumer checks and NativeAOT publication. The
 template-inclusive inventory and CI wiring are implemented, and the exact
 descriptor-bound template package passes the final local consumer proof;
-official publication awaits CI. Editor #247's bundled
+official publication is verified in 107.1, closing #246. Editor #247's bundled
 server and CI test wiring have passed
 source review and actual producer proof. Evaluated project matching and immutable
 cache/import now pass focused development checks and actual V4 packaged proof.
@@ -74,15 +74,30 @@ CI 106 passes package verification and cleanup, but its managed job exposed a
 test-helper Debug/Release mismatch. The helper's solution configuration and payload
 copy are corrected with a fresh isolated solution proof. The managed job now also
 has time for final verification and cache cleanup. Publication was skipped.
-`101.1` remains the latest confirmed release.
+CI 107 passes managed verification, package/native consumers and publication.
+`0.3.0-dev.107.1` is the latest confirmed release; its complete artifact and
+descriptor are independently authenticated. This closes #246/#247 and the
+remaining #323 publication follow-up. The fresh installed-editor journey remains
+#249. A local catalog download exposed premature consumption of incomplete
+ValueTask I/O; the correction passes an independent deferred-stream regression
+and the actual authenticated artifact transfer.
 Read-only environment doctor #248's static CLI, verified tool delivery and standard
 VS Code onboarding surfaces pass review and local package proof. Explicit editor
 project inspection now adds evaluated target/tool identity and fresh evidence
 reuse. The real-project contract, 14 cache tests and 99 extension tests pass,
 including two corrected review races. Default checks preserve explicit unverified
 capabilities; the accepted issue is not yet complete. The
-[doctor plan](plans/environment-doctor.md) orders its remaining optional feed and
-native-prerequisite checks. Standalone trusted-project CLI parity passes 32 Tools
+[doctor plan](plans/environment-doctor.md) records its optional diagnostics.
+Windows native-prerequisite inspection passes focused contracts, a real installed
+toolchain observation and independent review; it leaves actual publication unverified.
+Feed configuration and anonymous metadata checks are integrated with the CLI and
+editor. Review corrected shared scratch storage, transitive adapter files leaking
+into static output, and stale output inclusion. SDK-declared payloads and required
+notices now pass real tool installation, the complete VSIX producer and 83 release
+contracts. Fifty Tools contracts, the focused adapter checks and 110 editor tests
+pass; final independent review has no findings. Publication of these additions
+remains pending, followed by the fresh installed-editor journey in #249.
+Standalone trusted-project CLI parity passes 32 Tools
 contracts and a real coherent development-server invocation; it remains separate
 from default static checks and does not claim release authentication or build readiness.
 

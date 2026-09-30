@@ -47,6 +47,24 @@ $doctorEntries = foreach ($name in $doctorFiles) {
 }
 $doctorVersion = Get-LuiAssemblyVersion ([IO.File]::ReadAllBytes((Join-Path $doctorDirectory 'Lucent.Tools.dll')))
 if ($doctorVersion -notmatch ('\+' + [regex]::Escape($sourceCommit) + '(\.|$)')) { throw 'Extension and doctor source commits differ.' }
+$nugetDoctorDirectory = Join-Path $doctorDirectory 'nuget'
+$nugetDoctorItems = @(Get-ChildItem -LiteralPath $nugetDoctorDirectory -Recurse -Force)
+if ((Get-Item -LiteralPath $nugetDoctorDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint -or @($nugetDoctorItems | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) {
+    throw 'NuGet doctor payload must not contain links.'
+}
+$nugetDoctorEntries = @($nugetDoctorItems | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
+    $name = [IO.Path]::GetRelativePath($nugetDoctorDirectory, $_.FullName).Replace('\', '/')
+    Assert-LuiRelativePath $name
+    if ($_.Length -le 0 -or ($_.Extension -notin @('.dll', '.json') -and -not $name.StartsWith('notices/', [StringComparison]::Ordinal))) { throw "Invalid NuGet doctor payload file: $name" }
+    @{ fileName = $name; bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant() }
+})
+if ($nugetDoctorEntries.Count -gt 128 -or ($nugetDoctorEntries | Measure-Object bytes -Sum).Sum -gt 128MB) { throw 'NuGet doctor payload exceeds its bound.' }
+foreach ($required in @('Lucent.Tools.NuGet.dll', 'Lucent.Tools.NuGet.deps.json', 'Lucent.Tools.NuGet.runtimeconfig.json')) {
+    if ($required -cnotin @($nugetDoctorEntries.fileName)) { throw "NuGet doctor payload omitted $required" }
+}
+Assert-LuiNuGetDoctorPayload @($nugetDoctorEntries.fileName) (Get-Content -LiteralPath (Join-Path $nugetDoctorDirectory 'Lucent.Tools.NuGet.deps.json') -Raw | ConvertFrom-Json -AsHashtable)
+$nugetDoctorVersion = Get-LuiAssemblyVersion ([IO.File]::ReadAllBytes((Join-Path $nugetDoctorDirectory 'Lucent.Tools.NuGet.dll')))
+if ($nugetDoctorVersion -notmatch ('\+' + [regex]::Escape($sourceCommit) + '(\.|$)')) { throw 'Extension and NuGet doctor source commits differ.' }
 $archive = Open-LuiArchive $serverArchive
 try {
     $inventory = Read-LuiArchiveJson $archive 'lucent-server-files.json'
@@ -103,6 +121,7 @@ try {
     $stagedManifest.lucentRelease.bundledServer = $bundle
     $stagedManifest.lucentCacheHelper = @{ schemaVersion = 1; sourceCommit = $sourceCommit; entryPoint = 'Lucent.Tooling.Cache.dll'; files = @($helperEntries) }
     $stagedManifest.lucentDoctor = @{ schemaVersion = 1; sourceCommit = $sourceCommit; entryPoint = 'Lucent.Tools.dll'; files = @($doctorEntries) }
+    $stagedManifest.lucentNuGetDoctor = @{ schemaVersion = 1; sourceCommit = $sourceCommit; entryPoint = 'Lucent.Tools.NuGet.dll'; files = @($nugetDoctorEntries) }
     $stagedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $stageRoot 'package.json') -Encoding utf8
     $serverStage = Join-Path $stageRoot 'server'
     [IO.Directory]::CreateDirectory($serverStage) | Out-Null
@@ -121,6 +140,12 @@ try {
     $doctorStage = Join-Path $stageRoot 'doctor'
     [IO.Directory]::CreateDirectory($doctorStage) | Out-Null
     foreach ($entry in $doctorEntries) { Copy-Item -LiteralPath (Join-Path $doctorDirectory $entry.fileName) -Destination (Join-Path $doctorStage $entry.fileName) }
+    $nugetDoctorStage = Join-Path $stageRoot 'nuget-doctor'
+    foreach ($entry in $nugetDoctorEntries) {
+        $destination = Join-Path $nugetDoctorStage $entry.fileName
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $nugetDoctorDirectory $entry.fileName) -Destination $destination
+    }
     Copy-Item (Join-Path $extensionRoot 'onboarding') (Join-Path $stageRoot 'onboarding') -Recurse
     Copy-Item (Join-Path $extensionRoot 'syntaxes') (Join-Path $stageRoot 'syntaxes') -Recurse
     Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stageRoot 'LICENSE')

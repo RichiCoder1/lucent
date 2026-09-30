@@ -1,0 +1,9 @@
+{
+  "nugetVersion": "7.9.0",
+  "nugetRepositoryCommit": "977537e19c6be57fead1411e6cf05f936bf1baf4",
+  "nugetLicense": "https://raw.githubusercontent.com/NuGet/NuGet.Client/977537e19c6be57fead1411e6cf05f936bf1baf4/LICENSE.txt",
+  "newtonsoftVersion": "13.0.3",
+  "pkcsVersion": "8.0.1",
+  "protectedDataVersion": "8.0.0",
+  "packageClosure": "packages.lock.json"
+}

@@ -27,6 +27,19 @@ it as **notChecked**. A successful requirements check does not establish a
 successful build, native publication or feed access. The same review/copy command
 previews this report without including project paths or raw failure messages.
 
+**Lucent: Check Windows Native Prerequisites** inspects the installed Visual Studio
+toolchain separately. It distinguishes observed C++/Windows SDK components from
+missing or unavailable discovery; it does not prove that NativeAOT publication works.
+
+**Lucent: Check NuGet Feed Configuration** asks for a package ID and exact version,
+then inspects effective source selection without network access. **Lucent: Check
+Anonymous Feed Access** adds an explicit, trusted-workspace metadata request. This
+request sends no stored credentials and does not restore packages. A successful
+anonymous observation does not prove private package access or future restore
+success. Both reports omit source names, URLs and credentials and use the same
+review/copy surface. Configuration inspection currently supports local Windows
+fixed drives; unsupported configuration is reported as unavailable.
+
 The **Lucent** status item shows the current setup state and applicable actions.
 **Lucent: Select Project** chooses an owning folder and `.csproj`, writes only that
 folder's project setting and restarts language services. Removing the owner folder

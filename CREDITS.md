@@ -75,6 +75,30 @@ or create component/route service scopes.
 
 ## Development tooling
 
+The optional Windows native-prerequisite doctor follows Microsoft's
+[NativeAOT prerequisites](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/)
+and [target toolchain guidance](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/cross-compile),
+consulted September 30, 2026. It queries the installed
+[vswhere](https://github.com/microsoft/vswhere) discovery tool using its documented
+[component filters](https://github.com/microsoft/vswhere/wiki/Examples). This is
+observation of Visual Studio installer registrations, not a bundled dependency or
+proof of a successful native publish. No source is copied.
+
+The optional environment-doctor feed adapter uses
+[NuGet.Configuration 7.9.0](https://www.nuget.org/packages/NuGet.Configuration/7.9.0)
+and [NuGet.Protocol 7.9.0](https://www.nuget.org/packages/NuGet.Protocol/7.9.0)
+from [NuGet.Client](https://github.com/NuGet/NuGet.Client), Apache-2.0, consulted
+September 30, 2026. Official configuration hierarchy, disabled-source and package
+mapping semantics remain NuGet-owned. The explicitly invoked adapter uses bounded,
+non-caching protocol observations; it does not restore packages, install credential
+plugins, or add NuGet dependencies to the static doctor runtime.
+The adapter's read-only configuration discovery follows the public filename and
+environment policies in NuGet.Client commit
+`977537e19c6be57fead1411e6cf05f936bf1baf4`. On Windows, it holds existing inputs open
+without write/delete sharing before passing their fixed ordered paths to NuGet's
+immutable parser. This avoids the default loader's create-if-missing behavior;
+the adapter owns discovery and freshness, while NuGet owns configuration merging.
+
 Consulted September 14, 2026 for the [.lui source-style design](docs/plans/lui-style-and-tooling.md):
 [Prettier's document model and Vue/HTML/JSX printers](https://github.com/prettier/prettier/tree/884c2d6a7df1e97523f494dd4908f55a23e7df47)
 inform grouped line breaking, attribute layout and comment/whitespace boundaries.

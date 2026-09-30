@@ -35,6 +35,7 @@ $managedProjects = @(
     'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj',
     'tests/Lucent.Tooling.Cache.Tests/Lucent.Tooling.Cache.Tests.csproj',
     'tests/Lucent.Tools.Tests/Lucent.Tools.Tests.csproj'
+    'tests/Lucent.Tools.NuGet.Tests/Lucent.Tools.NuGet.Tests.csproj'
 )
 
 function Invoke-Dotnet([string[]] $Arguments) {
