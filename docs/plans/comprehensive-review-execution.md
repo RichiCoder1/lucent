@@ -101,6 +101,13 @@ package hashes remained unchanged. Evidence is under
 `artifacts/review321-package-evidence`. No editor restart or desktop check is
 claimed; public CI delivery is tracked separately.
 
+CI 92 passed the compiler, generator and tooling suites but failed one older
+editor assertion that chose an arbitrary overloaded imported component. That
+failure was independently reproduced against the pre-performance binaries.
+`9fde6b46` now asserts rejection of ambiguity and retains exact navigation for an
+unambiguous imported component beside malformed C#. Its five affected protocol
+checks pass; the next public CI run must verify the corrected complete suite.
+
 ### Notes integrity — #11
 
 `a3a51e8` corrects coherent clean-editor refresh and retains a dirty editor's
@@ -121,3 +128,57 @@ NativeAOT publication passed; executable SHA-256 is
 The correction and storage contract are pushed as Notes `85660119`; its CI run
 `36649087309` passed.
 Evidence is under `artifacts/review-followups`; no desktop walkthrough is claimed.
+
+### Notes editing and maintenance — #12
+
+Notes `f61ae316` keeps fields editable during Save and Backup while serializing
+other commands. Closing still drains the newly observed draft. Maintenance uses
+an existing-database-only open path, checks the schema before migration, and
+reports expected failures without creating a replacement database or crash
+directory. Six pre-fix failures were reproduced. Workspace/maintenance checks
+pass 56/56, storage 31/31, and twelve NativeAOT console cases pass. CI run
+`36650745851` passed. The exact console evidence is under Notes
+`artifacts/notes12-console/1d327431e53e44a3bca91d63221c4c7a`.
+
+The owner resumed general work while retaining the gaming pause on UI/focus
+tests. Automatic approval review also declined the proposed offscreen focus/input
+probe under that pause. Ctrl+S/input continuity remains unverified and #12 stays
+open for that focused check; no native input pass is claimed.
+
+### Measured repeated work — #324
+
+`9fde6b46` avoids repeated full-suffix parsing and creates protocol line indexes
+once per request. It adds no persistent cache or freshness shortcut. Fixed
+15-sample comparisons, with three warmups and reversed execution order, reduce
+parser allocations from 45,660,114 to 1,651,072 bytes for 400 markup elements,
+101,383,765 to 2,467,155 for 400 expression islands, and 6,025,842 to 460,157 for
+ComponentDetail. Symbol-request medians were 55–58 ms before and 10–11 ms after.
+Compiler 148/148 and the five affected protocol checks pass. Measurements and
+source hashes are retained under `artifacts/review324-*`.
+
+Font fingerprints now hash the font bytes directly instead of allocating their
+hexadecimal and UTF-8 representations first. In a fixed first-use Segoe UI shaping
+probe, allocations fall from 6,771,296 to 1,003,736 bytes. Both comparison orders
+produce identical glyph geometry and rendered bitmap hashes; the same Core binary
+is used throughout. The opaque fingerprint changes intentionally; there is no
+persisted-format or cross-version fingerprint compatibility contract. Renderer
+checks pass 103 cases with three existing opt-in skips, and its build is warning
+clean. Evidence is under `artifacts/review324-font`.
+
+These timings are characterization on an active machine, not frame-budget proof.
+No threshold was relaxed. The existing one-of-32-paragraph edit reshapes only the
+edited paragraph and reads zero additional font bytes; a larger shaping redesign
+is deferred. Source-map indexing, named/editor graph preparation, post-presentation
+projection, UIA listener admission and Notes filtering still need their scoped
+retain/defer decisions before #324 can close.
+
+### Navigation restoration and activation — #205
+
+The [implementation plan](navigation-restoration-activation.md) separates portable
+restoration from Windows activation. #221 is implementing the active-location
+codec and guarded startup replay first; journal/interaction state and application
+persistence follow. #222's optional Foundation/C#/WinRT dependency probe has
+passed locked NativeAOT publication and hidden-process redirection without a
+window. It identified and now documents the requirement to register and release
+AppInstance ownership on the same native thread. Actual OS protocol registration,
+MSIX delivery, application integration and foreground behavior remain unverified.

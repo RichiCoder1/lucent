@@ -1829,7 +1829,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             throw new InvalidOperationException(
                 "Typeface OpenStream produced no fingerprintable bytes."
             );
-        fingerprint = Hash(Convert.ToHexString(data.ToArray()));
+        fingerprint = Convert.ToHexStringLower(SHA256.HashData(data.ToArray()));
         FingerprintByteCount += data.Size;
         _faceFingerprints.Add(key, fingerprint);
         return fingerprint;

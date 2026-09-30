@@ -9,11 +9,21 @@ performance batch remains complete and its evidence is preserved.
 The owner is gaming: all visible UI/focus-taking tests are paused until explicit
 resume. Noninteractive code, build, test, review and push work may continue.
 
-Start with Notes #11 (revision/recovery/failure integrity), Lucent #320
-(navigation lifecycle), #321 (authoring), #322 (SVG/UIA), Notes #12
-(editing/maintenance), #323 (presentation/ergonomics), and #324 (measured work
-reduction). Notes' coherent editor-refresh correction is pushed as `a3a51e8`;
-replayed-write and multiple-failure corrections are being verified separately.
+Notes #11 (revision/recovery/failure integrity), Lucent #320 (navigation lifecycle)
+and #322 (SVG/UIA) are delivered and closed. Notes #12 source and CI are complete;
+its focused input/focus check remains deferred. #321 authoring has frozen package
+proof; CI 92's one stale ambiguity assertion is corrected locally in `9fde6b46`.
+#323 presentation/ergonomics and #325 default-content reader binding have passing
+focused checks and are completing source delivery. #324 has measured parser,
+protocol and font allocation wins, with remaining leads still under evaluation.
+The detailed execution record owns exact counts and evidence boundaries.
+
+Portable restoration #221 has started with an active-location codec and guarded
+startup replay. The optional Windows activation dependency probe for #222 passes
+console-only NativeAOT/redirection; OS registration and foreground tests remain
+deferred. Follow `docs/plans/navigation-restoration-activation.md`, including the
+AppInstance owner-thread cleanup requirement. Do not mistake the probe for a
+completed activation adapter.
 After review corrections, continue the existing roadmap with issue dependencies
 and feasibility decisions intact. This supersedes the older batch-specific
 instruction not to start #205. Keep advisory/security/Sandbox drafts separate.
