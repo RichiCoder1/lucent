@@ -3,6 +3,7 @@
 const childProcess = require("child_process");
 const path = require("path");
 const vscode = require("vscode");
+const clientRelease = require("./package.json").lucentRelease;
 
 const semanticTokensLegend = ["keyword", "type", "property", "enumMember"];
 const crossLanguageSelector = [{ language: "lui" }, { language: "csharp", scheme: "file" }];
@@ -205,28 +206,127 @@ class Rpc {
     }
 }
 
-async function activate(context) {
-    const projectSetting = vscode.workspace.getConfiguration("lucentLui").get("projectPath");
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const projectPath = projectSetting ? (workspaceRoot ? path.resolve(workspaceRoot, projectSetting) : path.resolve(projectSetting)) : undefined;
-    const configured = vscode.workspace.getConfiguration("lucentLui").get("serverPath");
+function identifyServer(server) {
+    return new Promise((resolve, reject) => {
+        childProcess.execFile("dotnet", [server, "--identity"], {
+            timeout: 10000,
+            maxBuffer: 64 * 1024,
+            windowsHide: true
+        }, (error, output) => {
+            if (error) return reject(new Error(`Lucent server identity check failed: ${error.message}`));
+            try {
+                const identity = JSON.parse(output);
+                const protocol = identity.protocol;
+                const accepted = clientRelease.protocol;
+                const language = identity.language;
+                if (identity.schemaVersion !== 1 || !/^[0-9a-f]{40}$/.test(identity.sourceCommit)
+                    || !/^[0-9a-f]{64}$/.test(identity.server?.sha256)
+                    || !/^[0-9a-f]{64}$/.test(identity.compiler?.sha256)
+                    || language?.id !== clientRelease.language.id
+                    || language.version !== clientRelease.language.version
+                    || language.featureLevel !== clientRelease.language.featureLevel
+                    || protocol?.id !== accepted.id || !Number.isInteger(protocol.major)
+                    || !Number.isInteger(protocol.minor) || protocol.major !== accepted.minimum.major
+                    || protocol.minor < accepted.minimum.minor || protocol.minor > accepted.maximumInclusive.minor) {
+                    throw new Error("The server identity or protocol is incompatible with this extension.");
+                }
+                resolve(identity);
+            } catch (failure) { reject(failure); }
+        });
+    });
+}
+
+async function selectProject() {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    if (folders.some(folder => folder.uri.scheme && folder.uri.scheme !== "file")) {
+        throw new Error("Lucent project evaluation requires a file-based workspace on the extension host.");
+    }
+    const selected = folders.length <= 1 ? folders[0] : await vscode.window.showQuickPick(
+        folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })),
+        { placeHolder: "Choose the workspace folder containing the Lucent project" }
+    );
+    if (folders.length > 1 && !selected) return undefined;
+    const folder = selected?.folder ?? selected;
+    const projectSetting = vscode.workspace.getConfiguration("lucentLui", folder?.uri).get("projectPath");
+    if (!projectSetting) return { folder, projectPath: undefined };
+    if (!folder) throw new Error("Select a workspace folder before setting a Lucent project path.");
+    if (path.isAbsolute(projectSetting)) {
+        const relative = path.relative(folder.uri.fsPath, projectSetting);
+        if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+            throw new Error("The selected Lucent project is outside its workspace folder.");
+        }
+        return { folder, projectPath: projectSetting };
+    }
+    const projectPath = path.resolve(folder.uri.fsPath, projectSetting);
+    const relative = path.relative(folder.uri.fsPath, projectPath);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error("The selected Lucent project path escapes its workspace folder.");
+    }
+    return { folder, projectPath };
+}
+
+async function activateTrusted(isActive, onStarted) {
+    if (!vscode.workspace.isTrusted || !isActive()) return;
+    let selection;
+    try { selection = await selectProject(); }
+    catch (error) {
+        vscode.window.showErrorMessage(error.message);
+        return;
+    }
+    if (!selection || !isActive()) return;
+    const { folder, projectPath } = selection;
+    const configured = vscode.workspace.getConfiguration("lucentLui", folder?.uri).get("serverPath");
     if (!configured) {
         vscode.window.showErrorMessage("Set lucentLui.serverPath to Lucent.Lui.LanguageServer.dll.");
         return;
     }
+    if (!path.isAbsolute(configured)) {
+        vscode.window.showErrorMessage("lucentLui.serverPath must be an absolute path on the workspace host.");
+        return;
+    }
+    const server = configured;
+    let identity;
+    try { identity = await identifyServer(server); }
+    catch (error) {
+        vscode.window.showErrorMessage(error.message);
+        return;
+    }
+    if (!vscode.workspace.isTrusted || !isActive()) return;
     const log = vscode.window.createOutputChannel("Lucent LUI", { log: true });
-    context.subscriptions.push(log);
     log.info(`Starting language server: ${configured}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
-    const server = path.resolve(configured);
+    log.info(`Server reports source ${identity.sourceCommit}, protocol ${identity.protocol.major}.${identity.protocol.minor}.`);
     const process = childProcess.spawn("dotnet", [server], {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true
     });
-    process.stderr.on("data", chunk => log.error(chunk.toString("utf8").trimEnd()));
+    const logStderr = chunk => log.error(chunk.toString("utf8").trimEnd());
+    process.stderr.on("data", logStderr);
     const rpc = new Rpc(process, log);
+    const acceptsUri = value => {
+        if (!folder || !vscode.workspace.getWorkspaceFolder) return true;
+        const uri = vscode.Uri.parse(value);
+        if (uri.scheme !== "file") return true;
+        const owner = vscode.workspace.getWorkspaceFolder(uri);
+        return owner?.uri.toString() === folder.uri.toString();
+    };
+    const request = rpc.request.bind(rpc);
+    rpc.request = (method, params) => params?.textDocument?.uri && !acceptsUri(params.textDocument.uri)
+        ? Promise.resolve(null) : request(method, params);
+    const notify = rpc.notify.bind(rpc);
+    rpc.notify = (method, params) => {
+        if (params?.textDocument?.uri && !acceptsUri(params.textDocument.uri)) return;
+        notify(method, params);
+    };
     const lintActions = new WeakMap();
     const subscriptions = [];
     let stopped = false;
+    let initialized = false;
+    let logDisposed = false;
+    const closeLog = () => {
+        if (logDisposed) return;
+        logDisposed = true;
+        log.dispose();
+    };
     const diagnostics = vscode.languages.createDiagnosticCollection("lucent-lui");
     rpc.onNotification("textDocument/publishDiagnostics", message => {
         const uri = vscode.Uri.parse(message.uri);
@@ -257,14 +357,28 @@ async function activate(context) {
         if (stopped) return;
         stopped = true;
         for (const subscription of subscriptions.splice(0).reverse()) subscription.dispose();
+        rpc.notifications.clear();
+        process.stderr.off("data", logStderr);
         if (rpc.failure) {
             if (process.exitCode === null && process.pid !== undefined) process.kill();
+            closeLog();
             return;
         }
-        const timeout = setTimeout(() => process.exitCode === null && process.kill(), 1000);
-        process.once("exit", () => clearTimeout(timeout));
+        if (!initialized) {
+            rpc.fail(new Error("Lucent language server startup was canceled."));
+            if (process.exitCode === null && process.pid !== undefined) process.kill();
+            closeLog();
+            return;
+        }
+        if (process.exitCode !== null) { closeLog(); return; }
+        const timeout = setTimeout(() => {
+            if (process.exitCode === null) process.kill();
+            closeLog();
+        }, 1000);
+        process.once("exit", () => { clearTimeout(timeout); closeLog(); });
         rpc.request("shutdown", {}).then(() => rpc.notify("exit", {})).catch(() => {});
     } };
+    onStarted(stop);
     const reportFailure = error => {
         log.error(error.message);
         return vscode.window.showErrorMessage(
@@ -273,16 +387,16 @@ async function activate(context) {
     };
     rpc.onFailure = error => {
         if (stopped) return;
-        stop.dispose();
         reportFailure(error);
+        stop.dispose();
     };
-    context.subscriptions.push(stop);
     subscriptions.push(diagnostics);
     const notifyWatchedFile = (uri, type) => rpc.notify("workspace/didChangeWatchedFiles", {
         changes: [{ uri: uri.toString(), type }]
     });
     const watchedDirectories = new Set();
     const watchProjectDirectories = directories => {
+        if (stopped || !isActive()) return;
         for (const projectDirectory of directories) {
             if (watchedDirectories.has(projectDirectory)) continue;
             watchedDirectories.add(projectDirectory);
@@ -311,17 +425,21 @@ async function activate(context) {
     rpc.onNotification("lucent/projectGraph", message => watchProjectDirectories(message.directories));
     if (projectPath) watchProjectDirectories([path.dirname(projectPath)]);
     const projectUri = projectPath ? vscode.Uri.file(projectPath).toString() : undefined;
-    try { await rpc.request("initialize", { initializationOptions: { projectUri } }); }
+    try {
+        if (!vscode.workspace.isTrusted) throw new Error("Workspace Trust is required for Lucent project evaluation.");
+        await rpc.request("initialize", { initializationOptions: { projectUri } });
+        initialized = true;
+    }
     catch (error) {
-        if (!stopped) { stop.dispose(); reportFailure(error); }
+        if (!stopped) { reportFailure(error); stop.dispose(); }
         throw error;
     }
-    if (stopped) return;
+    if (stopped || !isActive()) { stop.dispose(); return; }
     rpc.notify("initialized", {});
     const completionData = new WeakMap();
     const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
-    const isSynchronizedDocument = document => isLucentDocument(document)
-        || document.uri.scheme === "file" && path.basename(document.uri.fsPath).toLowerCase() === ".editorconfig";
+    const isSynchronizedDocument = document => acceptsUri(document.uri.toString()) && (isLucentDocument(document)
+        || document.uri.scheme === "file" && path.basename(document.uri.fsPath).toLowerCase() === ".editorconfig");
     const rename = async (document, position, newName) => toWorkspaceEdit(
         await rpc.request("textDocument/rename", {
             textDocument: { uri: document.uri.toString() }, position, newName
@@ -509,7 +627,7 @@ async function activate(context) {
                     item.children = symbol.children.map(convert);
                     return item;
                 };
-                return result.map(convert);
+                return (result ?? []).map(convert);
             }
         }),
         vscode.languages.registerDocumentSemanticTokensProvider("lui", {
@@ -521,9 +639,47 @@ async function activate(context) {
             }
         }, new vscode.SemanticTokensLegend(semanticTokensLegend, []))
     );
+    return stop;
+}
+
+async function activate(context) {
+    let currentStop;
+    let disposed = false;
+    let generation = 0;
+    const restart = () => {
+        const ticket = ++generation;
+        currentStop?.dispose();
+        currentStop = undefined;
+        if (disposed) return Promise.resolve();
+        if (!vscode.workspace.isTrusted) {
+            vscode.window.showErrorMessage("Trust this workspace to start Lucent language services.");
+            return Promise.resolve();
+        }
+        const isCurrent = () => !disposed && ticket === generation;
+        return activateTrusted(isCurrent, stop => {
+            if (isCurrent()) currentStop = stop;
+            else stop.dispose();
+        }).then(stop => {
+            if (isCurrent()) currentStop = stop;
+            else stop?.dispose();
+        }, error => {
+            if (isCurrent()) throw error;
+        });
+    };
+    context.subscriptions.push({ dispose: () => { disposed = true; generation++; currentStop?.dispose(); } });
+    context.subscriptions.push(vscode.commands.registerCommand("lucentLui.restartLanguageServices", restart));
+    if (!vscode.workspace.isTrusted) {
+        context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => {
+            void restart().catch(error => vscode.window.showErrorMessage(error.message));
+        }));
+        return;
+    }
+    return restart();
 }
 
 exports.activate = activate;
+exports.identifyServer = identifyServer;
+exports.selectProject = selectProject;
 exports.toVsCodeCompletionKind = toVsCodeCompletionKind;
 exports.toVsCodeDiagnosticSeverity = toVsCodeDiagnosticSeverity;
 exports.toVsCodeSymbolKind = toVsCodeSymbolKind;

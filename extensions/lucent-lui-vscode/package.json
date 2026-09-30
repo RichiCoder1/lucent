@@ -5,6 +5,7 @@
   "publisher": "lucent",
   "lucentRelease": {
     "schemaVersion": 1,
+    "language": { "id": "lui", "version": "preview", "featureLevel": "preview-1" },
     "protocol": { "id": "lucent-lui", "minimum": { "major": 1, "minor": 0 }, "maximumInclusive": { "major": 1, "minor": 0 } },
     "serverDelivery": "external-path"
   },
@@ -21,6 +22,15 @@
   "keywords": ["lucent", "lui", "language server", "syntax highlighting"],
   "engines": { "vscode": "^1.95.0" },
   "main": "./extension.js",
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Syntax highlighting remains available; project evaluation and the language server require a trusted workspace.",
+      "restrictedConfigurations": ["lucentLui.serverPath", "lucentLui.projectPath"]
+    },
+    "virtualWorkspaces": false
+  },
   "files": [
     "extension.js",
     "language-configuration.json",
@@ -44,6 +54,9 @@
     "commands": [{
       "command": "lucentLui.rename",
       "title": "Lucent: Rename Cross-Language Symbol"
+    }, {
+      "command": "lucentLui.restartLanguageServices",
+      "title": "Lucent: Restart Language Services"
     }],
     "configuration": {
       "title": "Lucent .lui",
@@ -51,9 +64,9 @@
         "lucentLui.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the separately installed Lucent.Lui.LanguageServer.dll."
+          "description": "Advanced override: path to a trusted Lucent.Lui.LanguageServer.dll on the workspace host. The server identity is checked before project evaluation."
         }
-        ,"lucentLui.projectPath": { "type": "string", "default": "", "description": "Evaluated .csproj, absolute or relative to the first workspace folder." }
+        ,"lucentLui.projectPath": { "type": "string", "default": "", "description": "Evaluated .csproj, absolute or relative to the selected workspace folder." }
       }
     }
   }

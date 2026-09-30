@@ -97,6 +97,10 @@ test("raw attribute strings stay inside tags and do not promise C# escapes", () 
 test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
     assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);
+    assert.deepEqual(manifest.extensionKind, ["workspace"]);
+    assert.equal(manifest.capabilities.untrustedWorkspaces.supported, "limited");
+    assert.deepEqual(manifest.capabilities.untrustedWorkspaces.restrictedConfigurations,
+        ["lucentLui.serverPath", "lucentLui.projectPath"]);
     assert.deepEqual(JSON.parse(JSON.stringify(loaded.exports.crossLanguageSelector)), [
         { language: "lui" }, { language: "csharp", scheme: "file" }
     ]);
@@ -177,9 +181,10 @@ test("activation preserves current diagnostics and clears closed documents", asy
             },
             registerSignatureHelpProvider: disposable
         },
-        commands: { registerCommand: (_name, command) => { lucentRename = command; return disposable(); } },
+        commands: { registerCommand: (name, command) => { if (name === "lucentLui.rename") lucentRename = command; return disposable(); } },
         window: { createOutputChannel: () => ({ info() {}, warn() {}, error() {}, dispose() {} }), showErrorMessage() {}, showInputBox: async () => "Renamed" },
         workspace: {
+            isTrusted: true,
             applyEdit: async () => true,
             createFileSystemWatcher: pattern => {
                 const watcher = {
@@ -193,7 +198,7 @@ test("activation preserves current diagnostics and clears closed documents", asy
                 return watcher;
             },
             workspaceFolders: [{ uri: { fsPath: path.resolve("workspace") } }],
-            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
+            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : path.resolve("server.dll") }),
             onDidChangeTextDocument: callback => { onDidChangeTextDocument = callback; return disposable(); },
             onDidCloseTextDocument: callback => { onDidCloseTextDocument = callback; return disposable(); },
             onDidOpenTextDocument: callback => { onDidOpenTextDocument = callback; return disposable(); },
@@ -290,7 +295,14 @@ test("activation preserves current diagnostics and clears closed documents", asy
 
 function disposable() { return { dispose() {} }; }
 
-function loadExtension(vscode, process, spawned) {
+function loadExtension(vscode, process, spawned, identityOutput = {
+    schemaVersion: 1,
+    sourceCommit: "1".repeat(40),
+    server: { sha256: "2".repeat(64) },
+    compiler: { sha256: "3".repeat(64) },
+    language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+    protocol: { id: "lucent-lui", major: 1, minor: 0 }
+}, identified) {
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "extension.js"), "utf8"), {
         Buffer,
@@ -299,7 +311,12 @@ function loadExtension(vscode, process, spawned) {
         exports: module.exports,
         module,
         require: name => name === "vscode" ? vscode : name === "child_process" ? {
-            spawn: (_command, _args, options) => { spawned?.(options); return process; }
+            execFile: (_command, _args, _options, callback) => {
+                identified?.();
+                return typeof identityOutput === "function"
+                    ? identityOutput(callback) : callback(null, JSON.stringify(identityOutput));
+            },
+            spawn: (_command, _args, options) => { spawned?.(options); return typeof process === "function" ? process() : process; }
         } : require(name),
         setTimeout
     }, { filename: "extension.js" });
@@ -345,54 +362,230 @@ class MockProcess extends EventEmitter {
     }
 }
 
-function failureHarness(process) {
+function failureHarness(process, { trusted = true, identity, processes = [process], folders, selectedFolder = 0 } = {}) {
     let completionProvider;
     let codeActionsProvider;
+    let symbolProvider;
     const logs = [];
     const resources = [];
     const messages = [];
     let generated;
+    let onGrantTrust;
+    let onOpen;
+    let spawnCount = 0;
+    let identityChecks = 0;
+    let restart;
     const own = () => {
         const resource = { disposed: 0, dispose() { this.disposed++; } };
         resources.push(resource);
         return resource;
     };
     const workspace = {
-        workspaceFolders: [{ uri: { fsPath: path.resolve("workspace") } }],
-            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
+        isTrusted: trusted,
+        onDidGrantWorkspaceTrust: callback => { onGrantTrust = callback; return own(); },
+        workspaceFolders: folders ?? [{ uri: { fsPath: path.resolve("workspace") } }],
+            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : path.resolve("server.dll") }),
         textDocuments: [],
         createFileSystemWatcher: () => Object.assign(own(), {
             onDidCreate: own, onDidChange: own, onDidDelete: own
         }),
-        onDidOpenTextDocument: own,
+        onDidOpenTextDocument: callback => { onOpen = callback; return own(); },
         onDidChangeTextDocument: own,
         onDidCloseTextDocument: own,
         registerTextDocumentContentProvider: (_scheme, provider) => { generated = provider; return own(); }
     };
     const vscode = {
         workspace,
-        window: { createOutputChannel: () => ({ info: text => logs.push(text), warn: text => logs.push(text), error: text => logs.push(text), dispose() {} }), showErrorMessage: message => messages.push(message) },
-        Uri: { file: value => ({ toString: () => value }), parse: value => ({ toString: () => value }) },
+        window: { createOutputChannel: () => {
+            const channel = own();
+            const write = text => {
+                if (channel.disposed) throw new Error("A disposed output channel was used.");
+                logs.push(text);
+            };
+            return Object.assign(channel, { info: write, warn: write, error: write });
+        }, showErrorMessage: message => messages.push(message), showQuickPick: async items => items[selectedFolder] },
+        Uri: { file: value => ({ toString: () => value }), parse: value => ({ scheme: value.startsWith("file:") ? "file" : undefined, toString: () => value }) },
         Range: class { constructor(...values) { this.values = values; } },
         WorkspaceEdit: class { constructor() { this.changes = []; } replace(uri, range, text) { this.changes.push({ uri, range, text }); } },
         CodeAction: class { constructor(title, kind) { this.title = title; this.kind = kind; } },
         CodeActionKind: { QuickFix: "quickfix" },
         RelativePattern: class {},
         SemanticTokensLegend: class {},
-        commands: { registerCommand: own },
+        commands: { registerCommand: (name, command) => { if (name === "lucentLui.restartLanguageServices") restart = command; return { dispose() {} }; } },
         CompletionItem: class { constructor(label, kind) { this.label = label; this.kind = kind; } },
         CompletionItemKind: { Field: "field" },
         MarkdownString: class { appendText(text) { this.value = text; } },
         languages: new Proxy({}, { get: (_target, key) => key === "createDiagnosticCollection"
             ? () => Object.assign(own(), { delete() {} }) : key === "registerCompletionItemProvider"
                 ? (_selector, provider) => { completionProvider = provider; return own(); } : key === "registerCodeActionsProvider"
-                    ? (_selector, provider) => { codeActionsProvider = provider; return own(); } : own })
+                    ? (_selector, provider) => { codeActionsProvider = provider; return own(); } : key === "registerDocumentSymbolProvider"
+                        ? (_selector, provider) => { symbolProvider = provider; return own(); } : own })
     };
     const context = { subscriptions: [] };
-    const extension = loadExtension(vscode, process);
-    return { context, messages, resources, logs, workspace, codeActions: () => codeActionsProvider, completion: () => completionProvider, activate: () => extension.activate(context),
+    let started;
+    const startedPromise = new Promise(resolve => { started = resolve; });
+    let nextProcess = 0;
+    const extension = loadExtension(vscode, () => processes[Math.min(nextProcess++, processes.length - 1)], () => { spawnCount++; started(); }, identity, () => { identityChecks++; });
+    return { context, messages, resources, logs, workspace, started: startedPromise, get spawnCount() { return spawnCount; }, get identityChecks() { return identityChecks; }, grantTrust: () => { workspace.isTrusted = true; onGrantTrust(); }, restart: () => restart(), open: document => onOpen(document), codeActions: () => codeActionsProvider, completion: () => completionProvider, symbols: () => symbolProvider, activate: () => extension.activate(context),
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
+
+test("Restricted Mode leaves project evaluation and server process untouched until trust is granted", async () => {
+    const server = new MockProcess();
+    const harness = failureHarness(server, { trusted: false });
+    await harness.activate();
+    assert.equal(harness.spawnCount, 0);
+    assert.equal(server.lastRequest, undefined);
+    assert.equal(harness.resources.length, 1);
+    await harness.restart();
+    assert.equal(harness.spawnCount, 0);
+    assert.match(harness.messages[0], /Trust this workspace/);
+    harness.grantTrust();
+    await harness.started;
+    assert.equal(harness.spawnCount, 1);
+    assert.equal(server.lastRequest.method, "initialize");
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("incompatible server identity prevents project initialization", async () => {
+    const server = new MockProcess();
+    const harness = failureHarness(server, { identity: {
+        schemaVersion: 1, sourceCommit: "1".repeat(40),
+        server: { sha256: "2".repeat(64) }, compiler: { sha256: "3".repeat(64) },
+        language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+        protocol: { id: "lucent-lui", major: 2, minor: 0 }
+    } });
+    await harness.activate();
+    assert.equal(harness.spawnCount, 0);
+    assert.equal(server.lastRequest, undefined);
+    assert.match(harness.messages[0], /incompatible/);
+});
+
+test("missing protocol minor and incompatible language fail the project-free identity check", async () => {
+    for (const change of [
+        identity => { delete identity.protocol.minor; },
+        identity => { identity.language.featureLevel = "future"; }
+    ]) {
+        const identity = {
+            schemaVersion: 1, sourceCommit: "1".repeat(40),
+            server: { sha256: "2".repeat(64) }, compiler: { sha256: "3".repeat(64) },
+            language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+            protocol: { id: "lucent-lui", major: 1, minor: 0 }
+        };
+        change(identity);
+        const harness = failureHarness(new MockProcess(), { identity });
+        await harness.activate();
+        assert.equal(harness.spawnCount, 0);
+        assert.match(harness.messages[0], /incompatible/);
+    }
+});
+
+test("explicit restart disposes the old server's registrations before starting another", async () => {
+    const first = new MockProcess();
+    const second = new MockProcess();
+    const harness = failureHarness(first, { processes: [first, second] });
+    await harness.activate();
+    const firstResources = [...harness.resources];
+    assert.equal(harness.spawnCount, 1);
+    await harness.restart();
+    assert.equal(harness.spawnCount, 2);
+    assert.ok(second.notifications.some(notification => notification.method === "initialized"));
+    const resourcesAfterRestart = harness.resources.length;
+    first.send({ jsonrpc: "2.0", method: "lucent/projectGraph", params: { directories: ["late-project"] } });
+    assert.equal(harness.resources.length, resourcesAfterRestart);
+    assert.ok(firstResources.some(resource => resource.disposed === 0));
+    first.emit("exit", 0, null);
+    assert.ok(firstResources.every(resource => resource.disposed === 1));
+    assert.ok(harness.resources.slice(firstResources.length).some(resource => resource.disposed === 0));
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    second.emit("exit", 0, null);
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+});
+
+test("restart cancels a pending initialize without waiting for its reply", async () => {
+    const first = new MockProcess();
+    first.holdRequests = new Set(["initialize"]);
+    const second = new MockProcess();
+    const harness = failureHarness(first, { processes: [first, second] });
+    const initialActivation = harness.activate();
+    await harness.started;
+    assert.equal(first.lastRequest.method, "initialize");
+    await Promise.race([
+        harness.restart(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Restart waited for the old initialize.")), 250))
+    ]);
+    await initialActivation;
+    assert.equal(harness.spawnCount, 2);
+    assert.equal(first.exitCode, 0);
+    assert.ok(second.notifications.some(notification => notification.method === "initialized"));
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    second.emit("exit", 0, null);
+});
+
+test("canceling multi-root selection aborts before identity check or process spawn", async () => {
+    const folders = ["first", "second"].map(name => ({ name, uri: {
+        scheme: "file", fsPath: path.resolve(name), toString: () => `file:///${name}`
+    } }));
+    const harness = failureHarness(new MockProcess(), { folders, selectedFolder: -1 });
+    await harness.activate();
+    assert.equal(harness.identityChecks, 0);
+    assert.equal(harness.spawnCount, 0);
+    assert.deepEqual(harness.messages, []);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("deactivation during the identity check cannot spawn a late server", async () => {
+    let completeIdentity;
+    const harness = failureHarness(new MockProcess(), { identity: callback => { completeIdentity = callback; } });
+    const activation = harness.activate();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(typeof completeIdentity, "function");
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    completeIdentity(null, JSON.stringify({
+        schemaVersion: 1, sourceCommit: "1".repeat(40),
+        server: { sha256: "2".repeat(64) }, compiler: { sha256: "3".repeat(64) },
+        language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+        protocol: { id: "lucent-lui", major: 1, minor: 0 }
+    }));
+    await activation;
+    assert.equal(harness.spawnCount, 0);
+});
+
+test("multi-root project selection uses the selected workspace host folder", async () => {
+    const first = path.resolve("workspace-one");
+    const second = path.resolve("workspace-two");
+    const folders = [first, second].map((fsPath, index) => ({ name: `Folder ${index + 1}`, uri: { scheme: "file", fsPath } }));
+    const vscode = {
+        workspace: {
+            workspaceFolders: folders,
+            getConfiguration: (_section, resource) => ({ get: () => resource?.fsPath === second
+                ? "app/App.csproj" : "wrong/Wrong.csproj" })
+        },
+        window: { showQuickPick: async items => items[1] }
+    };
+    const extension = loadExtension(vscode, new MockProcess());
+    assert.equal((await extension.selectProject()).projectPath, path.join(second, "app", "App.csproj"));
+});
+
+test("selected workspace project excludes document content from another root", async () => {
+    const first = { name: "First", uri: { scheme: "file", fsPath: path.resolve("first"), toString: () => "file:///first" } };
+    const second = { name: "Second", uri: { scheme: "file", fsPath: path.resolve("second"), toString: () => "file:///second" } };
+    const server = new MockProcess();
+    const harness = failureHarness(server, { folders: [first, second], selectedFolder: 1 });
+    harness.workspace.getConfiguration = (_section, resource) => ({ get: key => key === "projectPath"
+        ? resource === second.uri ? "host/Host.csproj" : "wrong/Wrong.csproj"
+        : path.resolve("server.dll") });
+    harness.workspace.getWorkspaceFolder = uri => uri.toString().startsWith("file:///second/") ? second : first;
+    await harness.activate();
+    const document = (uri, text) => ({ uri: { toString: () => uri }, languageId: "lui", version: 1, getText: () => text });
+    harness.open(document("file:///first/Private.lui", "private content"));
+    harness.open(document("file:///second/Public.lui", "selected content"));
+    assert.equal((await harness.symbols().provideDocumentSymbols(document("file:///first/Private.lui", "private content"))).length, 0);
+    const opens = server.notifications.filter(notification => notification.method === "textDocument/didOpen");
+    assert.deepEqual(opens.map(message => message.params.textDocument.text), ["selected content"]);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    server.emit("exit", 0, null);
+});
 
 test("lint actions resolve current edits and discard previously resolved or cancelled edits", async () => {
     const process = new MockProcess();
@@ -436,6 +629,7 @@ test("missing dotnet rejects activation, reports setup guidance and disposes wat
     process.holdRequests = new Set(["initialize"]);
     const harness = failureHarness(process);
     const activation = harness.activate();
+    await harness.started;
     process.emit("error", new Error("spawn dotnet ENOENT"));
     await assert.rejects(activation, /ENOENT/);
     assert.equal(harness.messages.length, 1);
@@ -452,6 +646,7 @@ test("server startup exit is reported separately from process launch failure", a
     process.holdRequests = new Set(["initialize"]);
     const harness = failureHarness(process);
     const activation = harness.activate();
+    await harness.started;
     process.exitCode = 1;
     process.emit("exit", 1, null);
     await assert.rejects(activation, /exited.*code 1/);
@@ -481,6 +676,7 @@ test("failure immediately after initialize cannot register disposed providers", 
     const process = new MockProcess();
     const harness = failureHarness(process);
     const activation = harness.activate();
+    await harness.started;
     process.emit("error", new Error("early runtime failure"));
     await activation;
     assert.equal(harness.messages.length, 1);

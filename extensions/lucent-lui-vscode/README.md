@@ -7,10 +7,24 @@ language server or the .NET SDK.
 
 ## Setup
 
-Install the matching `Lucent.Lui.LanguageServer.dll` separately, then set
-`lucentLui.serverPath` to its absolute path. Set `lucentLui.projectPath` to the
-owning `.csproj` for semantic features. Without a project setting, document/range
-formatting remains available. Reload the VS Code window after changing either setting.
+Install the matching `Lucent.Lui.LanguageServer.dll` separately, then set the
+advanced `lucentLui.serverPath` override to its absolute path on the workspace
+host. The extension runs the server's project-free `--identity` check and refuses
+an incompatible protocol before it sends `initialize`. The package and compiler
+version still need to match the selected Lucent release set; managed bundled
+installation is pending. Set `lucentLui.projectPath` to the owning `.csproj` for
+semantic features. Without a project setting, document/range formatting remains
+available. In a multi-root workspace, the extension asks which workspace folder
+to serve, then reads that folder's settings. One project is active at a time;
+documents from other workspace folders are not sent to that server. An absolute
+project path must be inside the selected workspace folder. Use **Lucent: Restart
+Language Services** after changing either setting or switching projects.
+
+In Restricted Mode, VS Code's `.lui` syntax highlighting remains available while
+the extension starts no server and evaluates no project. Grant Workspace Trust to
+enable the language services. Project paths and server overrides are restricted
+settings. A stopped server stays stopped until the explicit restart command; this
+prevents repeated crashes from becoming a process loop.
 
 The language server loads the evaluated `.csproj`, including its project
 references and `.lui` additional documents. Use the repository's pinned .NET
