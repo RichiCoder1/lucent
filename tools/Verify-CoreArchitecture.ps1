@@ -17,9 +17,9 @@ function Get-Assets([string] $Project) {
 
 function Assert-ProjectHasNoForbiddenDependencies([string] $Project) {
     [xml]$xml = Get-Content $Project
-    $packages = @($xml.Project.ItemGroup.PackageReference) | Where-Object { $_ }
-    if ($packages) { throw "Core has a direct dependency reference: $Project" }
-    foreach ($reference in @($xml.Project.ItemGroup.ProjectReference) | Where-Object { $_ }) {
+    $packages = $xml.SelectNodes('//*[local-name()="PackageReference"]')
+    if ($packages.Count -gt 0) { throw "Core has a direct dependency reference: $Project" }
+    foreach ($reference in $xml.SelectNodes('//*[local-name()="ProjectReference"]')) {
         $path = [IO.Path]::GetFullPath((Join-Path (Split-Path $Project) ([string]$reference.Include)))
         $buildOnly = $allowedBuildTools -contains $path -and
             [string]$reference.OutputItemType -eq 'Analyzer' -and
