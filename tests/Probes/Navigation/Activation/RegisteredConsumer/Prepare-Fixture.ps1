@@ -30,6 +30,7 @@ foreach ($entry in $candidate.packages) {
 }
 if (-not $seenPackages.Contains('Lucent.Platform.Windows.Activation') -or -not $seenPackages.Contains('Lucent.Platform.Windows') -or -not $seenPackages.Contains('Lucent.Core')) { throw 'Candidate descriptor omits an activation runtime package.' }
 $proof = Join-Path $root ('artifacts/windows-activation-registered/' + [Guid]::NewGuid().ToString('N'))
+$packageCache = Join-Path (Split-Path -Parent $proof) ((Split-Path -Leaf $proof) + '.nuget-packages')
 $publish = Join-Path $proof 'publish'
 $output = Join-Path $proof 'output'
 $null = New-Item -ItemType Directory -Path $publish, $output -Force
@@ -63,7 +64,7 @@ $escapedFeed = [Security.SecurityElement]::Escape($feedPath)
 <configuration><packageSources><clear /><add key="lucent" value="$escapedFeed" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources><packageSourceMapping><packageSource key="lucent"><package pattern="Lucent.*" /></packageSource><packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
 "@ | Set-Content (Join-Path $proof 'NuGet.config')
 $previousPackages = $env:NUGET_PACKAGES
-$env:NUGET_PACKAGES = Join-Path $proof 'packages'
+$env:NUGET_PACKAGES = $packageCache
 Push-Location $proof
 try {
     & $dotnet restore Consumer.csproj --configfile NuGet.config

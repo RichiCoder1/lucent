@@ -8,6 +8,7 @@ $dotnet = Join-Path $root '.dotnet/dotnet.exe'
 if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $feedPath = (Resolve-Path -LiteralPath $Feed).Path
 $proof = Join-Path $root ('artifacts/windows-activation-package/' + [Guid]::NewGuid().ToString('N'))
+$packageCache = Join-Path (Split-Path -Parent $proof) ((Split-Path -Leaf $proof) + '.nuget-packages')
 $publish = Join-Path $proof 'publish'
 $null = New-Item -ItemType Directory -Path $publish -Force
 Copy-Item (Join-Path $PSScriptRoot 'Program.cs') $proof
@@ -39,7 +40,7 @@ $escapedFeed = [Security.SecurityElement]::Escape($feedPath)
 <configuration><packageSources><clear /><add key="lucent" value="$escapedFeed" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources><packageSourceMapping><packageSource key="lucent"><package pattern="Lucent.*" /></packageSource><packageSource key="nuget.org"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
 "@ | Set-Content (Join-Path $proof 'NuGet.config')
 $previousPackages = $env:NUGET_PACKAGES
-$env:NUGET_PACKAGES = Join-Path $proof 'packages'
+$env:NUGET_PACKAGES = $packageCache
 $activationSources = @(
     Get-ChildItem -LiteralPath (Join-Path $root 'src/Lucent.Platform.Windows.Activation') -File |
         Where-Object { $_.Extension -in @('.cs', '.csproj', '.json', '.md') }

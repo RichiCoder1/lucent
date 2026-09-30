@@ -61,6 +61,20 @@ accepts the 17 runtime notices and still rejects a missing required notice.
 The failed log is retained as `artifacts/issue245/ci99-package-job-109762477403.log`;
 publication was skipped and 94.1 remains the latest published version.
 
+CI 100 at `5f683ed1` passed managed verification and reached the activation
+package consumer, then failed compilation. The fixture stored its NuGet cache
+inside the generated C# project, allowing the default source glob to include
+CsWinRT package sources and conflict with its referenced runtime. Preserve
+`artifacts/issue245/ci100-package-job-109776699986.log` (SHA-256
+`3B25DA5C603F838FC9A90E9FAD8550BE371F38AA04E7B2E35FD9D2010ADA3976`).
+Both activation fixtures now keep the cache beside the generated project. The
+corrected consumer compiles only `Program.cs`, and an isolated development-package
+NativeAOT proof passed: primary and valid secondary exited 0; the oversized
+secondary exited 2. Evidence: `artifacts/issue245/ci100-package-diagnosis.md` and
+`artifacts/issue245/ci100-activation-globfix-5f683ed/proof-manifest.json`.
+CI 100 publication was skipped; do not describe 100.1 as published or use it for
+Notes adoption. The corrected CI run and actual publication remain pending.
+
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |

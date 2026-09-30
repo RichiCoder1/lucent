@@ -33,7 +33,10 @@ CI 98 passed the corrected native thread and package journal checks, then failed
 asset fixture's optional-field access under strict PowerShell. The correction passes
 the full asset suite against existing immutable packages. CI 99 passed that suite
 and managed tests, then failed optional notice metadata access; the focused
-correction is committed and publication remains pending. Reviewed templates #246
+correction is committed. CI 100 passed managed verification, then exposed an
+activation fixture cache directory accidentally included in C# compilation.
+Both fixture cache paths are corrected, and the isolated NativeAOT package-consumer
+proof passes; the corrected CI run and publication remain pending. Reviewed templates #246
 pass generation checks and a Unicode library-name diagnostic, with coherent package
 consumer proof pending. Editor #247's bundled server and CI test wiring have passed
 source review and actual producer proof. Evaluated project matching, immutable

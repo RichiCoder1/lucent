@@ -338,6 +338,19 @@ NativeAOT consumers after source/feed/cache removal. Evidence is under
 `artifacts/issue245/assets-strict-ci93`; the failed CI log is retained alongside it.
 This is script-correction proof, not publication of a new version.
 
+CI 100 at `5f683ed1` passed managed checks and progressed to the activation
+package consumer, whose project-local NuGet cache was included by the default C#
+source glob. CsWinRT embedded sources then conflicted with its referenced runtime.
+The failed log is preserved under `artifacts/issue245/ci100-package-job-109776699986.log`,
+SHA-256 `3B25DA5C603F838FC9A90E9FAD8550BE371F38AA04E7B2E35FD9D2010ADA3976`.
+Both activation fixtures now place their package caches outside the generated
+project. The corrected consumer has one Compile item and no CsWinRT package
+sources. An isolated development-package NativeAOT proof passed primary/secondary
+transport and oversized-request rejection; evidence is recorded in
+`artifacts/issue245/ci100-package-diagnosis.md` and its linked proof manifest.
+CI 100 publication was skipped; no complete release or published 100.1 package is
+claimed. The corrected CI run and publication remain pending.
+
 CI 99 passed managed tests, the complete native asset proof and headless package
 consumers, then failed after the package-only Issue Browser publish on SDK-only
 notice records without a runtime `output` field. `a50abdc8` uses optional dictionary
