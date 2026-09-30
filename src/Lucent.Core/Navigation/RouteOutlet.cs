@@ -70,7 +70,13 @@ internal static class RouteOutlet
                 // surrounding authored layout so a published route root receives its bounds.
                 host.Present(
                     context.Theme,
-                    author: Style.Empty.Axis(LayoutAxis.Column).MainGrow(1)
+                    author: Style
+                        .Empty.Axis(LayoutAxis.Column)
+                        .MainGrow(1)
+                        .MainShrink(1)
+                        .MainBasis(0)
+                        .MinWidth(0)
+                        .MinHeight(0)
                 );
                 var outlet = new RouteOutletMount(
                     session,
