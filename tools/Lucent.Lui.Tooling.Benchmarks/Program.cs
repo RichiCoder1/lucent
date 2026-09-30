@@ -3,7 +3,11 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lucent.Lui.Compiler;
+
+if (args is ["sourceMaps" or "namedPreparation", ..])
+    return AuthoringWorkBenchmarks.Run(args, FindRepositoryRoot(AppContext.BaseDirectory));
 
 if (args is ["parse"] or ["parse", _])
 {
@@ -145,7 +149,7 @@ if (args is ["format"] or ["format", _])
 if (args is not [var measure])
 {
     Console.Error.WriteLine(
-        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename|documentSymbols>\n       Lucent.Lui.Tooling.Benchmarks <format|parse> [source-root]"
+        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename|documentSymbols|mapOperations|sourceMaps|namedPreparation>\n       Lucent.Lui.Tooling.Benchmarks <format|parse> [source-root]"
     );
     return 2;
 }
@@ -162,19 +166,36 @@ try
     var core = Path.Combine(repositoryRoot, "src/Lucent.Core/Lucent.Core.csproj");
     var project = new Uri(Path.Combine(fixtureRoot, "Measure.csproj"));
     var document = new Uri(Path.Combine(fixtureRoot, "Widget.lui"));
-    var source =
-        measure == "documentSymbols"
-            ? "namespace Sample; using Lucent.Core; using static Lucent.Core.Components;\ninternal component Widget() {\n<Row>\n"
-                + string.Concat(
-                    Enumerable.Range(0, 400).Select(row => $"<Text content=\"Row {row}\" />\n")
+    var source = measure is "documentSymbols" or "mapOperations"
+        ? "namespace Sample; using Lucent.Core; using static Lucent.Core.Components;\ninternal component Widget() {\n<Row>\n"
+            + string.Concat(
+                Enumerable.Range(0, 400).Select(row => $"<Text content=\"Row {row}\" />\n")
+            )
+            + "</Row>\n}"
+        : "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget(int count) { <Row><Text content={Helpers.Format(count)} /></Row> }";
+    if (measure == "mapOperations")
+        source = source
+            .Replace("Widget()", "Widget(int count)", StringComparison.Ordinal)
+            .Replace(
+                "content=\"Row ",
+                "content={Helpers.Format(count) + \"Row ",
+                StringComparison.Ordinal
+            )
+            .Replace("\" />", "\"} />", StringComparison.Ordinal);
+    var coreReference =
+        measure == "mapOperations"
+            ? "<Reference Include=\"Lucent.Core\"><HintPath>"
+                + Path.Combine(
+                    repositoryRoot,
+                    "src/Lucent.Core/bin/Release/net10.0/Lucent.Core.dll"
                 )
-                + "</Row>\n}"
-            : "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget(int count) { <Row><Text content={Helpers.Format(count)} /></Row> }";
+                + "</HintPath></Reference>"
+            : "<ProjectReference Include=\"" + core + "\" />";
     await File.WriteAllTextAsync(
         project.LocalPath,
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\""
-            + core
-            + "\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>"
+            + coreReference
+            + "<AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
     );
     await File.WriteAllTextAsync(
         Path.Combine(fixtureRoot, "Helpers.cs"),
@@ -202,6 +223,85 @@ try
 
     switch (measure)
     {
+        case "mapOperations":
+            foreach (
+                var method in new[]
+                {
+                    "textDocument/hover",
+                    "textDocument/completion",
+                    "textDocument/semanticTokens/full",
+                }
+            )
+            {
+                var parameters = new
+                {
+                    textDocument = new { uri = VsCodeUri(document) },
+                    position = method.EndsWith("completion", StringComparison.Ordinal)
+                        ? completionPosition
+                        : renamePosition,
+                };
+                for (var index = 0; index < 3; index++)
+                {
+                    using var warm = await lsp.RequestAsync(method, parameters);
+                    Check(
+                        !warm.RootElement.TryGetProperty("error", out _)
+                            && warm.RootElement.GetProperty("result").ValueKind
+                                != JsonValueKind.Null,
+                        method + " failed: " + warm.RootElement.GetRawText()
+                    );
+                }
+                var times = new double[15];
+                string? resultHash = null;
+                for (var index = 0; index < times.Length; index++)
+                {
+                    var watch = Stopwatch.StartNew();
+                    using var response = await lsp.RequestAsync(method, parameters);
+                    times[index] = watch.Elapsed.TotalMilliseconds;
+                    var result = response.RootElement.GetProperty("result");
+                    Check(result.ValueKind != JsonValueKind.Null, method + " returned no result.");
+                    var hash = Convert.ToHexString(
+                        SHA256.HashData(Encoding.UTF8.GetBytes(MapOperationResult(method, result)))
+                    );
+                    Check(
+                        resultHash is null || resultHash == hash,
+                        method + " returned inconsistent results."
+                    );
+                    resultHash = hash;
+                }
+                Array.Sort(times);
+                Console.WriteLine(
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            method,
+                            rows = 400,
+                            warmups = 3,
+                            samples = times.Length,
+                            medianMs = times[times.Length / 2],
+                            resultSha256 = resultHash,
+                            sourceSha256 = Convert.ToHexString(
+                                SHA256.HashData(Encoding.UTF8.GetBytes(source))
+                            ),
+                            compilerSha256 = Convert.ToHexString(
+                                SHA256.HashData(
+                                    File.ReadAllBytes(typeof(LuiCompiler).Assembly.Location)
+                                )
+                            ),
+                            serverSha256 = Convert.ToHexString(
+                                SHA256.HashData(
+                                    File.ReadAllBytes(
+                                        Path.Combine(
+                                            AppContext.BaseDirectory,
+                                            "Lucent.Lui.LanguageServer.dll"
+                                        )
+                                    )
+                                )
+                            ),
+                        }
+                    )
+                );
+            }
+            break;
         case "documentSymbols":
             var symbolParameters = new { textDocument = new { uri = VsCodeUri(document) } };
             using (
@@ -379,7 +479,8 @@ try
     await lsp.RequestAsync("shutdown", new { });
     if (await lsp.ExitAsync() != 0)
         return 1;
-    Console.WriteLine("MeasureMilliseconds=" + stopwatch.ElapsedMilliseconds);
+    if (measure != "mapOperations")
+        Console.WriteLine("MeasureMilliseconds=" + stopwatch.ElapsedMilliseconds);
     return 0;
 }
 finally
@@ -428,6 +529,17 @@ static void Check(bool condition, string message)
 {
     if (!condition)
         throw new InvalidOperationException(message);
+}
+
+static string MapOperationResult(string method, JsonElement result)
+{
+    if (method != "textDocument/completion")
+        return result.GetRawText();
+    var response = JsonNode.Parse(result.GetRawText())!;
+    // Resolve data carries the unique temporary project identity; compare user-visible items.
+    foreach (var item in response["items"]!.AsArray())
+        item!.AsObject().Remove("data");
+    return response.ToJsonString();
 }
 
 sealed class LspClient : IDisposable
