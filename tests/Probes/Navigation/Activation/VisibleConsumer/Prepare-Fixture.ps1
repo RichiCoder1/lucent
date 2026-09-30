@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory)] [string] $Feed,
-    [Parameter(Mandatory)] [ValidatePattern('^0\.3\.0-dev\.[0-9A-Za-z.-]+$')] [string] $Version,
+    [ValidateSet('0.3.0-dev.101.1')] [string] $Version = '0.3.0-dev.101.1',
     [Parameter(Mandatory)] [string] $CandidateDescriptor
 )
 $ErrorActionPreference = 'Stop'
@@ -28,9 +28,10 @@ foreach ($entry in $candidate.packages) {
     finally { $archive.Dispose() }
     $packageEvidence += [ordered]@{ id = $entry.id; version = $Version; repositoryCommit = $entry.repositoryCommit; fileName = $entry.artifact.fileName; sha256 = $entry.artifact.sha256 }
 }
+if ($candidate.releaseSet.sourceCommit -cne '6270d75762c9318d3a64eb35cf512f6631fb485e') { throw 'Visible fixture requires the published 101.1 source identity.' }
 if (-not $seenPackages.Contains('Lucent.Platform.Windows.Activation') -or -not $seenPackages.Contains('Lucent.Platform.Windows') -or -not $seenPackages.Contains('Lucent.Core')) { throw 'Candidate descriptor omits an activation runtime package.' }
-$proof = Join-Path $root ('artifacts/windows-activation-registered/' + [Guid]::NewGuid().ToString('N'))
-$packageCache = Join-Path (Split-Path -Parent $proof) ((Split-Path -Leaf $proof) + '.nuget-packages')
+$proof = Join-Path ([IO.Path]::GetTempPath()) ('lucent-visible-activation-' + [Guid]::NewGuid().ToString('N'))
+$packageCache = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.nuget/packages'
 $publish = Join-Path $proof 'publish'
 $output = Join-Path $proof 'output'
 $null = New-Item -ItemType Directory -Path $publish, $output -Force
@@ -68,7 +69,7 @@ $env:NUGET_PACKAGES = $packageCache
 Push-Location $proof
 try {
     & $dotnet restore Consumer.csproj --configfile NuGet.config
-    if ($LASTEXITCODE) { throw 'Registered fixture package-only restore failed.' }
+    if ($LASTEXITCODE) { throw 'Visible fixture package-only restore failed.' }
     $assets = Get-Content -LiteralPath (Join-Path $proof 'obj/project.assets.json') -Raw | ConvertFrom-Json
     $consumed = @($assets.libraries.PSObject.Properties | Where-Object { $_.Name -match '^Lucent\.[^/]+/' -and $_.Value.type -eq 'package' } | ForEach-Object {
         $parts = $_.Name.Split('/')
@@ -80,7 +81,7 @@ try {
     })
     if ($consumed.Count -eq 0 -or @($consumed | Where-Object { -not $seenPackages.Contains($_) }).Count -ne 0) { throw 'Package restore consumed Lucent packages absent from the validated candidate.' }
     & $dotnet publish Consumer.csproj -c Release --no-restore -o $publish -warnaserror -m:1 -nr:false -p:UseSharedCompilation=false
-    if ($LASTEXITCODE) { throw 'Registered fixture package-only NativeAOT publish failed.' }
+    if ($LASTEXITCODE) { throw 'Visible fixture package-only NativeAOT publish failed.' }
 }
 finally {
     Pop-Location
@@ -90,9 +91,8 @@ finally {
     else { [Environment]::SetEnvironmentVariable('NUGET_PACKAGES', $previousPackages) }
 }
 $scheme = 'lucent' + [Guid]::NewGuid().ToString('N')
-$key = 'Lucent.RegisteredProbe.' + [Guid]::NewGuid().ToString('N')
-$stop = Join-Path $proof 'stop'
-@($key, $scheme, $output, $stop) | Set-Content (Join-Path $publish 'fixture.txt')
+$key = 'Lucent.VisibleProbe.' + [Guid]::NewGuid().ToString('N')
+@($key, $scheme, $output) | Set-Content (Join-Path $publish 'fixture.txt')
 $manifest = [ordered]@{
     schemaVersion = 2
     scheme = $scheme
@@ -104,11 +104,11 @@ $manifest = [ordered]@{
     candidateDescriptorSha256 = (Get-FileHash -LiteralPath (Join-Path $proof 'candidate-descriptor.json') -Algorithm SHA256).Hash
     consumerSourceSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Program.cs') -Algorithm SHA256).Hash
     prepareScriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
-    invokeScriptSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Invoke-RegisteredFixture.ps1') -Algorithm SHA256).Hash
+    transport = 'direct-command'
     packages = @($packageEvidence)
     consumedLucentPackages = @($consumed)
     executableSha256 = (Get-FileHash -LiteralPath (Join-Path $publish 'Consumer.exe') -Algorithm SHA256).Hash
     registrationAttempted = $false
 }
 $manifest | ConvertTo-Json | Set-Content (Join-Path $proof 'manifest.json')
-Write-Output "Prepared registered-delivery fixture without registration: $proof"
+Write-Output "Prepared visible fixture without registration or launch: $proof"

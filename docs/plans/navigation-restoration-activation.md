@@ -1,9 +1,10 @@
 # Navigation restoration and Windows activation
 
-Status: implementation plan for [#205](https://github.com/RichiCoder1/lucent/issues/205),
+Status: delivered implementation plan for [#205](https://github.com/RichiCoder1/lucent/issues/205),
 [#221](https://github.com/RichiCoder1/lucent/issues/221), and
-[#222](https://github.com/RichiCoder1/lucent/issues/222), September 29, 2026.
-This document selects defaults; it does not claim implementation or execution evidence.
+[#222](https://github.com/RichiCoder1/lucent/issues/222), September 30, 2026.
+The contracts below are implemented. Issue closeout records bind the official
+101.1 packages to restoration replay, registered transport and visible-host evidence.
 The current execution state and desktop-testing permission are recorded in the
 [handoff](../agents/remaining-work-handoff.md); this design is not a pause instruction.
 
@@ -225,7 +226,7 @@ delivery, window attention and actual foreground acquisition.
 | Application persistence integration | #221 | Fresh temporary storage, older async write completion rejected, atomic replace/failure recovery, nonpersistable active route clears prior snapshot, close/draft-write independence; generated typed routes and restoration in a package-only managed and NativeAOT console consumer. |
 | Optional activation dependency probe | #222 | Locked dependency graph, warning-clean build, exact NativeAOT executable and required assets, cold argument extraction and raw-input fidelity, instance claim/redirection/cleanup without a visible window; both deployment artifacts prepared. Stop this adapter if the proof fails; do not add reflection fallbacks. |
 | Host policy and delivery | #222 | Deterministic envelope/URI/queue/owner-thread/close tests; published process race proves only one session/window initialization, bounded redirect failure and recovery after owner exit. |
-| Registered Windows proof | #222 | Separately install isolated unpackaged and MSIX fixtures in an authorized test environment; actual OS protocol launch cold/warm, hostile input, guard veto, normal launch attention, minimized/foreground-denied behavior, disposal and association cleanup. Run UI/focus cases only after the owner resumes desktop testing. |
+| Registered Windows proof | #222 | Separately installed unpackaged and MSIX fixtures own actual OS cold/warm/hostile protocol transport and association cleanup. A package-only visible Lucent host owns guard veto, continued typing, normal launch attention, minimized/foreground-denied behavior, close veto and disposal through direct SDK-encoded commands. These are composed proofs, not every transport/UI combination. Run UI/focus cases only with desktop-testing permission. |
 
 Extend the existing `NavigationSessionContracts`, `RouteOutletContracts` and
 `NavigationInteractionContracts` for their owned transitions. Keep byte-format behavior

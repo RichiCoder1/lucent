@@ -21,17 +21,19 @@ publication remains. UI testing is authorized, and completed Computer Use sessio
 are closed after each walkthrough.
 Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
 is not claimed. Standard Num Lock-off keypad navigation is delivered in 101.1; #326 is closed.
-Navigation #205 now has an
-[implementation plan](plans/navigation-restoration-activation.md): portable
-restoration first, then an optional Windows activation adapter. Its dependency
-probe is proven without a window; registered protocol and focus behavior remain
-separate work. Journal/interaction restoration and reviewed ownership corrections
+Navigation #205's [implementation plan](plans/navigation-restoration-activation.md)
+is delivered: portable restoration and an optional Windows activation adapter.
+Journal/interaction restoration and reviewed ownership corrections
 pass 210 affected contracts; package-only managed/AOT journal proof passes.
 Issue Browser opt-in persistence is reviewed, passes 44 application contracts, and
 restores a saved route in a fresh NativeAOT process; #221 is closed. The activation
 adapter passes 22 model contracts and official-package MSIX and unpackaged
 cold/warm/hostile URI delivery in disposable Sandboxes, including handler cleanup.
-Visible host foreground checks remain under #222.
+The official-package visible host also passes warm navigation, guard veto with
+continued typing, launch attention without history changes, minimized restoration,
+close veto and fresh-primary recovery. Foreground denial is recorded separately
+from the taskbar-attention request. This completes #222 and parent #205; registered
+OS transport and visible host behavior have separate maintained proof owners.
 Onboarding #245 implements the [release descriptor and project-free identity](RELEASE-SETS.md).
 CI 98 passed the corrected native thread and package journal checks, then failed an
 asset fixture's optional-field access under strict PowerShell. The correction passes
@@ -116,7 +118,7 @@ as `0.3.0-dev.89.1` from `48feed95` after
 [CI 89](https://github.com/RichiCoder1/lucent/actions/runs/36049540126) passed managed,
 package verification and publication; see the execution record for evidence and
 environment limits.
-Navigation restoration/Windows activation #205 follows separately.
+Navigation restoration/Windows activation #205 is delivered as recorded above.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.
 
@@ -135,8 +137,9 @@ passed managed and package/NativeAOT verification before publication. Component 
 uses generated roots and route mappings; both inline and companion Windows sample apps
 passed managed and NativeAOT execution. The [authoring guide](APPLICATION-AUTHORING.md)
 documents the supported surface, and the [execution record](plans/application-routing-component-authoring-execution.md)
-records exact evidence and limitations. The next ordered parent is navigation restoration
-and Windows activation [#205](https://github.com/RichiCoder1/lucent/issues/205).
+records exact evidence and limitations. Navigation restoration and Windows activation
+[#205](https://github.com/RichiCoder1/lucent/issues/205) are now delivered; environment
+diagnostics and the installed-editor journey are the next onboarding work.
 
 Whole-file `.lui` formatting and linting [#295–300](plans/lui-formatting-and-linting.md)
 implement the accepted source policy across the compiler, CLI, editor and SDK.
@@ -155,7 +158,7 @@ The [semantic capability refactor](plans/semantic-capabilities.md) #291–294 is
 
 The `.lui` assignment-callback diagnostic follow-up [#290](https://github.com/RichiCoder1/lucent/issues/290) is delivered in `5ebb236` and published as `0.3.0-dev.75.1` after [CI 34806634193](https://github.com/RichiCoder1/lucent/actions/runs/34806634193) passed managed, NativeAOT/package-consumer and publication jobs. All 72 compiler and 28 language-server local tests pass. It keeps the expression allowlist unchanged, highlights the assignment itself, and recommends a named method; [the language guide](LUI-LANGUAGE.md#c-expressions-and-reactivity) documents the boundary and workaround.
 
-Typed composition context/service injection [#203](https://github.com/RichiCoder1/lucent/issues/203) and URI navigation [#204](https://github.com/RichiCoder1/lucent/issues/204) are delivered in `b3f3d59` and published as `0.3.0-dev.76.1`. The runtime, compiler, editor and Hosting contracts are implemented, and Issue Browser and Light Notes consume typed routes and declared requirements. [CI 34822437908](https://github.com/RichiCoder1/lucent/actions/runs/34822437908) passed managed and package-only NativeAOT verification before publication. Both applications pass focused native desktop checks; Light Notes is pinned to the official package. The [execution plan](plans/context-navigation-execution.md) maps joint verification #213 to the acceptance cases, and [typed navigation](NAVIGATION.md) describes the supported API. Restoration and Windows activation remain deferred under #205; live compilation remains separate.
+Typed composition context/service injection [#203](https://github.com/RichiCoder1/lucent/issues/203) and URI navigation [#204](https://github.com/RichiCoder1/lucent/issues/204) are delivered in `b3f3d59` and published as `0.3.0-dev.76.1`. The runtime, compiler, editor and Hosting contracts are implemented, and Issue Browser and Light Notes consume typed routes and declared requirements. [CI 34822437908](https://github.com/RichiCoder1/lucent/actions/runs/34822437908) passed managed and package-only NativeAOT verification before publication. Both applications pass focused native desktop checks; Light Notes is pinned to the official package. The [execution plan](plans/context-navigation-execution.md) maps joint verification #213 to the acceptance cases, and [typed navigation](NAVIGATION.md) describes the supported API. Restoration and Windows activation are delivered under #205 as recorded above; live compilation remains separate.
 
 ## Supported boundary
 

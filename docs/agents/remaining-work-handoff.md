@@ -153,7 +153,7 @@ The owner approved deleting only the failed repository-local test cache; that
 | Presentation #323 | Official 101.1 Notes consumer passes the 520-pixel regression, native save/persistence and CI; additional Select scrollbar-gutter correction passes real-Skia and Windows smoke; header follow-up passes | Publish the gutter correction |
 | Repeated work #324 | All retained improvements published in 94.1; measured deferrals recorded; closed and Project Done | No new work required |
 | Restoration #221 | Published codec/journal ownership and reviewed app persistence; final official 101.1 package-only NativeAOT restart reopens issue #9999 in a new process | Complete; evidence under `artifacts/issue221-package101-replay` |
-| Activation #222 | Optional adapter has 22 passing model contracts; official 101.1 MSIX and unpackaged cold/warm/hostile protocol transport pass in disposable Sandboxes with verified cleanup | Visible host foreground coverage remains |
+| Activation #222 / parent #205 | Official 101.1 registered transport and real visible host behavior pass, including guard/focus/attention/minimize/close/ownership cleanup | Complete; separate transport and visible evidence under `artifacts/issue222-unpackaged` and `artifacts/issue222-visible` |
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
 | Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
 | Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
@@ -183,6 +183,17 @@ of the observed URL capability and handler ProgID with no residual shell command
 The successful guest run is recorded in `artifacts/issue222-unpackaged/evidence.md`;
 the original failures remain alongside it. The named Sandbox session stopped
 cleanly. This establishes registration/transport cleanup, not foreground policy.
+The separate package-only `VisibleConsumer` now proves the actual Lucent host and
+binding through direct Windows App SDK encoded commands. Its two primary processes
+and five redirected secondaries pass committed navigation, guard veto preserving
+route/history/editor focus and continued typing, launch attention, native minimize
+and restore, close veto, subsequent activation, orderly disposal and fresh ownership.
+Cold foreground requests were denied and requested taskbar attention; the record
+does not claim a visibly flashing taskbar. Both primaries exited zero and Computer
+Use stopped. Exact executable/package identities and raw log assertions are in
+`artifacts/issue222-visible`; this is not an OS-shell or MSIX visible walkthrough.
+Together with the separately owned registered transport checks and model contracts,
+this completes #222 and #205 without duplicating the full deployment/UI matrix.
 The package-only Issue Browser replay build is under
 `artifacts/issue221-package101-replay`, with exact package/executable hashes in
 `prepared.json`; its final two-process native replay is recorded beside it.
