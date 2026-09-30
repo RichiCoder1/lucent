@@ -6,7 +6,7 @@
   "name": "Lucent Windows application",
   "shortName": "lucent-app",
   "tags": { "language": "C#", "type": "project" },
-  "sourceName": "LucentApp",
+  "sourceName": "LucentAppProject",
   "preferNameDirectory": true,
   "symbols": {
     "Namespace": {
@@ -16,5 +16,5 @@
       "replaces": "TemplateNamespace"
     }
   },
-  "primaryOutputs": [{ "path": "LucentApp.csproj" }]
+  "primaryOutputs": [{ "path": "LucentAppProject.csproj" }]
 }

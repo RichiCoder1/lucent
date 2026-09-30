@@ -8,5 +8,6 @@
   "Lucent.Lui.Sdk",
   "Lucent.Reactive.R3",
   "Lucent.Testing",
-  "Lucent.Testing.Skia"
+  "Lucent.Testing.Skia",
+  "Lucent.Templates"
 ]

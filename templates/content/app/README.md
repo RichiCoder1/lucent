@@ -1,4 +1,4 @@
-# LucentApp
+# LucentAppProject
 
 This Windows app uses Lucent __LUCENT_VERSION__ and .NET SDK __DOTNET_SDK_VERSION__.
 It targets `win-x64` and Windows SDK 10.0.26100.0, matching the current Windows host package.

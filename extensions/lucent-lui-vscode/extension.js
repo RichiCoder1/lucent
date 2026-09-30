@@ -5,7 +5,12 @@ const path = require("path");
 const { isDeepStrictEqual } = require("node:util");
 const vscode = require("vscode");
 const { verifyBundledServer } = require("./server-bundle");
-const clientRelease = require("./package.json").lucentRelease;
+const { readProjectRequirements, assertCompatibleCompiler, verifyRequirementInputs } = require("./project-requirements");
+const { selectApprovedEntry, resolveCachedServer, importApprovedArchive, importDownloadedRelease } = require("./server-cache");
+const { acquireApprovedRelease } = require("./server-acquisition");
+const manifest = require("./package.json");
+const clientRelease = manifest.lucentRelease;
+const releaseCatalog = require("./release-catalog.json");
 
 const semanticTokensLegend = ["keyword", "type", "property", "enumMember"];
 const crossLanguageSelector = [{ language: "lui" }, { language: "csharp", scheme: "file" }];
@@ -208,12 +213,13 @@ class Rpc {
     }
 }
 
-function identifyServer(server) {
+function identifyServer(server, signal) {
     return new Promise((resolve, reject) => {
         childProcess.execFile("dotnet", [server, "--identity"], {
             timeout: 10000,
             maxBuffer: 64 * 1024,
-            windowsHide: true
+            windowsHide: true,
+            signal
         }, (error, output) => {
             if (error) return reject(new Error(`Lucent server identity check failed: ${error.message}`));
             try {
@@ -267,6 +273,152 @@ async function selectProject() {
     return { folder, projectPath };
 }
 
+async function bootstrapServer(context, folder, signal) {
+    const configured = vscode.workspace.getConfiguration("lucentLui", folder?.uri).get("serverPath");
+    if (configured && !path.isAbsolute(configured)) {
+        throw new Error("lucentLui.serverPath must be an absolute path on the workspace host.");
+    }
+    let bundled;
+    let server = configured;
+    if (!server) {
+        if (clientRelease.serverDelivery !== "bundled" || !clientRelease.bundledServer) {
+            throw new Error("The Lucent extension has no bundled server. Set an absolute lucentLui.serverPath override.");
+        }
+        bundled = verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
+        server = bundled.serverPath;
+    }
+    const identity = await identifyServer(server, signal);
+    if (bundled && !isDeepStrictEqual(identity, bundled.identity)) {
+        throw new Error("The bundled server reported a different identity.");
+    }
+    return { server, bundled, identity, configured };
+}
+
+async function cacheOptions(context, requirement, signal) {
+    if (releaseCatalog.schemaVersion !== 1 || !Array.isArray(releaseCatalog.releases)) {
+        throw new Error("The installed Lucent release catalog is unsupported.");
+    }
+    if (!context.globalStorageUri?.fsPath || (context.globalStorageUri.scheme && context.globalStorageUri.scheme !== "file")) {
+        throw new Error("Lucent tooling cache requires file storage on the workspace host.");
+    }
+    const dotnetPath = await new Promise((resolve, reject) => {
+        childProcess.execFile("where.exe", ["dotnet.exe"], { timeout: 10000, maxBuffer: 65536, windowsHide: true, signal }, (error, output) => {
+            const host = output?.trim().split(/\r?\n/)[0];
+            if (error || !host || !path.isAbsolute(host)) reject(new Error("The .NET host could not be located for Lucent tooling installation."));
+            else resolve(host);
+        });
+    });
+    return {
+        requirement, approvedEntries: releaseCatalog.releases, clientRelease,
+        cacheRoot: path.join(context.globalStorageUri.fsPath, "tooling"),
+        helperDirectory: context.asAbsolutePath("tooling-cache"), helperManifest: manifest.lucentCacheHelper,
+        sourceCommit: clientRelease.sourceCommit, dotnetPath, signal
+    };
+}
+
+async function prepareToolingInstall(context, current, controller) {
+    if (!current()) return;
+    const selection = await selectProject();
+    if (!selection || !current()) return;
+    if (!selection.projectPath) throw new Error("Set lucentLui.projectPath before installing compatible tooling.");
+    const bootstrap = await bootstrapServer(context, selection.folder, controller.signal);
+    if (!current()) return;
+    const requirement = await readProjectRequirements(bootstrap.server, selection.projectPath, controller.signal);
+    if (!current()) return;
+    const approved = selectApprovedEntry(requirement, releaseCatalog.releases, clientRelease);
+    if (approved.status !== "approved") {
+        throw new Error("No authenticated release anchor matches this project's compiler. Update the extension's release catalog or use a trusted absolute server override.");
+    }
+    const options = await cacheOptions(context, requirement, controller.signal);
+    await verifyRequirementInputs(requirement, controller.signal);
+    return current() ? { requirement, options, approved } : undefined;
+}
+
+async function finishToolingInstall(requirement, result, current, controller) {
+    if (!current() || result.status === "cancelled") return;
+    if (result.status !== "selected") throw new Error(`Lucent tooling was not installed: ${result.reason ?? result.status}. The running server is unchanged.`);
+    await verifyRequirementInputs(requirement, controller.signal);
+    if (!current()) return;
+    const choice = await vscode.window.showInformationMessage("Verified Lucent tooling is ready. Restart language services to use it.", "Restart Language Services");
+    if (choice === "Restart Language Services" && current()) await vscode.commands.executeCommand("lucentLui.restartLanguageServices");
+}
+
+async function importServerArchive(context, current, controller) {
+    const prepared = await prepareToolingInstall(context, current, controller);
+    if (!prepared) return;
+    const { requirement, options } = prepared;
+    const selected = await vscode.window.showOpenDialog({
+        title: "Import verified Lucent server archive", canSelectMany: false,
+        canSelectFiles: true, canSelectFolders: false, filters: { "Lucent server ZIP": ["zip"] }
+    });
+    if (!selected?.length || !current()) return;
+    if (selected[0].scheme !== "file") throw new Error("Choose a server archive on the workspace host.");
+    await verifyRequirementInputs(requirement, controller.signal);
+    if (!current()) return;
+    const result = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification, title: "Verifying Lucent tooling", cancellable: true
+    }, async (_progress, token) => {
+        const subscription = token.onCancellationRequested(() => controller.abort());
+        try {
+            if (token.isCancellationRequested) controller.abort();
+            return await importApprovedArchive({ ...options, archivePath: selected[0].fsPath });
+        } finally { subscription.dispose(); }
+    });
+    await finishToolingInstall(requirement, result, current, controller);
+}
+
+async function installMatchingServer(context, current, controller) {
+    const prepared = await prepareToolingInstall(context, current, controller);
+    if (!prepared) return;
+    const { requirement, options, approved } = prepared;
+    const cached = await resolveCachedServer(options);
+    if (!current() || cached.status === "cancelled") return;
+    if (cached.status === "selected") {
+        await finishToolingInstall(requirement, cached, current, controller);
+        return;
+    }
+    let authentication;
+    try { authentication = await vscode.authentication.getSession("github", ["repo"], { createIfNone: true }); }
+    catch {
+        if (current()) throw new Error("GitHub sign-in was not completed. Retry Lucent: Install Matching Language Tools or import an approved archive.");
+        return;
+    }
+    if (!authentication?.accessToken || !current()) return;
+    await verifyRequirementInputs(requirement, controller.signal);
+    if (!current()) return;
+    const result = await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: `Installing Lucent language tools ${approved.version}`, cancellable: true
+    }, async (progress, token) => {
+        const subscription = token.onCancellationRequested(() => controller.abort());
+        let downloaded;
+        let failed = false;
+        try {
+            if (token.isCancellationRequested) controller.abort();
+            if (!current()) return { status: "cancelled" };
+            progress.report({ message: "Authenticating and downloading the approved release" });
+            downloaded = await acquireApprovedRelease({ ...options, token: authentication.accessToken,
+                stagingRoot: path.join(options.cacheRoot, ".downloads") });
+            if (!current() || downloaded.status === "cancelled") return { status: "cancelled" };
+            if (downloaded.status !== "downloaded") return downloaded;
+            await verifyRequirementInputs(requirement, controller.signal);
+            if (!current()) return { status: "cancelled" };
+            progress.report({ message: "Verifying and installing language tools" });
+            return await importDownloadedRelease({ ...options, downloaded });
+        } catch (error) {
+            failed = true;
+            throw error;
+        } finally {
+            subscription.dispose();
+            if (downloaded?.cleanup) {
+                try { await downloaded.cleanup(); }
+                catch { if (!failed && current()) throw new Error("Language tools were processed, but temporary download cleanup failed. Retry after checking workspace-host storage access."); }
+            }
+        }
+    });
+    await finishToolingInstall(requirement, result, current, controller);
+}
+
 async function activateTrusted(context, isActive, onStarted) {
     if (!vscode.workspace.isTrusted || !isActive()) return;
     let selection;
@@ -277,45 +429,83 @@ async function activateTrusted(context, isActive, onStarted) {
     }
     if (!selection || !isActive()) return;
     const { folder, projectPath } = selection;
-    const configured = vscode.workspace.getConfiguration("lucentLui", folder?.uri).get("serverPath");
-    if (configured && !path.isAbsolute(configured)) {
-        vscode.window.showErrorMessage("lucentLui.serverPath must be an absolute path on the workspace host.");
-        return;
-    }
-    let bundled;
-    let server = configured;
-    if (!server) {
-        if (clientRelease.serverDelivery !== "bundled" || !clientRelease.bundledServer) {
-            vscode.window.showErrorMessage("The Lucent extension has no bundled server. Set an absolute lucentLui.serverPath override.");
-            return;
-        }
-        try {
-            bundled = verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
-            server = bundled.serverPath;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Bundled Lucent language server rejected: ${error.message}`);
-            return;
-        }
-    }
-    let identity;
-    try { identity = await identifyServer(server); }
+    const controller = new AbortController();
+    const subscriptions = [];
+    let activeStop = { dispose: () => {
+        controller.abort();
+        for (const subscription of subscriptions.splice(0).reverse()) subscription.dispose();
+    } };
+    onStarted(activeStop);
+    const current = () => isActive() && !controller.signal.aborted && vscode.workspace.isTrusted;
+    let bundled, server, identity, configured;
+    let cached;
+    try { ({ bundled, server, identity, configured } = await bootstrapServer(context, folder, controller.signal)); }
     catch (error) {
-        vscode.window.showErrorMessage(error.message);
+        const report = current();
+        activeStop.dispose();
+        if (report) vscode.window.showErrorMessage(error.message);
         return;
     }
-    if (!vscode.workspace.isTrusted || !isActive()) return;
+    if (!current()) return;
+    let requirements;
+    if (projectPath) {
+        try {
+            requirements = await readProjectRequirements(server, projectPath, controller.signal);
+            if (!current()) return;
+            if (!configured && selectApprovedEntry(requirements, releaseCatalog.releases, clientRelease).status === "approved") {
+                cached = await resolveCachedServer(await cacheOptions(context, requirements, controller.signal));
+                if (!current()) return;
+                if (cached.status === "selected") {
+                    server = cached.serverPath;
+                    bundled = undefined;
+                    identity = await identifyServer(server, controller.signal);
+                    if (!current()) return;
+                    if (!isDeepStrictEqual(identity, cached.identity)) throw new Error("The cached server reported a different identity.");
+                }
+            }
+            assertCompatibleCompiler(requirements, identity);
+            const watchedInputs = new Map();
+            for (const input of requirements.inputs) {
+                const directory = path.dirname(input.path);
+                const inputs = watchedInputs.get(directory) ?? new Set();
+                inputs.add(path.resolve(input.path).toLowerCase());
+                watchedInputs.set(directory, inputs);
+            }
+            const changed = inputs => uri => {
+                if (!current() || !uri.fsPath || !inputs.has(path.resolve(uri.fsPath).toLowerCase())) return;
+                activeStop.dispose();
+                vscode.window.showErrorMessage("Lucent project tooling inputs changed. Restore if needed, then run Lucent: Restart Language Services. Syntax highlighting remains available.");
+            };
+            for (const [directory, inputs] of watchedInputs) {
+                const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, "*"));
+                const invalidate = changed(inputs);
+                subscriptions.push(watcher, watcher.onDidCreate(invalidate), watcher.onDidChange(invalidate), watcher.onDidDelete(invalidate));
+            }
+            await verifyRequirementInputs(requirements, controller.signal);
+            if (!current()) return;
+        } catch (error) {
+            const report = current();
+            activeStop.dispose();
+            if (report) vscode.window.showErrorMessage(error.message);
+            return;
+        }
+    }
     if (bundled) {
         try {
             if (!isDeepStrictEqual(identity, bundled.identity)) throw new Error("The bundled server reported a different identity.");
             verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
         } catch (error) {
+            activeStop.dispose();
             vscode.window.showErrorMessage(`Bundled Lucent language server rejected: ${error.message}`);
             return;
         }
     }
+    if (!current()) { activeStop.dispose(); return; }
     const log = vscode.window.createOutputChannel("Lucent LUI", { log: true });
-    log.info(`Starting ${bundled ? "bundled" : "override"} language server: ${server}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
-    log.info(`${bundled ? "Verified bundled server" : "Override server reports"} source ${identity.sourceCommit}, protocol ${identity.protocol.major}.${identity.protocol.minor}.`);
+    const delivery = cached?.status === "selected" ? "verified cache" : bundled ? "bundled" : "override";
+    log.info(`Starting ${delivery} language server: ${server}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
+    log.info(`${delivery} server source ${identity.sourceCommit}, protocol ${identity.protocol.major}.${identity.protocol.minor}.`);
+    if (requirements) log.info(`Evaluated ${requirements.state} project requirements match compiler ${requirements.compiler.sha256}.`);
     const process = childProcess.spawn("dotnet", [server], {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true
@@ -339,7 +529,6 @@ async function activateTrusted(context, isActive, onStarted) {
         notify(method, params);
     };
     const lintActions = new WeakMap();
-    const subscriptions = [];
     let stopped = false;
     let initialized = false;
     let logDisposed = false;
@@ -377,6 +566,7 @@ async function activateTrusted(context, isActive, onStarted) {
     const stop = { dispose: () => {
         if (stopped) return;
         stopped = true;
+        controller.abort();
         for (const subscription of subscriptions.splice(0).reverse()) subscription.dispose();
         rpc.notifications.clear();
         process.stderr.off("data", logStderr);
@@ -399,6 +589,7 @@ async function activateTrusted(context, isActive, onStarted) {
         process.once("exit", () => { clearTimeout(timeout); closeLog(); });
         rpc.request("shutdown", {}).then(() => rpc.notify("exit", {})).catch(() => {});
     } };
+    activeStop = stop;
     onStarted(stop);
     const reportFailure = error => {
         log.error(error.message);
@@ -428,6 +619,7 @@ async function activateTrusted(context, isActive, onStarted) {
             }
             const watchers = [
                 vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(projectDirectory, "**/*.{lui,cs,csproj,props,targets,dll,winmd}")),
+                vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(projectDirectory, "{packages.lock.json,obj/project.assets.json}")),
                 vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(projectDirectory, "*/**/.editorconfig")),
                 ...projectAncestors.map(directory => vscode.workspace.createFileSystemWatcher(
                     new vscode.RelativePattern(directory, "{global.json,.editorconfig,Directory.Build.props,Directory.Build.targets,Directory.Packages.props}")
@@ -665,10 +857,12 @@ async function activateTrusted(context, isActive, onStarted) {
 
 async function activate(context) {
     let currentStop;
+    let importController;
     let disposed = false;
     let generation = 0;
     const restart = () => {
         const ticket = ++generation;
+        importController?.abort();
         currentStop?.dispose();
         currentStop = undefined;
         if (disposed) return Promise.resolve();
@@ -687,8 +881,28 @@ async function activate(context) {
             if (isCurrent()) throw error;
         });
     };
-    context.subscriptions.push({ dispose: () => { disposed = true; generation++; currentStop?.dispose(); } });
+    context.subscriptions.push({ dispose: () => { disposed = true; generation++; importController?.abort(); currentStop?.dispose(); } });
     context.subscriptions.push(vscode.commands.registerCommand("lucentLui.restartLanguageServices", restart));
+    context.subscriptions.push(vscode.commands.registerCommand("lucentLui.importServerArchive", async () => {
+        if (disposed) return;
+        if (!vscode.workspace.isTrusted) { vscode.window.showErrorMessage("Trust this workspace before importing Lucent tooling."); return; }
+        importController?.abort();
+        const controller = importController = new AbortController();
+        const current = () => !disposed && !controller.signal.aborted && vscode.workspace.isTrusted;
+        try { await importServerArchive(context, current, controller); }
+        catch (error) { if (current()) vscode.window.showErrorMessage(error.message); }
+        finally { if (importController === controller) importController = undefined; }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand("lucentLui.installMatchingServer", async () => {
+        if (disposed) return;
+        if (!vscode.workspace.isTrusted) { vscode.window.showErrorMessage("Trust this workspace before installing Lucent tooling."); return; }
+        importController?.abort();
+        const controller = importController = new AbortController();
+        const current = () => !disposed && !controller.signal.aborted && vscode.workspace.isTrusted;
+        try { await installMatchingServer(context, current, controller); }
+        catch (error) { if (current()) vscode.window.showErrorMessage(error.message); }
+        finally { if (importController === controller) importController = undefined; }
+    }));
     if (!vscode.workspace.isTrusted) {
         context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => {
             void restart().catch(error => vscode.window.showErrorMessage(error.message));

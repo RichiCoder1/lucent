@@ -9,16 +9,17 @@ presentation, and measured repeated-work follow-ups before new roadmap features.
 The completed performance evidence below remains tied to its original source.
 
 Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320, SVG/UIA #322 and authoring
-#321/#325 are delivered. Lucent `0.3.0-dev.94.1` passed managed/package CI and
-publication; Light Notes is integrating its presentation APIs. Measured
+#321/#325 are delivered. Lucent `0.3.0-dev.101.1` passed managed/package CI and
+publication; Light Notes is adopting that official package. Measured
 repeated-work #324 is closed, with the final projection correction published.
-Presentation #323 has a further CommandScope/app shrink correction awaiting
-package delivery. Representative browser walkthroughs ran after the app restart;
-the owner has now paused Computer Use again. Follow-up header and stock Select
+Presentation #323's CommandScope correction is published; its app shrink fix still
+needs official consumer verification. Representative browser walkthroughs ran after
+the app restart. The owner reauthorized Computer Use, but another immediate Escape
+interruption leaves retry permission pending. Follow-up header and stock Select
 geometry fixes pass focused contracts and have fresh NativeAOT builds awaiting
 visual review.
 Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
-is not claimed. Standard Num Lock-off keypad navigation is tracked in #326.
+is not claimed. Standard Num Lock-off keypad navigation is delivered in 101.1; #326 is closed.
 Navigation #205 now has an
 [implementation plan](plans/navigation-restoration-activation.md): portable
 restoration first, then an optional Windows activation adapter. Its dependency
@@ -36,11 +37,20 @@ and managed tests, then failed optional notice metadata access; the focused
 correction is committed. CI 100 passed managed verification, then exposed an
 activation fixture cache directory accidentally included in C# compilation.
 Both fixture cache paths are corrected, and the isolated NativeAOT package-consumer
-proof passes; the corrected CI run and publication remain pending. Reviewed templates #246
-pass generation checks and a Unicode library-name diagnostic, with coherent package
-consumer proof pending. Editor #247's bundled server and CI test wiring have passed
-source review and actual producer proof. Evaluated project matching, immutable
-cache/import and authenticated acquisition remain.
+proof passes. CI 101 passed all three jobs and published 101.1. Its complete artifact
+has been independently authenticated, closing #245. Templates #246 pass the official
+101.1 generated-app/library/test consumer checks and NativeAOT publication. The
+template-inclusive inventory and CI wiring are implemented, and the exact
+descriptor-bound template package passes the final local consumer proof;
+official publication awaits CI. Editor #247's bundled
+server and CI test wiring have passed
+source review and actual producer proof. Evaluated project matching and immutable
+cache/import now pass focused development checks and actual V4 packaged proof.
+Reviewed custom lock-file and cancellation corrections are complete. The 101.1
+catalog is authenticated. Explicit online acquisition passes the real packaged
+GitHub download/install/cache proof and integrated review under the
+[editor lifecycle plan](plans/editor-tooling-lifecycle.md).
+Read-only environment doctor #248 is next; its initial implementation is underway.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

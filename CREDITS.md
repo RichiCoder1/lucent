@@ -254,3 +254,14 @@ The #246 starter templates use the MIT-licensed [.NET template engine](https://g
 for standard `dotnet new` metadata, namespace/name transforms and template-package
 conventions, following Microsoft's [custom template documentation](https://learn.microsoft.com/dotnet/core/tools/custom-templates).
 Lucent adds no alternative scaffold engine or application runtime dependency.
+
+## Verified tooling cache
+
+The #247 cache helper uses .NET's built-in `ZipArchive`, `FileStream` and SHA-256 APIs.
+Microsoft's [ZIP archive safety guidance](https://learn.microsoft.com/dotnet/standard/io/zip-tar-best-practices)
+and [path traversal rule](https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca5389)
+inform bounded entry validation and destination containment before extraction.
+No external archive library or copied implementation is introduced.
+The extension uses VS Code's built-in GitHub authentication provider and the
+GitHub Actions REST API for explicit approved-release downloads. Credentials
+remain in the provider/session boundary; Lucent adds no credential store.

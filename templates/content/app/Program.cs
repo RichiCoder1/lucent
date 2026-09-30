@@ -18,7 +18,7 @@ internal static class Program
                     MinimumHeight = 320,
                 }
             )
-            .SetTitle("LucentApp")
+            .SetTitle("LucentAppProject")
             .Build(Components.MainView())
             .Run();
 }

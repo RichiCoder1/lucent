@@ -4,9 +4,10 @@
 Exercises the four templates in an isolated CLI home and generated workspace.
 .DESCRIPTION
 GenerationOnly checks authoring without claiming package compatibility. Full mode
-first verifies an explicit release descriptor and its local artifacts, then restores
-and runs generated package-only consumers. Nothing opens a desktop window. The
-template package is a local first slice, outside the current release-set allowlist.
+first verifies an explicit release descriptor and its local artifacts, installs the
+descriptor-bound template package, then restores and runs generated package-only
+consumers. GenerationOnly packs the local template source. Nothing opens a desktop
+window.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Release')]
 param(
@@ -24,6 +25,7 @@ $dotnet = (Get-Command $DotNetPath -ErrorAction Stop).Source
 $policy = Get-Content -LiteralPath (Join-Path $root 'global.json') -Raw | ConvertFrom-Json -AsHashtable
 $sourceCommit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -or $sourceCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'Unable to identify the template source checkout.' }
+$package = $null
 if (!$GenerationOnly) {
     $DescriptorPath = (Resolve-Path -LiteralPath $DescriptorPath).Path
     $ArtifactDirectory = (Resolve-Path -LiteralPath $ArtifactDirectory).Path
@@ -34,6 +36,14 @@ if (!$GenerationOnly) {
     if ($descriptor.sdk.version -cne $policy.sdk.version -or $descriptor.sdk.rollForward -cne $policy.sdk.rollForward) {
         throw 'The release descriptor and template SDK policy differ.'
     }
+    $templateEntries = @($descriptor.packages | Where-Object { $_.id -ceq 'Lucent.Templates' })
+    if ($templateEntries.Count -ne 1) { throw 'The validated release descriptor must contain exactly one Lucent.Templates package.' }
+    $templateEntry = $templateEntries[0]
+    $expectedTemplateFile = "Lucent.Templates.$Version.nupkg"
+    if ($templateEntry.version -cne $Version -or $templateEntry.artifact.fileName -cne $expectedTemplateFile) {
+        throw 'The descriptor-bound template package does not match the release version.'
+    }
+    $package = Resolve-LuiArtifactPath $ArtifactDirectory $templateEntry.artifact.fileName
 }
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $root ('artifacts/templates-proof/' + [Guid]::NewGuid().ToString('N')) }
 $proof = [IO.Path]::GetFullPath($OutputDirectory)
@@ -71,8 +81,10 @@ function Create-Project([string] $Template, [string] $Name, [string] $Folder, [s
 try {
     '<Project />' | Set-Content -LiteralPath (Join-Path $proof 'Directory.Build.props'), (Join-Path $proof 'Directory.Build.targets'), (Join-Path $proof 'Directory.Packages.props')
     Copy-Item -LiteralPath (Join-Path $root 'global.json') -Destination $proof
-    & (Join-Path $root 'templates/Pack-Templates.ps1') -Version $Version -SourceCommit $sourceCommit -OutputDirectory (Join-Path $proof 'template-feed') -DotNetPath $dotnet
-    $package = Join-Path $proof "template-feed/Lucent.Templates.$Version.nupkg"
+    if ($GenerationOnly) {
+        & (Join-Path $root 'templates/Pack-Templates.ps1') -Version $Version -SourceCommit $sourceCommit -OutputDirectory (Join-Path $proof 'template-feed') -DotNetPath $dotnet
+        $package = Join-Path $proof "template-feed/Lucent.Templates.$Version.nupkg"
+    }
     Push-Location $proof
     try {
         Invoke-Dotnet @('new', 'install', $package) 'install-local-template'
@@ -159,7 +171,7 @@ try {
             Push-Location (Split-Path $library -Parent)
             try { Invoke-Dotnet @('new', 'lucent-component', '-n', 'PackageGreeting') 'create-library-item' }
             finally { Pop-Location }
-            Invoke-Dotnet @('pack', $library, '-c', 'Release', '--no-restore', '-o', $feed, '-p:PackageVersion=1.0.0', '-m:1', '-nr:false') 'pack-generated-library'
+            Invoke-Dotnet @('pack', $library, '-c', 'Release', '--no-restore', '-o', $feed, '-m:1', '-nr:false') 'pack-generated-library'
             & (Join-Path $root 'templates/Test-LibraryConsumer.ps1') -ProofDirectory $proof -DotNetPath $dotnet -Version $Version
             $checks.Add('generated item compiles; generated library consumed only as NuGet, including embedded asset and retained state')
             Invoke-Dotnet @('publish', $app, '-c', 'Release', '-r', 'win-x64', '-p:PublishAot=true', '-o', (Join-Path $proof 'native-app'), '-m:1', '-nr:false') 'publish-native-app'
@@ -171,11 +183,12 @@ try {
     $evidence = [ordered]@{
         scope = $(if ($GenerationOnly) { 'generation-only' } else { 'validated-candidate-consumers' })
         version = $Version
-        templateSourceCommit = $sourceCommit
+        templateSourceCommit = $(if ($GenerationOnly) { $sourceCommit } else { $descriptor.releaseSet.sourceCommit })
+        testHarnessSourceCommit = $sourceCommit
         sdk = $policy.sdk
         templatePackage = @{ file = $package; sha256 = (Get-FileHash -LiteralPath $package).Hash.ToLowerInvariant() }
         checks = @($checks)
-        releaseIntegration = 'pending: template package is not yet part of the compatible release-set inventory'
+        templatePackageSource = $(if ($GenerationOnly) { 'packed from local template source' } else { 'exact package artifact from the validated release descriptor' })
         sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'templates') -File -Recurse -Force | Sort-Object FullName | ForEach-Object {
             @{ path = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/'); sha256 = (Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant() }
         })

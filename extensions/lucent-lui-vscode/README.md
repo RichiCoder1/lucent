@@ -20,11 +20,55 @@ documents from other workspace folders are not sent to that server. An absolute
 project path must be inside the selected workspace folder. Use **Lucent: Restart
 Language Services** after changing either setting or switching projects.
 
+Before semantic services start, the verified bootstrap server evaluates the
+selected project's tooling requirements and compares the current NuGet graph
+with the restored graph. The chosen server must use that exact compiler, including
+when an advanced override is configured. Missing restore data, changed package
+settings, incomplete project evaluation and incompatible compiler identities leave
+syntax highlighting available and report an actionable error. The extension does
+not edit package pins or request a restore.
+The current prerequisite evaluator supports single-target projects. Multiple target
+frameworks, or a restore that resolves several versions of one package in that
+project, receive an explicit unsupported-project diagnostic.
+
+This prerequisite check uses trusted MSBuild project evaluation. Imported project
+tooling can execute; it is not a sandboxed or guaranteed offline inspection. The
+extension checks input hashes again before startup and stops semantic services
+when the evaluated tooling inputs change. Restore if needed, then use **Lucent:
+Restart Language Services** to evaluate the new inputs. Canceling or restarting
+while evaluation is pending prevents the old result from starting a server.
+
 In Restricted Mode, VS Code's `.lui` syntax highlighting remains available while
 the extension starts no server and evaluates no project. Grant Workspace Trust to
 enable the language services. Project paths and server overrides are restricted
 settings. A stopped server stays stopped until the explicit restart command; this
 prevents repeated crashes from becoming a process loop.
+
+For package projects, the extension can select an exact compatible server from
+its verified cache on the workspace host. **Lucent: Install Matching Language Tools**
+uses VS Code's GitHub sign-in to download the project's exact approved release.
+An already verified matching cache is reused before asking for sign-in.
+It verifies the workflow run, artifact identity and downloaded bytes before
+installing. Downloads are explicit, cancellable and limited to releases approved
+by the installed extension's catalog. Normal activation does not sign in or download.
+Credentials are not stored by Lucent or sent to the redirected download host.
+
+**Lucent: Import Server Archive** accepts
+a raw server ZIP only when its bytes match an approved release in the installed
+catalog. Selecting a ZIP does not authenticate it; an unknown release remains
+unavailable until its authenticated catalog entry is supplied by an extension
+update. Import performs no network request. Project evaluation still follows the
+trusted MSBuild rules above.
+
+Both commands preserve the running server and existing cache generations. Use **Restart
+Language Services** after a successful installation. Returning a project to an older
+supported pin selects that exact compatible cached generation; it never substitutes
+the newest server or changes the project's pins. The shipped catalog currently
+approves `0.3.0-dev.101.1`, authenticated against its complete GitHub Actions release
+artifact. Unknown releases require an extension catalog update. Expired GitHub
+artifacts cannot be downloaded; an existing verified cache or an approved offline
+server archive remains usable. The compatible bundle and an explicit trusted
+override are also available.
 
 The language server loads the evaluated `.csproj`, including its project
 references and `.lui` additional documents. Use the repository's pinned .NET
@@ -32,10 +76,14 @@ SDK when building the server.
 
 Keep the server and Core/SDK authoring versions aligned; property discovery uses
 Core's attributed metadata. For repository project references, build the selected
-application once in the default Debug configuration before opening its editor
-project so MSBuild can load the generated style/state analyzers. Package consumers
-receive those analyzers during SDK restore. Use workspace-specific settings when
-different applications are pinned to different Lucent versions.
+application once so MSBuild can load the generated style/state analyzers. For a
+source checkout, build the server and the application in the configuration evaluated
+by the editor (Debug by default), and use `lucentLui.serverPath` to select that
+server. Debug and Release compiler
+binaries can differ even at the same commit; a Release VSIX does not satisfy a
+Debug source project's exact compiler requirement. Package consumers receive their
+analyzers during SDK restore. Use workspace-specific settings when different
+applications are pinned to different Lucent versions.
 
 Document/range formatting follows the shared `.editorconfig` policy, including
 embedded C#. Format-on-save follows your VS Code setting. Semantic quick fixes
@@ -57,14 +105,15 @@ need to be checked in for these editor features.
 Run the extension tests from the repository root:
 
 ```powershell
-node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs
+node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs
 ```
 
 Create a local VSIX with the maintained packaging script:
 
 ```powershell
 ./tools/Pack-LuiExtension.ps1 -ServerArchivePath <server.zip> `
-  -ServerDirectory <published-server-directory>
+  -ServerDirectory <published-server-directory> `
+  -CacheHelperDirectory <published-cache-helper-directory>
 ```
 
 The package is written under `artifacts/`; the script stages the repository

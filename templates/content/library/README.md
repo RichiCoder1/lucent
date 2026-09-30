@@ -1,7 +1,8 @@
 # LucentLibrary
 
 A portable component library using Lucent __LUCENT_VERSION__. It references
-`Lucent.Core` and the `.lui` SDK, and has no Windows host dependency.
+`Lucent.Core` and the `.lui` SDK, and has no Windows host dependency. Its starter
+package version is `0.1.0-dev.1`; set `Version` before publishing your own releases.
 
 Use .NET SDK __DOTNET_SDK_VERSION__, configured by your workspace's `global.json`.
 After configuring the authenticated Lucent package feed, explicitly run

@@ -262,6 +262,28 @@ Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
 Replace-Entries $path @{ 'extension/syntaxes/lui.tmLanguage.json' = [Text.Encoding]::UTF8.GetBytes('invalid JSON') }
 Expect-Rejected 'vsix-invalid-grammar' { Get-LuiVsix $path } 'JSON'
 
+if ($manifest['lucentCacheHelper']) {
+    foreach ($case in @(
+        @{ name = 'vsix-missing-cache-helper'; entry = 'extension/tooling-cache/Lucent.Tooling.Cache.dll'; bytes = $null; pattern = 'cache helper payload' },
+        @{ name = 'vsix-tampered-cache-helper'; entry = 'extension/tooling-cache/Lucent.Tooling.Cache.dll'; bytes = [byte[]]@(1); pattern = 'Cache helper bytes' },
+        @{ name = 'vsix-extra-cache-helper-file'; entry = 'extension/tooling-cache/extra.dll'; bytes = [byte[]]@(1); pattern = 'cache helper payload' },
+        @{ name = 'vsix-missing-cache-module'; entry = 'extension/server-cache.js'; bytes = $null; pattern = 'Missing declared VSIX entry' },
+        @{ name = 'vsix-missing-acquisition-module'; entry = 'extension/server-acquisition.js'; bytes = $null; pattern = 'Missing declared VSIX entry' },
+        @{ name = 'vsix-missing-project-requirements'; entry = 'extension/project-requirements.js'; bytes = $null; pattern = 'Missing declared VSIX entry' }
+    )) {
+        $path = Join-Path $rejections ($case.name + '.vsix')
+        Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+        Replace-Entries $path @{ $case.entry = $case.bytes }
+        Expect-Rejected $case.name { Get-LuiVsix $path } $case.pattern
+    }
+    $changed = Copy-Json $manifest
+    $changed.Remove('lucentCacheHelper')
+    $path = Join-Path $rejections 'vsix-no-helper-manifest.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
+    Expect-Rejected 'vsix-no-helper-manifest' { Get-LuiVsix $path } 'no bundled helper'
+}
+
 # These five receipts are deliberately synthetic: they prove validator boundaries,
 # never that managed/native/product checks actually ran or GitHub authenticated them.
 $provenance = @{ repository = 'RichiCoder1/lucent'; sourceCommit = $source; workflow = '.github/workflows/tests.yml'; runId = 1; runAttempt = 1; artifactId = 1; artifactDigest = '1' * 64 }

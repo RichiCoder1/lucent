@@ -102,6 +102,24 @@ internal sealed partial class LuiProjectContext : IDisposable
 
     internal string ProjectPath => projectPath;
 
+    internal IReadOnlyList<Project> EvaluatedProjectGraph()
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            return ProjectGraph(Project());
+        }
+    }
+
+    internal IReadOnlyList<WorkspaceDiagnostic> EvaluationDiagnostics()
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            return workspace.Diagnostics;
+        }
+    }
+
     internal static async Task<LuiProjectContext> LoadAsync(
         string projectPath,
         CancellationToken cancellationToken

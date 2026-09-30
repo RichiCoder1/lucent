@@ -69,7 +69,13 @@ try {
     dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release --no-restore -o $serverStage
     if ($LASTEXITCODE) { throw 'Server publication failed.' }
     ./tools/Pack-LuiServer.ps1 -ServerDirectory $serverStage -OutputPath (Join-Path $directory 'server.zip')
-    ./tools/Pack-LuiExtension.ps1 -ServerArchivePath (Join-Path $directory 'server.zip') -ServerDirectory $serverStage -OutputPath (Join-Path $directory 'extension.vsix')
+    $helperStage = Join-Path $root "artifacts/release-cache-helper-$Version"
+    if (Test-Path -LiteralPath $helperStage) { throw 'Cache helper staging directory already exists.' }
+    dotnet restore src/Lucent.Tooling.Cache/Lucent.Tooling.Cache.csproj --locked-mode
+    if ($LASTEXITCODE) { throw 'Cache helper restore failed.' }
+    dotnet publish src/Lucent.Tooling.Cache/Lucent.Tooling.Cache.csproj -c Release --no-restore -p:UseAppHost=false -o $helperStage
+    if ($LASTEXITCODE) { throw 'Cache helper publication failed.' }
+    ./tools/Pack-LuiExtension.ps1 -ServerArchivePath (Join-Path $directory 'server.zip') -ServerDirectory $serverStage -CacheHelperDirectory $helperStage -OutputPath (Join-Path $directory 'extension.vsix')
     $candidatePath = Join-Path $directory 'candidate.json'
     $candidate = New-LuiReleaseSet -Directory $directory -Version $Version -SourceCommit $commit -SourceState clean -ServerArchive server.zip -Vsix extension.vsix -OutputPath $candidatePath
 
@@ -81,6 +87,7 @@ try {
         ./tools/Verify-LuiAssets.ps1 -Version $Version -Feed $directory
         ./tools/Test-HeadlessPackages.ps1 -Version $Version -Feed $directory
         ./tools/Test-Packages.ps1 -Version $Version -Feed $directory
+        ./tools/Test-Templates.ps1 -DescriptorPath $candidatePath -ArtifactDirectory $directory
     }
     Invoke-RecordedCheck server published-server {
         # Execute the actual archive, not the source-tree language-server binary.
@@ -95,8 +102,9 @@ try {
         finally { $env:LUCENT_LSP_SERVER_DLL = $previousServer }
     }
     Invoke-RecordedCheck extension packaged-extension {
-        node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs
+        node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs
         if ($LASTEXITCODE) { throw 'Extension tests failed.' }
+        ./tools/Test-LuiReleaseCatalog.ps1
         ./tools/Test-ReleaseSet.ps1 -RunFixtures -ServerArchivePath (Join-Path $directory 'server.zip') -VsixPath (Join-Path $directory 'extension.vsix')
         ./tools/Test-ReleaseSet.ps1 -DescriptorPath $candidatePath -ArtifactDirectory $directory
     }

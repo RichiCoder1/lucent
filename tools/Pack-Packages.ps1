@@ -10,6 +10,10 @@ $commit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE) { throw 'Cannot resolve package source identity.' }
 $names = Get-Content (Join-Path $PSScriptRoot 'package-set.json') -Raw | ConvertFrom-Json
 foreach ($name in $names) {
+    if ($name -eq 'Lucent.Templates') {
+        & (Join-Path $root 'templates/Pack-Templates.ps1') -Version $Version -OutputDirectory $OutputDirectory -SourceCommit $commit
+        continue
+    }
     $project = Join-Path $root "src/$name/$name.csproj"
     & dotnet restore $project --locked-mode
     if ($LASTEXITCODE) { throw "Restore failed: $name" }

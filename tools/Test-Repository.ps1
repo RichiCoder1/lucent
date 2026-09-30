@@ -29,7 +29,8 @@ $managedProjects = @(
     'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj',
     'tests/Lucent.Lui.Tooling.Tests/Lucent.Lui.Tooling.Tests.csproj',
     'tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj',
-    'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj'
+    'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj',
+    'tests/Lucent.Tooling.Cache.Tests/Lucent.Tooling.Cache.Tests.csproj'
 )
 
 function Invoke-Dotnet([string[]] $Arguments) {

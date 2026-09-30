@@ -105,19 +105,32 @@ Follow the [pre-release verification policy](agents/verification.md): select com
 
 The source SDK recognizes component fields, methods, and synchronous Setup blocks described in [the language reference](LUI-LANGUAGE.md#component-local-state). Generated implementation members map back to authored declarations. Hover distinguishes writable, derived, and once-initialized values; document symbols include fields, methods, and Setup. Published packages and an already installed language server must be updated together before using this syntax in a package consumer.
 
-The VS Code host accepts an absolute `lucentLui.projectPath` or a path relative to the first workspace folder. Prefer the relative form in shared workspace settings.
+The VS Code host accepts an absolute `lucentLui.projectPath` inside the selected workspace folder or a path relative to that folder. Prefer the relative form in shared workspace settings.
 
 ## Local editor packaging
 
-Build the language server with the repository's pinned SDK and install its publish directory separately. Package the thin VS Code client with `./tools/Pack-LuiExtension.ps1`; it restores the official VSCE tool with `npm ci` from the committed `tools/vsce/package-lock.json`, disables dependency lifecycle scripts, and includes the repository license. The [extension setup guide](../extensions/lucent-lui-vscode/README.md) describes the settings and packaging command. Parameterized styles and reactive condition groups require the matching compiler/server revision and extension 0.3.1 or later. Reload the VS Code window after updating the server path or extension.
+Publish the language server and tooling cache helper with the repository's pinned
+SDK, then bundle them with `./tools/Pack-LuiExtension.ps1`. The script restores the
+official VSCE tool from the committed lock file with lifecycle scripts disabled,
+includes the license, and checks source identity and runtime inventories. The
+[extension setup guide](../extensions/lucent-lui-vscode/README.md) describes project
+selection, trust, exact compiler matching and verified cache import. Reload VS Code
+after replacing the installed extension.
 
 ```powershell
 dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release -o artifacts/lui-server
-./tools/Pack-LuiExtension.ps1
-code --install-extension artifacts/lucent-lui-vscode/lucent-lui-0.3.2.vsix --force
+dotnet publish src/Lucent.Tooling.Cache/Lucent.Tooling.Cache.csproj -c Release -p:UseAppHost=false -o artifacts/lui-cache-helper
+./tools/Pack-LuiServer.ps1 -ServerDirectory artifacts/lui-server -OutputPath artifacts/lui-server.zip
+./tools/Pack-LuiExtension.ps1 -ServerArchivePath artifacts/lui-server.zip `
+  -ServerDirectory artifacts/lui-server -CacheHelperDirectory artifacts/lui-cache-helper `
+  -OutputPath artifacts/lucent-lui.vsix
+code --install-extension artifacts/lucent-lui.vsix --force
 ```
 
-Set `lucentLui.serverPath` to the absolute path of `artifacts/lui-server/Lucent.Lui.LanguageServer.dll`, or copy the entire publish directory to a stable local tooling location and use that path. A package consumer's project path should identify its own `.csproj`.
+No separate server path is needed for bundled delivery. The advanced
+`lucentLui.serverPath` override accepts an absolute path to a trusted server's full
+publish directory; it must still match the selected project's compiler. A package
+consumer's project path should identify its own `.csproj`.
 
 The current extension selects one `lucentLui.projectPath` per VS Code window;
 it does not discover a different owning project for each open file. Put this

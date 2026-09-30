@@ -171,7 +171,7 @@ measurements.
 The VS Code client has a dependency-free Node test harness. Run it when changing the extension or its protocol/client boundary:
 
 ```powershell
-node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs
+node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs
 ```
 
 Windows CI runs this short contract check before the managed .NET suite. The managed check performs the Core architecture/public API preflight after restore/build and before the longer tests; its negative fixture proof remains after those tests.

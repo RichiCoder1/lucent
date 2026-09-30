@@ -1,9 +1,10 @@
 # Lucent templates
 
-The local `Lucent.Templates` first slice contains four standard `dotnet new`
-templates. Release-set and CI publication integration is pending; this package is
-not yet part of the published compatible release inventory. Do not interpret a
-local template proof as a published onboarding journey.
+`Lucent.Templates` contains four standard `dotnet new` templates. It is part of the
+coordinated release inventory: packing stamps the release's exact pins, the
+descriptor binds the package bytes, and CI installs that package for consumer
+verification before publication. Use a successfully published release. A local
+template proof does not establish the complete onboarding journey.
 
 | Short name | Result |
 | --- | --- |
@@ -61,9 +62,9 @@ template package does not upgrade existing projects.
 `templates/Pack-Templates.ps1 -Version <version> -SourceCommit <commit> -OutputDirectory <new-output>`
 stamps exact Lucent and repository SDK/MSTest pins into an isolated staging copy
 and packs content only, including the supplied source commit in NuGet metadata.
-It refuses to replace an existing package. It adds no
-package to the current release allowlist. The final coordinated release must add
-the template package to its descriptor after stamping and packing; stamping does
+It refuses to replace an existing package. `tools/Pack-Packages.ps1` invokes this
+content-only packer for the `Lucent.Templates` allowlist entry. The coordinated
+descriptor binds the resulting package after stamping and packing; stamping does
 not depend on the final descriptor hash.
 
 ```powershell
@@ -76,7 +77,8 @@ not depend on the final descriptor hash.
 
 Both modes use a new isolated CLI home, package cache, and output workspace under
 `artifacts`; existing template installations are untouched. Logs survive failures.
-Full mode verifies the supplied descriptor and local bytes, then tests generation,
+Full mode verifies the supplied descriptor and local bytes, installs its exact
+template package without rebuilding it, then tests generation,
 names with Unicode/spaces, exact pins, ordinary conflicts, item namespace binding,
 configuration preservation, first and locked restores, semantic actions, optional
 Skia capture, and a packed generated library consumed through NuGet rather than a

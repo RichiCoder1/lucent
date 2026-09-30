@@ -7,10 +7,11 @@ records and issues.
 
 ## Current constraints
 
-The owner explicitly paused Computer Use again on September 30 after another
-Escape interruption. The Node session was reset and the newly launched, untouched
-Issue Browser fixture process was stopped. Do not resume desktop input until the
-owner says so. Earlier representative Component Browser and Issue Browser
+The owner reauthorized Computer Use on September 30, but the first app-list call
+immediately reported another physical Escape interruption. A question to reset and
+retry is pending; do not issue desktop input until the owner answers. The earlier
+Node session was reset and the untouched Issue Browser fixture was stopped.
+Earlier representative Component Browser and Issue Browser
 presentation checks ran, as did a real Issue Browser journal restart.
 Computer Use's Down and Right commands arrived at SDL as keypad 2 and keypad 6,
 not the main arrow keys. Tab arrived correctly and moved focus. Equivalent Core
@@ -59,7 +60,7 @@ SDK-only notice records have no runtime `output` property. `a50abdc8` reads that
 optional field safely under strict PowerShell. The extracted production loop
 accepts the 17 runtime notices and still rejects a missing required notice.
 The failed log is retained as `artifacts/issue245/ci99-package-job-109762477403.log`;
-publication was skipped and 94.1 remains the latest published version.
+publication was skipped and 94.1 was the latest published version at that point.
 
 CI 100 at `5f683ed1` passed managed verification and reached the activation
 package consumer, then failed compilation. The fixture stored its NuGet cache
@@ -73,7 +74,16 @@ NativeAOT proof passed: primary and valid secondary exited 0; the oversized
 secondary exited 2. Evidence: `artifacts/issue245/ci100-package-diagnosis.md` and
 `artifacts/issue245/ci100-activation-globfix-5f683ed/proof-manifest.json`.
 CI 100 publication was skipped; do not describe 100.1 as published or use it for
-Notes adoption. The corrected CI run and actual publication remain pending.
+Notes adoption.
+
+[CI 101](https://github.com/RichiCoder1/lucent/actions/runs/36686517408) at
+`6270d75762c9318d3a64eb35cf512f6631fb485e` passed managed, package verification and
+publication. `0.3.0-dev.101.1` is now published. The complete artifact's GitHub digest
+and complete descriptor were independently verified; #245 is closed. The approved
+editor catalog and retained acquisition evidence are under
+`artifacts/issue247-cache-acquisition-design/ci101-catalog`. Generated template
+consumers are now exercising that bundle.
+The failed CI 95–100 evidence above remains historical and must be preserved.
 
 | Work | Current boundary | Next action |
 | --- | --- | --- |
@@ -81,14 +91,14 @@ Notes adoption. The corrected CI run and actual publication remain pending.
 | Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
 | Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
 | Notes #12 | Published correction and real delayed-write Ctrl+S/typing/reopen pass; closed and Project Done | Presentation adoption remains separate |
-| Presentation #323 | Notes consumes 94.1; additional CommandScope sizing fix `3c95e5f1` and two app shrink declarations pass unchanged 520-pixel regression in isolated diagnostic output | Publish correction, verify actual package consumer and finish browser walkthrough |
+| Presentation #323 | Framework correction is published in 101.1; Notes adoption is in progress, including the unchanged 520-pixel regression | Verify official Notes consumer and finish browser walkthrough |
 | Repeated work #324 | All retained improvements published in 94.1; measured deferrals recorded; closed and Project Done | No new work required |
-| Restoration #221 | Reviewed app persistence and pending-state capture committed as `57245db1`; 149 Core and 44 app contracts pass; native restart reopens issue #9915 | Publish and verify the final package-only replay boundary |
-| Activation #222 | Optional adapter has 22 passing model contracts; reviewed fixture corrections committed as `7c4be47b` | Coherent package proof, then isolated native registration/foreground coverage |
-| Release identity #245 | Exact server/package/client compatibility, immutable descriptors and CI completion implemented; 63 rejection/integrity contracts pass | First coherent CI publication; complete does not mean NuGet upload succeeded |
-| Templates #246 | Reviewed source committed as `053b5357`; four generation variants and a Unicode library-name package diagnostic pass; source remains outside package inventory | Validate real generated consumers against a coherent release bundle |
-| Editor lifecycle #247 | Bundled delivery committed as `e3f63d26`; source review, real server/archive/VSIX producer, 65 release fixtures and 29 Node contracts pass | Publish, then deliver evaluated project matching, cache/import and acquisition |
-| Windows keypad #326 | Num Lock-off adapter and popup routing committed as `28f13dc0`; three focused contracts pass in both managed and NativeAOT runs | Publication; no physical main-arrow claim |
+| Restoration #221 | Reviewed app persistence and pending-state capture committed as `57245db1`; native restart reopens issue #9915; official 101.1 package-only NativeAOT replay app prepared | Execute final package-only replay when Computer Use resumes |
+| Activation #222 | Optional adapter has 22 passing model contracts; reviewed fixture corrections published; official 101.1 NativeAOT fixture and unsigned MSIX/Sandbox input prepared | Isolated native registration/foreground coverage remains |
+| Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
+| Templates #246 | Exact descriptor-bound local template package passes generated builds, semantic/Skia tests, package-only library and NativeAOT publication; 11-package inventory and CI wiring implemented | Commit/publish and confirm official template publication |
+| Editor lifecycle #247 | Reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Commit/publish; visual VS Code sign-in remains part of the later onboarding journey |
+| Windows keypad #326 | Published in 101.1 and closed; three focused contracts pass in both managed and NativeAOT runs | No remaining issue work; no physical main-arrow claim |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
 processes pass and registration/cleanup remain on the same thread. The initial
@@ -97,6 +107,13 @@ evidence. The [restoration/activation plan](../plans/navigation-restoration-acti
 and [journal implementation design](../plans/navigation-journal-implementation.md)
 define the next contracts. No protocol registration or runtime installation has
 been performed on the owner's machine.
+The official 101.1 activation fixture is at
+`artifacts/windows-activation-registered/09d23de4c31a449e83e99d06148c9f34`;
+its unsigned MSIX and unlaunched Sandbox input are recorded under
+`artifacts/windows-activation-sandbox/64eb810555e14a84966c2ee4e3ff117c`.
+The package-only Issue Browser replay build is under
+`artifacts/issue221-package101-replay`, with exact package/executable hashes in
+`prepared.json`. None of these preparation steps ran a window or registered a protocol.
 
 Light Notes now restores and builds against `0.3.0-dev.94.1`. Its new
 command buttons, Field-aware TextArea, placeholder colors and metadata contrast
@@ -106,6 +123,10 @@ latest text survived a new process. Evidence is in
 Its source update remains uncommitted until the next framework package fixes the
 known constrained-height failure. Diagnostic DLL substitution isolated the cause
 but is not consumer delivery proof; do not close #323 with that boundary outstanding.
+101.1 is now available. Its two pin edits are prepared in
+`artifacts/notes101-adoption/pins.patch`; automatic approval review rejected the
+separate-repository write because the visible authorization covered walkthroughs.
+The owner approval question is pending; no Notes edit has been applied by that attempt.
 
 Fresh Component Browser NativeAOT presentation observations are recorded under
 `artifacts/review323-native-final/walkthrough.md`. The final Issue Browser binary
@@ -128,14 +149,55 @@ this is not an audit of the framework's other dependency trees. It is queued for
 next successful publication. #245's [release contract](../RELEASE-SETS.md) preserves exact pins and
 authenticated distribution. The reported PowerShell escaping review finding was
 retracted after AST/file-byte confirmation and real producer execution; no speculative
-correction was applied. #246's four templates pass generation checks and await a
-coherent release bundle for real consumer validation. They are not yet part of
-the release inventory. #247's bundled delivery passes the actual producer checks at
+correction was applied. #246's composed proof against authenticated CI101 is under
+`artifacts/templates-proof/ci101-36686517408-1-fix2`. It passes five warning-clean
+generated builds, one semantic test, two Skia tests, package-only library interaction
+and artwork, and a NativeAOT app publish without launch. The aggregate manifest binds
+reused passing slices and preserved failures. Corrections avoid an app-name token
+colliding with `LucentApplication`, give the library a packable prerelease default,
+and fix the consumer fixture's root and generated component namespaces. Templates
+now participate in the 11-package release inventory and CI's package-consumer
+receipt. Final `artifacts/templates-proof/ci101-release-final/evidence.json` proves
+installation of the exact descriptor-bound template package, all generated builds
+and semantic/capture/library checks, and NativeAOT publication without launch.
+Its candidate is explicitly local development, combining CI101 inputs and the
+new template package; official template publication awaits the next CI run.
+#247's bundled delivery
+passes the actual producer checks at
 `03116311`, recorded in `artifacts/issue247-producer-03116311/evidence.json` as a dirty
 development snapshot, not release evidence. The VSIX is 14,968,359 bytes with 184
 server files; its extracted verifier and exact server identity both pass. Evaluated
-project matching, immutable cache/import and authenticated acquisition remain
-separate delivery work against that contract.
+project matching and immutable cache/import now have passing development proof in
+`artifacts/issue247-producer-6270d757`: 71 release fixtures and the real packaged
+JavaScript adapter installing/reverifying through its packaged helper. The helper
+has 8 passing contracts and the extension had 45 at that checkpoint. Code Review
+accepted held-open stdin, cancellation and stdout-close corrections. V4, under
+`artifacts/issue247-producer-6270d757-v4`, closes the reviewed custom lock-file and
+cancellation gaps. Two focused producer contracts pass, including mid-discovery
+mutation and stdin cancellation with child-process exit. Its actual packaged
+adapter/helper imports and reuses the authenticated 101.1 server for a real
+package project. V4 source and artifact review passed.
+
+The explicit online command now uses VS Code GitHub authentication and fixed
+Actions endpoints for a shipped-catalog-approved release. It preserves the current
+server, checks project inputs after download and cleans its owned staging data.
+The final 60 Node contracts pass. The catalog producer's total transfer deadline,
+redirect credential handling and partial-file cleanup corrections passed focused
+tests and review. All 13 helper, 72 release and 26 catalog contracts pass. V5's
+packaged JavaScript/helper downloaded the real approved CI101 complete artifact,
+verified and installed its matching server, reused the immutable cache and cleaned
+the owned download. V6 adds the reviewed cache-before-sign-in shortcut; its packaged
+runtime sources match the tested source and reuse V5's unchanged network/helper
+proof. Evidence is under `artifacts/issue247-producer-6270d757-v6` and its linked V5
+proof. The integrated review found no remaining blocker. These are development
+proofs, not published releases. See
+[the lifecycle plan](../plans/editor-tooling-lifecycle.md) for supported scope.
+
+Environment doctor #248 is the next implementation slice. Its worker owns only
+`src/Lucent.Tools` and `tests/Lucent.Tools.Tests`; these are in-progress sources,
+not part of the #246/#247 publication checkpoint. Keep default checks static,
+offline and read-only; explicit project checks must reuse verified requirements
+evaluation rather than becoming a second MSBuild evaluator.
 
 After these corrections, continue navigation #205, onboarding #242, native
 preview #224, diagnostics #243 and transfer #244 according to their technical

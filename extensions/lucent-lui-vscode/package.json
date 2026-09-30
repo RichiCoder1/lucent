@@ -1,7 +1,7 @@
 {
   "name": "lucent-lui",
   "displayName": "Lucent .lui",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "publisher": "lucent",
   "lucentRelease": {
     "schemaVersion": 1,
@@ -34,6 +34,11 @@
   "files": [
     "extension.js",
     "server-bundle.js",
+    "project-requirements.js",
+    "server-cache.js",
+    "server-acquisition.js",
+    "release-catalog.json",
+    "tooling-cache/**",
     "server/**",
     "language-configuration.json",
     "syntaxes/**",
@@ -59,6 +64,12 @@
     }, {
       "command": "lucentLui.restartLanguageServices",
       "title": "Lucent: Restart Language Services"
+    }, {
+      "command": "lucentLui.importServerArchive",
+      "title": "Lucent: Import Server Archive"
+    }, {
+      "command": "lucentLui.installMatchingServer",
+      "title": "Lucent: Install Matching Language Tools"
     }],
     "configuration": {
       "title": "Lucent .lui",

@@ -10,14 +10,42 @@ internal static class Program
     private static readonly string[] signatureTriggers = ["(", ",", " "];
     private static readonly string[] completionTriggers = ["<", " ", ".", ":", "{"];
 
-    private static Task<int> Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         if (args.Length == 0)
-            return RunProtocolAsync();
+            return await RunProtocolAsync().ConfigureAwait(false);
         if (args is ["--identity"])
-            return Task.FromResult(LuiServerIdentity.Write());
-        Console.Error.WriteLine("Usage: Lucent.Lui.LanguageServer [--identity]");
-        return Task.FromResult(2);
+            return LuiServerIdentity.Write();
+        if (args is ["--project-requirements", "--trusted-project", var projectPath])
+        {
+            using var cancellation = new CancellationTokenSource();
+            if (
+                Console.IsInputRedirected
+                && Environment.GetEnvironmentVariable("LUCENT_REQUIREMENTS_CANCEL_STDIN") == "1"
+            )
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var command = await Console
+                            .In.ReadLineAsync(cancellation.Token)
+                            .ConfigureAwait(false);
+                        if (
+                            command is null
+                            || command.Equals("cancel", StringComparison.OrdinalIgnoreCase)
+                        )
+                            await cancellation.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) { }
+                });
+            return await LuiProjectRequirements
+                .WriteAsync(projectPath, cancellation.Token)
+                .ConfigureAwait(false);
+        }
+        Console.Error.WriteLine(
+            "Usage: Lucent.Lui.LanguageServer [--identity | --project-requirements --trusted-project <absolute.csproj>]"
+        );
+        return 2;
     }
 
     private static async Task<int> RunProtocolAsync()

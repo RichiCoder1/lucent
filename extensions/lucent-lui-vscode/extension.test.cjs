@@ -4,6 +4,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const crypto = require("node:crypto");
+const os = require("node:os");
+const { readProjectRequirements, validateRequirements, assertCompatibleCompiler, verifyRequirementInputs } = require("./project-requirements");
 
 const loaded = { exports: {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "extension.js"), "utf8"), {
@@ -295,6 +298,102 @@ test("activation preserves current diagnostics and clears closed documents", asy
 
 function disposable() { return { dispose() {} }; }
 
+function requirementFixture(t) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lucent-requirements-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const projectPath = path.join(directory, "App.csproj");
+    const project = Buffer.from('<Project Sdk="Microsoft.NET.Sdk" />');
+    fs.writeFileSync(projectPath, project);
+    return {
+        schemaVersion: 1, kind: "project-requirements", state: "development-source", semanticReady: false,
+        projectPath, compiler: { sha256: "a".repeat(64), informationalVersion: "0.3.0+" + "b".repeat(40), sourceCommit: "b".repeat(40) },
+        projects: [{ projectPath, state: "development-source", sdk: null }], packages: [],
+        inputs: [{ path: projectPath, sha256: crypto.createHash("sha256").update(project).digest("hex") }]
+    };
+}
+
+test("requirements reject malformed provenance and never infer semantic readiness", t => {
+    const good = requirementFixture(t);
+    assert.equal(validateRequirements(good, good.projectPath), good);
+    const packaged = structuredClone(good);
+    packaged.state = "package";
+    packaged.projects[0].state = "package";
+    packaged.projects[0].sdk = { id: "Lucent.Lui.Sdk", version: "0.3.0-dev.1.1",
+        repositoryCommit: good.compiler.sourceCommit, packageSha256: "d".repeat(64) };
+    assert.equal(validateRequirements(packaged, good.projectPath), packaged);
+    packaged.projects[0].sdk.repositoryCommit = "e".repeat(40);
+    assert.throws(() => validateRequirements(packaged, good.projectPath), /SDK package identity/);
+    for (const mutate of [
+        value => { value.semanticReady = true; },
+        value => { value.state = "package"; },
+        value => { value.inputs = []; },
+        value => { value.inputs.push({ ...value.inputs[0] }); },
+        value => { value.projectPath = path.join(path.dirname(value.projectPath), "Other.csproj"); },
+        value => { value.compiler.sourceCommit = "unknown"; }
+    ]) {
+        const invalid = structuredClone(good);
+        mutate(invalid);
+        assert.throws(() => validateRequirements(invalid, good.projectPath));
+    }
+    assertCompatibleCompiler(good, { compiler: good.compiler, sourceCommit: good.compiler.sourceCommit });
+    assert.throws(() => assertCompatibleCompiler(good, { compiler: { ...good.compiler, sha256: "c".repeat(64) }, sourceCommit: good.compiler.sourceCommit }), /compiler differs/);
+    assert.throws(() => assertCompatibleCompiler(good, { compiler: good.compiler, sourceCommit: "c".repeat(40) }), /compiler differs/);
+});
+
+test("requirement input proof detects same-length edits and newly created control files", async t => {
+    const value = requirementFixture(t);
+    const optional = path.join(path.dirname(value.projectPath), "packages.lock.json");
+    value.inputs.push({ path: optional, sha256: null });
+    await verifyRequirementInputs(value);
+    const original = fs.readFileSync(value.projectPath);
+    fs.writeFileSync(value.projectPath, Buffer.alloc(original.length, "x"));
+    await assert.rejects(verifyRequirementInputs(value), /inputs changed/);
+    fs.writeFileSync(value.projectPath, original);
+    fs.writeFileSync(optional, "{}");
+    await assert.rejects(verifyRequirementInputs(value), /inputs changed/);
+    fs.unlinkSync(optional);
+    fs.unlinkSync(value.projectPath);
+    await assert.rejects(verifyRequirementInputs(value), /inputs changed/);
+});
+
+test("prerequisite transport is bounded, cancellable and rejects nonzero success payloads", async t => {
+    const value = requirementFixture(t);
+    const controller = new AbortController();
+    const execute = (command, args, options, callback) => {
+        assert.equal(command, "dotnet");
+        assert.deepEqual(args, ["server.dll", "--project-requirements", "--trusted-project", value.projectPath]);
+        assert.equal(options.cwd, path.dirname(value.projectPath));
+        assert.equal(options.env.LUCENT_REQUIREMENTS_CANCEL_STDIN, "1");
+        assert.equal(options.windowsHide, true);
+        assert.equal(options.signal, undefined);
+        assert.ok(options.maxBuffer <= 2 * 1024 * 1024);
+        callback(null, JSON.stringify(value));
+    };
+    assert.deepEqual(await readProjectRequirements("server.dll", value.projectPath, controller.signal, execute), value);
+    await assert.rejects(readProjectRequirements("server.dll", value.projectPath, undefined,
+        (_command, _args, _options, callback) => callback(new Error("exit 3"), JSON.stringify(value))), /did not succeed/);
+    await assert.rejects(readProjectRequirements("server.dll", value.projectPath, undefined,
+        (_command, _args, _options, callback) => callback(new Error("exit 3"), JSON.stringify({
+            schemaVersion: 1, kind: "project-requirements", state: "unavailable",
+            error: { code: "stale-restore", message: "Central package settings differ from the restored graph." }
+        }))), /stale-restore/);
+    controller.abort();
+    await assert.rejects(readProjectRequirements("server.dll", value.projectPath, controller.signal, execute), { name: "AbortError" });
+    const active = new AbortController();
+    let cancellation;
+    const pending = readProjectRequirements("server.dll", value.projectPath, active.signal,
+        (_command, _args, _options, callback) => ({
+            stdin: Object.assign(new EventEmitter(), { end: line => {
+                cancellation = line;
+                callback(new Error("canceled"), "");
+            } }),
+            kill: () => assert.fail("cooperatively canceled probe must not be force-killed")
+        }));
+    active.abort();
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.equal(cancellation, "cancel\n");
+});
+
 function loadExtension(vscode, process, spawned, identityOutput = {
     schemaVersion: 1,
     sourceCommit: "1".repeat(40),
@@ -305,6 +404,7 @@ function loadExtension(vscode, process, spawned, identityOutput = {
 }, identified, dependencies = {}) {
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "extension.js"), "utf8"), {
+        AbortController,
         Buffer,
         clearTimeout,
         console,
@@ -312,11 +412,23 @@ function loadExtension(vscode, process, spawned, identityOutput = {
         exports: module.exports,
         module,
         require: name => name === "./package.json" && dependencies.packageRelease
-            ? { lucentRelease: dependencies.packageRelease }
+            ? { lucentRelease: dependencies.packageRelease, lucentCacheHelper: dependencies.helperManifest }
+            : name === "./release-catalog.json" && dependencies.releaseCatalog ? dependencies.releaseCatalog
+            : name === "./server-cache" && dependencies.cache ? { ...require("./server-cache"), ...dependencies.cache }
+            : name === "./server-acquisition" && dependencies.acquisition ? { ...require("./server-acquisition"), ...dependencies.acquisition }
+            : name === "./project-requirements" ? {
+                ...require("./project-requirements"),
+                readProjectRequirements: dependencies.readRequirements ?? (async (_server, projectPath) => ({
+                    compiler: { sha256: "3".repeat(64), sourceCommit: null },
+                    projectPath, state: "development-source", inputs: []
+                })),
+                verifyRequirementInputs: dependencies.verifyInputs ?? (async () => {})
+            }
             : name === "./server-bundle" && dependencies.bundleVerifier
                 ? { verifyBundledServer: dependencies.bundleVerifier }
                 : name === "vscode" ? vscode : name === "child_process" ? {
             execFile: (_command, _args, _options, callback) => {
+                if (_command === "where.exe") { callback(null, path.resolve("dotnet.exe")); return; }
                 identified?.();
                 return typeof identityOutput === "function"
                     ? identityOutput(callback) : callback(null, JSON.stringify(identityOutput));
@@ -374,12 +486,13 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
     const logs = [];
     const resources = [];
     const messages = [];
+    const watchers = [];
     let generated;
     let onGrantTrust;
     let onOpen;
     let spawnCount = 0;
     let identityChecks = 0;
-    let restart;
+    const commands = new Map();
     const own = () => {
         const resource = { disposed: 0, dispose() { this.disposed++; } };
         resources.push(resource);
@@ -391,9 +504,15 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
         workspaceFolders: folders ?? [{ uri: { fsPath: path.resolve("workspace") } }],
             getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : serverPath }),
         textDocuments: [],
-        createFileSystemWatcher: () => Object.assign(own(), {
-            onDidCreate: own, onDidChange: own, onDidDelete: own
-        }),
+        createFileSystemWatcher: pattern => {
+            const watcher = Object.assign(own(), { pattern,
+                onDidCreate(callback) { this.create = callback; return own(); },
+                onDidChange(callback) { this.change = callback; return own(); },
+                onDidDelete(callback) { this.delete = callback; return own(); }
+            });
+            watchers.push(watcher);
+            return watcher;
+        },
         onDidOpenTextDocument: callback => { onOpen = callback; return own(); },
         onDidChangeTextDocument: own,
         onDidCloseTextDocument: own,
@@ -401,6 +520,7 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
     };
     const vscode = {
         workspace,
+        authentication: dependencies.authentication,
         window: { createOutputChannel: () => {
             const channel = own();
             const write = text => {
@@ -408,15 +528,16 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
                 logs.push(text);
             };
             return Object.assign(channel, { info: write, warn: write, error: write });
-        }, showErrorMessage: message => messages.push(message), showQuickPick: async items => items[selectedFolder] },
+        }, showErrorMessage: message => messages.push(message), showQuickPick: async items => items[selectedFolder], ...dependencies.window },
+        ProgressLocation: { Notification: 15 },
         Uri: { file: value => ({ toString: () => value }), parse: value => ({ scheme: value.startsWith("file:") ? "file" : undefined, toString: () => value }) },
         Range: class { constructor(...values) { this.values = values; } },
         WorkspaceEdit: class { constructor() { this.changes = []; } replace(uri, range, text) { this.changes.push({ uri, range, text }); } },
         CodeAction: class { constructor(title, kind) { this.title = title; this.kind = kind; } },
         CodeActionKind: { QuickFix: "quickfix" },
-        RelativePattern: class {},
+        RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
         SemanticTokensLegend: class {},
-        commands: { registerCommand: (name, command) => { if (name === "lucentLui.restartLanguageServices") restart = command; return { dispose() {} }; } },
+        commands: { registerCommand: (name, command) => { commands.set(name, command); return { dispose() {} }; }, executeCommand: name => commands.get(name)() },
         CompletionItem: class { constructor(label, kind) { this.label = label; this.kind = kind; } },
         CompletionItemKind: { Field: "field" },
         MarkdownString: class { appendText(text) { this.value = text; } },
@@ -426,12 +547,13 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
                     ? (_selector, provider) => { codeActionsProvider = provider; return own(); } : key === "registerDocumentSymbolProvider"
                         ? (_selector, provider) => { symbolProvider = provider; return own(); } : own })
     };
-    const context = { subscriptions: [], asAbsolutePath: relative => path.resolve("extension-host", relative) };
+    const context = { subscriptions: [], asAbsolutePath: relative => path.resolve("extension-host", relative), globalStorageUri: { scheme: "file", fsPath: path.resolve("extension-storage") } };
     let started;
     const startedPromise = new Promise(resolve => { started = resolve; });
     let nextProcess = 0;
     const extension = loadExtension(vscode, () => processes[Math.min(nextProcess++, processes.length - 1)], () => { spawnCount++; started(); }, identity, () => { identityChecks++; }, dependencies);
-    return { context, messages, resources, logs, workspace, started: startedPromise, get spawnCount() { return spawnCount; }, get identityChecks() { return identityChecks; }, grantTrust: () => { workspace.isTrusted = true; onGrantTrust(); }, restart: () => restart(), open: document => onOpen(document), codeActions: () => codeActionsProvider, completion: () => completionProvider, symbols: () => symbolProvider, activate: () => extension.activate(context),
+    return { context, messages, resources, logs, watchers, workspace, started: startedPromise, get spawnCount() { return spawnCount; }, get identityChecks() { return identityChecks; }, grantTrust: () => { workspace.isTrusted = true; onGrantTrust(); }, restart: () => commands.get("lucentLui.restartLanguageServices")(), importArchive: () => commands.get("lucentLui.importServerArchive")(), open: document => onOpen(document), codeActions: () => codeActionsProvider, completion: () => completionProvider, symbols: () => symbolProvider, activate: () => extension.activate(context),
+        installMatching: () => commands.get("lucentLui.installMatchingServer")(),
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
 
@@ -466,6 +588,77 @@ test("incompatible server identity prevents project initialization", async () =>
     assert.match(harness.messages[0], /incompatible/);
 });
 
+test("project compiler mismatch and stale restore never spawn semantic services", async () => {
+    for (const readRequirements of [
+        async () => ({ compiler: { sha256: "9".repeat(64), sourceCommit: null }, inputs: [] }),
+        async () => { throw new Error("stale-restore: restore the imported package requirements"); }
+    ]) {
+        const harness = failureHarness(new MockProcess(), { dependencies: { readRequirements } });
+        await harness.activate();
+        assert.equal(harness.spawnCount, 0);
+        assert.match(harness.messages[0], /compiler differs|stale-restore/);
+        harness.context.subscriptions.forEach(resource => resource.dispose());
+    }
+});
+
+test("restart cancels pending project evaluation and ignores its late result", async () => {
+    let complete;
+    let oldSignal;
+    let evaluations = 0;
+    const harness = failureHarness(new MockProcess(), { dependencies: {
+        readRequirements: (_server, _project, signal) => {
+            if (evaluations++ === 0) {
+                oldSignal = signal;
+                return new Promise(resolve => { complete = resolve; });
+            }
+            return Promise.resolve({ compiler: { sha256: "3".repeat(64), sourceCommit: null }, inputs: [] });
+        }
+    } });
+    const first = harness.activate();
+    while (!complete) await new Promise(resolve => setImmediate(resolve));
+    await harness.restart();
+    assert.equal(oldSignal.aborted, true);
+    assert.equal(harness.spawnCount, 1);
+    complete({ compiler: { sha256: "3".repeat(64), sourceCommit: null }, inputs: [] });
+    await first;
+    assert.equal(harness.spawnCount, 1);
+    assert.deepEqual(harness.messages, []);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("changed project input between evaluation and startup prevents initialization", async () => {
+    const harness = failureHarness(new MockProcess(), { dependencies: {
+        verifyInputs: async () => { throw new Error("project inputs changed during tooling selection"); }
+    } });
+    await harness.activate();
+    assert.equal(harness.spawnCount, 0);
+    assert.match(harness.messages[0], /inputs changed/);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("evaluated tooling input changes stop services while unrelated sibling files do not", async () => {
+    const input = path.resolve("workspace", "Directory.Packages.props");
+    const server = new MockProcess();
+    const harness = failureHarness(server, { dependencies: {
+        readRequirements: async () => ({ compiler: { sha256: "3".repeat(64), sourceCommit: null },
+            inputs: [{ path: input, sha256: "1".repeat(64) }] })
+    } });
+    await harness.activate();
+    const watcher = harness.watchers.find(item => item.pattern.base === path.dirname(input) && item.pattern.pattern === "*");
+    assert.ok(watcher);
+    watcher.change({ fsPath: path.join(path.dirname(input), "Unrelated.md") });
+    assert.deepEqual(harness.messages, []);
+    assert.equal(watcher.disposed, 0);
+    watcher.change({ fsPath: input });
+    assert.equal(watcher.disposed, 1);
+    assert.match(harness.messages[0], /tooling inputs changed/);
+    assert.equal(server.lastRequest.method, "shutdown");
+    watcher.change({ fsPath: input });
+    assert.equal(harness.messages.length, 1);
+    server.emit("exit", 0, null);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
 test("bundled server verifies workspace-host bytes and exact identity before initialization", async () => {
     const identity = {
         schemaVersion: 1, sourceCommit: "1".repeat(40),
@@ -492,15 +685,18 @@ test("bundled server verifies workspace-host bytes and exact identity before ini
     assert.equal(server.lastRequest.method, "initialized");
     harness.context.subscriptions.forEach(resource => resource.dispose());
 
+    let evaluatedMismatch = false;
     const mismatch = failureHarness(new MockProcess(), {
         identity: { ...identity, sourceCommit: "4".repeat(40) }, serverPath: null,
         dependencies: {
             packageRelease,
+            readRequirements: async () => { evaluatedMismatch = true; throw new Error("Must not evaluate with a false bundled identity."); },
             bundleVerifier: root => ({ serverPath: path.join(root, "Lucent.Lui.LanguageServer.dll"), identity })
         }
     });
     await mismatch.activate();
     assert.equal(mismatch.spawnCount, 0);
+    assert.equal(evaluatedMismatch, false);
     assert.match(mismatch.messages[0], /different identity/);
 });
 
@@ -521,6 +717,231 @@ test("missing protocol minor and incompatible language fail the project-free ide
         assert.equal(harness.spawnCount, 0);
         assert.match(harness.messages[0], /incompatible/);
     }
+});
+
+function cacheLifecycleFixture() {
+    const identity = {
+        schemaVersion: 1, sourceCommit: "1".repeat(40), server: { sha256: "2".repeat(64) },
+        compiler: { sha256: "3".repeat(64), informationalVersion: "0.3.0+" + "1".repeat(40) },
+        language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+        protocol: { id: "lucent-lui", major: 1, minor: 0 }
+    };
+    const projectPath = path.resolve("workspace/host/Host.csproj");
+    const requirement = {
+        schemaVersion: 1, kind: "project-requirements", state: "package", semanticReady: false, projectPath,
+        compiler: { ...identity.compiler, sourceCommit: identity.sourceCommit }, inputs: [],
+        projects: [{ projectPath, state: "package", sdk: { id: "Lucent.Lui.Sdk", version: "0.3.0-dev.101.1", repositoryCommit: identity.sourceCommit, packageSha256: "7".repeat(64) } }]
+    };
+    const entry = {
+        sdk: { id: "Lucent.Lui.Sdk", version: "0.3.0-dev.101.1", packageSha256: "7".repeat(64) },
+        releaseVersion: "0.3.0-dev.101.1", server: { identity, artifact: { bytes: 123, sha256: "4".repeat(64) }, filesSha256: "5".repeat(64) },
+        anchor: { kind: "bundled-catalog", sourceCommit: identity.sourceCommit, descriptorSha256: "6".repeat(64),
+            githubActions: { repository: "RichiCoder1/lucent", workflow: ".github/workflows/tests.yml",
+                runId: 123, runAttempt: 1, headSha: identity.sourceCommit,
+                artifact: { id: 456, name: "complete-release-123-1", digest: "sha256:" + "8".repeat(64) } } }
+    };
+    return { identity, requirement, dependencies: {
+        packageRelease: { ...require("./package.json").lucentRelease, sourceCommit: identity.sourceCommit, bundledServer: { identity } },
+        releaseCatalog: { schemaVersion: 1, releases: [entry] },
+        bundleVerifier: root => ({ serverPath: path.join(root, "Lucent.Lui.LanguageServer.dll"), identity }),
+        readRequirements: async () => requirement
+    } };
+}
+
+test("cache selection uses the exact project release and cancelled verification cannot spawn later", async () => {
+    const fixture = cacheLifecycleFixture();
+    let finish;
+    let signal;
+    const harness = failureHarness(new MockProcess(), { identity: fixture.identity, serverPath: null, dependencies: {
+        ...fixture.dependencies, cache: { resolveCachedServer: options => {
+            assert.equal(options.requirement, fixture.requirement);
+            assert.equal(options.cacheRoot, path.resolve("extension-storage/tooling"));
+            signal = options.signal;
+            return new Promise(resolve => { finish = resolve; });
+        } }
+    } });
+    const activating = harness.activate();
+    for (let attempt = 0; !finish && attempt < 100; attempt++) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(finish, JSON.stringify(harness.messages));
+    harness.context.subscriptions.forEach(item => item.dispose());
+    assert.equal(signal.aborted, true);
+    finish({ status: "selected", serverPath: path.resolve("cache/server.dll"), identity: fixture.identity });
+    await activating;
+    assert.equal(harness.spawnCount, 0);
+    assert.equal(harness.identityChecks, 1);
+
+    const ready = failureHarness(new MockProcess(), { identity: fixture.identity, serverPath: null, dependencies: {
+        ...fixture.dependencies, cache: { resolveCachedServer: async () => ({ status: "selected", serverPath: path.resolve("cache/server.dll"), identity: fixture.identity }) }
+    } });
+    await ready.activate();
+    assert.equal(ready.spawnCount, 1, JSON.stringify(ready.messages));
+    assert.equal(ready.identityChecks, 2);
+    assert.ok(ready.logs.some(line => line.includes("Starting verified cache language server")));
+    ready.context.subscriptions.forEach(item => item.dispose());
+});
+
+test("explicit offline import preserves the active process and reports failed or cancelled installs", async () => {
+    for (const outcome of ["selected", "cache-missing", "cancelled"]) {
+        const fixture = cacheLifecycleFixture();
+        const server = new MockProcess();
+        const notices = [];
+        let imported = 0;
+        const harness = failureHarness(server, { identity: fixture.identity, dependencies: {
+            ...fixture.dependencies,
+            window: {
+                showOpenDialog: async () => [{ scheme: "file", fsPath: path.resolve("server.zip") }],
+                withProgress: async (_options, action) => action({}, { isCancellationRequested: false, onCancellationRequested: () => disposable() }),
+                showInformationMessage: async message => { notices.push(message); }
+            },
+            cache: { importApprovedArchive: async options => {
+                imported++;
+                assert.equal(options.archivePath, path.resolve("server.zip"));
+                return { status: outcome, reason: "fixture rejection" };
+            } }
+        } });
+        await harness.activate();
+        assert.equal(harness.spawnCount, 1, JSON.stringify(harness.messages));
+        await harness.importArchive();
+        assert.equal(imported, 1);
+        assert.equal(server.exitCode, null);
+        assert.equal(harness.spawnCount, 1);
+        assert.equal(notices.length, outcome === "selected" ? 1 : 0);
+        assert.equal(harness.messages.length, outcome === "cache-missing" ? 1 : 0);
+        harness.context.subscriptions.forEach(item => item.dispose());
+    }
+});
+
+test("offline import in Restricted Mode does not inspect projects, ask for files or start tools", async () => {
+    let inspected = 0;
+    const harness = failureHarness(new MockProcess(), { trusted: false, dependencies: {
+        readRequirements: async () => { inspected++; },
+        window: { showOpenDialog: async () => { throw new Error("must not request files"); } }
+    } });
+    await harness.activate();
+    await harness.importArchive();
+    assert.equal(inspected, 0);
+    assert.equal(harness.identityChecks, 0);
+    assert.equal(harness.spawnCount, 0);
+    assert.match(harness.messages[0], /Trust this workspace before importing/);
+    harness.context.subscriptions.forEach(item => item.dispose());
+});
+
+test("online install requires trust and an approved project before requesting authentication", async () => {
+    for (const trusted of [false, true]) {
+        const fixture = cacheLifecycleFixture();
+        const harness = failureHarness(new MockProcess(), { trusted, dependencies: {
+            ...fixture.dependencies, releaseCatalog: { schemaVersion: 1, releases: [] },
+            authentication: { getSession: async () => assert.fail("must not request authentication") },
+            acquisition: { acquireApprovedRelease: async () => assert.fail("must not download") }
+        } });
+        await harness.activate();
+        await harness.installMatching();
+        assert.ok(harness.messages.some(message => trusted ? /No authenticated release anchor/.test(message) : /Trust this workspace/.test(message)));
+        harness.context.subscriptions.forEach(item => item.dispose());
+    }
+});
+
+test("explicit online install cleans its download and preserves the active process", async () => {
+    for (const outcome of ["selected", "cache-missing", "cancelled", "throws"]) {
+        const fixture = cacheLifecycleFixture();
+        const server = new MockProcess();
+        const notices = [];
+        let cleaned = 0;
+        let imported = 0;
+        const harness = failureHarness(server, { identity: fixture.identity, dependencies: {
+            ...fixture.dependencies,
+            authentication: { getSession: async (provider, _scopes, options) => {
+                assert.equal(provider, "github");
+                assert.equal(options.createIfNone, true);
+                return { accessToken: "private-test-token" };
+            } },
+            window: {
+                withProgress: async (_options, action) => action({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => disposable() }),
+                showInformationMessage: async message => { notices.push(message); }
+            },
+            acquisition: { acquireApprovedRelease: async options => {
+                assert.equal(options.token, "private-test-token");
+                assert.equal(options.requirement, fixture.requirement);
+                return { status: "downloaded", cleanup: async () => { cleaned++; } };
+            } },
+            cache: { importDownloadedRelease: async options => {
+                imported++;
+                assert.equal(options.token, undefined);
+                if (outcome === "throws") throw new Error("fixture installation failed");
+                return { status: outcome, reason: "fixture rejection" };
+            } }
+        } });
+        await harness.activate();
+        await harness.installMatching();
+        assert.equal(imported, 1);
+        assert.equal(cleaned, 1);
+        assert.equal(server.exitCode, null);
+        assert.equal(harness.spawnCount, 1);
+        assert.equal(notices.length, outcome === "selected" ? 1 : 0);
+        assert.equal(harness.messages.length, ["cache-missing", "throws"].includes(outcome) ? 1 : 0);
+        assert.ok(![...harness.messages, ...harness.logs, ...notices].some(message => message.includes("private-test-token")));
+        harness.context.subscriptions.forEach(item => item.dispose());
+    }
+});
+
+test("explicit online install reuses a verified cache without authentication or download", async () => {
+    const fixture = cacheLifecycleFixture();
+    const notices = [];
+    const server = new MockProcess();
+    const harness = failureHarness(server, { identity: fixture.identity, dependencies: {
+        ...fixture.dependencies,
+        authentication: { getSession: async () => assert.fail("verified cache must not request authentication") },
+        acquisition: { acquireApprovedRelease: async () => assert.fail("verified cache must not download") },
+        cache: { resolveCachedServer: async () => ({ status: "selected", serverPath: path.resolve("verified-cache/server.dll"), identity: fixture.identity }) },
+        window: { showInformationMessage: async message => { notices.push(message); } }
+    } });
+    await harness.activate();
+    await harness.installMatching();
+    assert.equal(notices.length, 1);
+    assert.equal(server.exitCode, null);
+    assert.equal(harness.spawnCount, 1);
+    harness.context.subscriptions.forEach(item => item.dispose());
+});
+
+test("disposing while authentication is pending ignores its late response", async () => {
+    const fixture = cacheLifecycleFixture();
+    let finishAuthentication;
+    const harness = failureHarness(new MockProcess(), { identity: fixture.identity, dependencies: {
+        ...fixture.dependencies,
+        authentication: { getSession: () => new Promise(resolve => { finishAuthentication = resolve; }) },
+        acquisition: { acquireApprovedRelease: async () => assert.fail("disposed command must not download") }
+    } });
+    await harness.activate();
+    const installing = harness.installMatching();
+    for (let attempt = 0; !finishAuthentication && attempt < 100; attempt++) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(finishAuthentication);
+    harness.context.subscriptions.forEach(item => item.dispose());
+    finishAuthentication({ accessToken: "late-test-token" });
+    await installing;
+    assert.equal(harness.spawnCount, 1);
+    assert.deepEqual(harness.messages, []);
+});
+
+test("changed project inputs after download prevent installation and clean the download", async () => {
+    const fixture = cacheLifecycleFixture();
+    let changed = false;
+    let cleaned = 0;
+    const harness = failureHarness(new MockProcess(), { identity: fixture.identity, dependencies: {
+        ...fixture.dependencies,
+        authentication: { getSession: async () => ({ accessToken: "test-token" }) },
+        window: { withProgress: async (_options, action) => action({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => disposable() }) },
+        verifyInputs: async () => { if (changed) throw new Error("project inputs changed"); },
+        acquisition: { acquireApprovedRelease: async () => {
+            changed = true;
+            return { status: "downloaded", cleanup: async () => { cleaned++; } };
+        } },
+        cache: { importDownloadedRelease: async () => assert.fail("changed project must not install") }
+    } });
+    await harness.activate();
+    await harness.installMatching();
+    assert.equal(cleaned, 1);
+    assert.match(harness.messages[0], /project inputs changed/);
+    harness.context.subscriptions.forEach(item => item.dispose());
 });
 
 test("explicit restart disposes the old server's registrations before starting another", async () => {

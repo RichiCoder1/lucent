@@ -1,9 +1,9 @@
 # Lucent.Templates
 
 Four standard .NET templates for Lucent: `lucent-app`, `lucent-library`,
-`lucent-tests`, and `lucent-component`. This local first slice is awaiting
-integration into the compatible release inventory; it is not a published
-onboarding release.
+`lucent-tests`, and `lucent-component`. The template package participates in the
+coordinated Lucent release inventory and consumer checks. Use a version from a
+successfully published release; a local package is development evidence.
 
 Generation runs no post-actions. The selected package stamps exact Lucent and
 .NET SDK pins. Restore explicitly after configuring the supported package feed,

@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory)][string] $ServerArchivePath,
     [Parameter(Mandatory)][string] $ServerDirectory,
+    [Parameter(Mandatory)][string] $CacheHelperDirectory,
     [string] $OutputPath
 )
 
@@ -19,6 +20,17 @@ $serverDirectory = (Resolve-Path -LiteralPath $ServerDirectory).Path
 $bundle = Get-LuiServerBundle $serverArchive
 $sourceCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -or $sourceCommit -cne $bundle.identity.sourceCommit) { throw 'Extension and server archive source commits differ.' }
+$helperDirectory = (Resolve-Path -LiteralPath $CacheHelperDirectory).Path
+if ((Get-Item -LiteralPath $helperDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Cache helper directory must not be a link.' }
+$helperFiles = @('Lucent.Tooling.Cache.dll', 'Lucent.Tooling.Cache.deps.json', 'Lucent.Tooling.Cache.runtimeconfig.json')
+$helperEntries = foreach ($name in $helperFiles) {
+    $helperPath = Join-Path $helperDirectory $name
+    $helperFile = Get-Item -LiteralPath $helperPath
+    if ($helperFile.PSIsContainer -or ($helperFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $helperFile.Length -le 0) { throw "Invalid cache helper file: $name" }
+    @{ fileName = $name; bytes = $helperFile.Length; sha256 = (Get-FileHash -LiteralPath $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+$helperVersion = Get-LuiAssemblyVersion ([IO.File]::ReadAllBytes((Join-Path $helperDirectory 'Lucent.Tooling.Cache.dll')))
+if ($helperVersion -notmatch ('\+' + [regex]::Escape($sourceCommit) + '(\.|$)')) { throw 'Extension and cache helper source commits differ.' }
 $archive = Open-LuiArchive $serverArchive
 try {
     $inventory = Read-LuiArchiveJson $archive 'lucent-server-files.json'
@@ -55,6 +67,10 @@ try {
         'package.json',
         'extension.js',
         'server-bundle.js',
+        'project-requirements.js',
+        'server-cache.js',
+        'server-acquisition.js',
+        'release-catalog.json',
         'language-configuration.json',
         'README.md'
     )
@@ -65,6 +81,7 @@ try {
     $stagedManifest.lucentRelease.serverDelivery = 'bundled'
     $stagedManifest.lucentRelease.sourceCommit = $sourceCommit
     $stagedManifest.lucentRelease.bundledServer = $bundle
+    $stagedManifest.lucentCacheHelper = @{ schemaVersion = 1; sourceCommit = $sourceCommit; entryPoint = 'Lucent.Tooling.Cache.dll'; files = @($helperEntries) }
     $stagedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $stageRoot 'package.json') -Encoding utf8
     $serverStage = Join-Path $stageRoot 'server'
     [IO.Directory]::CreateDirectory($serverStage) | Out-Null
@@ -77,6 +94,9 @@ try {
         }
     }
     finally { $archive.Zip.Dispose() }
+    $helperStage = Join-Path $stageRoot 'tooling-cache'
+    [IO.Directory]::CreateDirectory($helperStage) | Out-Null
+    foreach ($entry in $helperEntries) { Copy-Item -LiteralPath (Join-Path $helperDirectory $entry.fileName) -Destination (Join-Path $helperStage $entry.fileName) }
     Copy-Item (Join-Path $extensionRoot 'syntaxes') (Join-Path $stageRoot 'syntaxes') -Recurse
     Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stageRoot 'LICENSE')
 

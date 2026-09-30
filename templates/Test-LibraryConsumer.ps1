@@ -16,7 +16,7 @@ $consumer = Join-Path $ProofDirectory 'library-consumer'
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Example.Cards" Version="[1.0.0]" />
+    <PackageReference Include="Example.Cards" Version="[0.1.0-dev.1]" />
     <PackageReference Include="Lucent.Testing.Skia" Version="[$Version]" />
   </ItemGroup>
 </Project>
@@ -24,9 +24,19 @@ $consumer = Join-Path $ProofDirectory 'library-consumer'
 @'
 namespace PackageConsumer;
 
+style LibraryViewStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 8;
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+}
+
 public component LibraryView() {
-    <Example.Cards.CounterCard title="Packaged counter" />
-    <Example.Cards.PackageGreeting title="Packaged item" />
+    <Layout style={LibraryViewStyle}>
+        <Example.Cards.Components.CounterCard title="Packaged counter" />
+        <Example.Cards.Components.PackageGreeting title="Packaged item" />
+    </Layout>
 }
 '@ | Set-Content -LiteralPath (Join-Path $consumer 'LibraryView.lui')
 @'

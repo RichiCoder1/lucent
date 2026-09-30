@@ -40,13 +40,24 @@ Obtain these artifacts from the expected authenticated repository/workflow/run;
 do not trust a downloaded descriptor merely because it labels itself complete.
 The source of truth for policy is [lui-release-policy.json](../eng/lui-release-policy.json),
 and the format is [release-set.schema.json](../tools/release-set.schema.json).
+For a shipped editor catalog, `tools/New-LuiReleaseCatalog.ps1 -RunId <id>
+-RunAttempt <attempt> -OutputPath <new-catalog.json>` uses an ephemeral
+`GITHUB_TOKEN` to query only the fixed repository/workflow. It verifies the complete
+artifact's GitHub digest before validating its descriptor and payload. It never
+accepts a user-supplied archive URL or receipt as publisher evidence. Optional
+`-EvidenceDirectory <new-directory>` retains the verified archive and sanitized
+metadata; tokens and signed download URLs are not recorded. Its metadata rejection
+fixtures run through `tools/Test-LuiReleaseCatalog.ps1` in the release extension check.
+See the [editor tooling lifecycle plan](plans/editor-tooling-lifecycle.md) for
+project matching, immutable cache/import and explicit approved-release downloads.
 
 ## Local validation
 
 ```powershell
 ./tools/Pack-LuiServer.ps1 -ServerDirectory <published-server-directory> -OutputPath <server.zip>
 ./tools/Pack-LuiExtension.ps1 -ServerArchivePath <server.zip> `
-  -ServerDirectory <published-server-directory> -OutputPath <extension.vsix>
+  -ServerDirectory <published-server-directory> `
+  -CacheHelperDirectory <published-cache-helper-directory> -OutputPath <extension.vsix>
 ./tools/New-ReleaseSet.ps1 -ArtifactDirectory <directory> -Version <exact-version> `
   -SourceCommit <commit> -ServerArchive server.zip -Vsix extension.vsix `
   -OutputPath <candidate.json>
@@ -57,6 +68,11 @@ Archive validation does not execute its contents. Packing the server runs its
 project-free `--identity` command against the supplied build, which reports actual
 assembly hashes and runtime requirements without loading an application project.
 Normal project evaluation remains the authoritative semantic path after trust.
+The cache helper is published from `src/Lucent.Tooling.Cache` in Release with
+`-p:UseAppHost=false` at the same source commit as the server. Its three managed
+runtime files are inventoried and hashed inside the VSIX before execution. The
+helper validates server archives and immutable cache generations; it does not
+authenticate a caller-supplied descriptor or contact GitHub.
 The extension package verifies the server inventory and source identity against
 the standalone server archive. At startup, it checks the bundled bytes again
 before running the project-free `--identity` command and opening a project.

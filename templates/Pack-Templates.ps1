@@ -17,6 +17,7 @@ $stage = Join-Path $root ('artifacts/templates-pack/' + [Guid]::NewGuid().ToStri
 [IO.Directory]::CreateDirectory($stage) | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Lucent.Templates.csproj') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'content') -Destination $stage -Recurse
 # A content-only package must not inherit the repository's build graph or dependencies.
 '<Project />' | Set-Content -LiteralPath (Join-Path $stage 'Directory.Build.props'), (Join-Path $stage 'Directory.Build.targets'), (Join-Path $stage 'Directory.Packages.props')

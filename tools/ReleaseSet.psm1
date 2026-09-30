@@ -229,8 +229,30 @@ function Get-LuiVsix([string] $Path) {
             if ($compatibility['sourceCommit'] -cne $bundle['identity']['sourceCommit']) { throw 'Extension and bundled server source commits differ.' }
         }
         else { $bundle = $null }
+        if ($manifest['files'] -contains 'server-cache.js' -and !$manifest['lucentCacheHelper']) { throw 'Extension cache module has no bundled helper.' }
+        if ($manifest['lucentCacheHelper']) {
+            $helper = $manifest['lucentCacheHelper']
+            if ($helper['schemaVersion'] -ne 1 -or $helper['entryPoint'] -cne 'Lucent.Tooling.Cache.dll' -or $helper['sourceCommit'] -cne $compatibility['sourceCommit']) { throw 'Unsupported or mismatched cache helper identity.' }
+            $helperNames = @('Lucent.Tooling.Cache.dll', 'Lucent.Tooling.Cache.deps.json', 'Lucent.Tooling.Cache.runtimeconfig.json')
+            Assert-LuiSame @($helper['files'] | ForEach-Object { $_['fileName'] } | Sort-Object -CaseSensitive) @($helperNames | Sort-Object -CaseSensitive) 'cache helper inventory'
+            $prefix = 'extension/tooling-cache/'
+            Assert-LuiSame @($archive.Entries.Keys | Where-Object { $_.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } | Sort-Object -CaseSensitive) @($helperNames | ForEach-Object { $prefix + $_ } | Sort-Object -CaseSensitive) 'cache helper payload'
+            foreach ($file in $helper['files']) {
+                $bytes = Read-LuiArchiveBytes $archive ($prefix + $file['fileName'])
+                if ($bytes.Length -ne $file['bytes'] -or (Get-LuiBytesHash $bytes) -cne $file['sha256']) { throw 'Cache helper bytes differ from the packaged inventory.' }
+            }
+            $helperVersion = Get-LuiAssemblyVersion (Read-LuiArchiveBytes $archive ($prefix + 'Lucent.Tooling.Cache.dll'))
+            if ($helperVersion -notmatch ('\+' + [regex]::Escape($helper['sourceCommit']) + '(\.|$)')) { throw 'Cache helper assembly source identity mismatch.' }
+            $runtime = Read-LuiArchiveJson $archive ($prefix + 'Lucent.Tooling.Cache.runtimeconfig.json')
+            if ($runtime['runtimeOptions']['tfm'] -cne 'net10.0' -or $runtime['runtimeOptions']['framework']['name'] -cne 'Microsoft.NETCore.App') { throw 'Unsupported cache helper runtime.' }
+            Assert-LuiDependencyFiles $archive ($prefix + 'Lucent.Tooling.Cache.deps.json')
+        }
+        elseif (@($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/tooling-cache/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Extension contains an undeclared cache helper.' }
         $declared = @(@{ path = $manifest['main']; json = $false })
         if ($null -ne $bundle) { $declared += @{ path = './server-bundle.js'; json = $false } }
+        foreach ($file in @('project-requirements.js', 'server-cache.js', 'server-acquisition.js', 'release-catalog.json')) {
+            if ($manifest['files'] -contains $file) { $declared += @{ path = $file; json = $file.EndsWith('.json') } }
+        }
         foreach ($language in $manifest['contributes']['languages']) {
             $declared += @{ path = $language['configuration']; json = $true }
         }
@@ -377,4 +399,4 @@ function New-LuiReleaseSet {
     return $descriptor
 }
 
-Export-ModuleMember -Function Get-LuiReleasePolicy, ConvertTo-LuiCanonicalJson, Get-LuiBytesHash, Assert-LuiRelativePath, Resolve-LuiArtifactPath, Get-LuiArtifact, Open-LuiArchive, Read-LuiArchiveBytes, Read-LuiArchiveJson, Get-LuiServerArchive, Get-LuiServerBundle, Get-LuiVsix, Get-LuiPackageInventory, Assert-LuiReleaseSet, Write-LuiImmutableJson, New-LuiReleaseSet
+Export-ModuleMember -Function Get-LuiReleasePolicy, ConvertTo-LuiCanonicalJson, Get-LuiBytesHash, Get-LuiAssemblyVersion, Assert-LuiRelativePath, Resolve-LuiArtifactPath, Get-LuiArtifact, Open-LuiArchive, Read-LuiArchiveBytes, Read-LuiArchiveJson, Get-LuiServerArchive, Get-LuiServerBundle, Get-LuiVsix, Get-LuiPackageInventory, Assert-LuiReleaseSet, Write-LuiImmutableJson, New-LuiReleaseSet
