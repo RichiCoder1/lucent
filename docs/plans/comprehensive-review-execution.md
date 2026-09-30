@@ -59,7 +59,8 @@ The repository's test wrapper discovered zero tests on this invocation; directly
 executing the freshly built test assembly ran the required cases. Package/CI
 delivery remains to be verified separately; no desktop walkthrough is claimed.
 Source and planning updates are pushed as `6bfb0a4e`. CI 90 was superseded by
-the subsequent asset/UIA push; the combined source is being verified in CI 91.
+the subsequent asset/UIA push. CI 91 passed managed/package verification and
+published the combined source as `0.3.0-dev.91.1`.
 
 ### Asset/UIA boundaries — #322
 
@@ -75,7 +76,7 @@ The noninteractive hidden-window UIA text contract passes, including seven exact
 range cases through the provider ABI. Both affected builds are warning-clean;
 formatting and scoped whitespace checks pass. Evidence is under
 `artifacts/review-c9-c10`. No app window or focus-taking input was used.
-Source is pushed as `59bc11d2`.
+Source is pushed as `59bc11d2`; CI 91 passed and published `0.3.0-dev.91.1`.
 
 ### Authoring reliability — #321
 
@@ -90,12 +91,33 @@ Focused regressions reproduced the reported failures before the fixes. Compiler
 147/147, generator 52/52, tooling 9/9, affected editor 8/8 and extension 16/16
 checks pass. Two additional named-method map/diagnostic cases pass after the broad
 compiler run, with no intervening production change. Affected builds are
-warning-clean, formatting and whitespace checks pass. The frozen package and
-console NativeAOT proof is next; no editor restart or desktop check is claimed.
+warning-clean, formatting and whitespace checks pass.
+
+Source commit `f825dc43` passed frozen package verification as
+`0.3.0-dev.review321.gf825dc43`: managed C#/.lui consumption, lint configuration
+and named-component parity, consumer and routed named-component NativeAOT
+execution, and prepared-SDK missing-host/nondeterminism negatives. Source and
+package hashes remained unchanged. Evidence is under
+`artifacts/review321-package-evidence`. No editor restart or desktop check is
+claimed; public CI delivery is tracked separately.
 
 ### Notes integrity — #11
 
 `a3a51e8` corrects coherent clean-editor refresh and retains a dirty editor's
 original revision. Both regressions failed before the fix; 34 workspace tests
-passed afterward. Follow-on replay/failure work remains in progress, with three
-additional pre-fix failures retained under `artifacts/review-followups`.
+passed afterward; its CI build succeeded. Follow-on replay/failure work now
+reconciles immutable write identities, conditionally removes only an owned
+recovery row, preserves independent draft/archive failures, and fences retry
+and discard against late autosave callbacks. Cancelling a debounce for retry
+still requests the observed edit before selection changes. Newer editor content
+survives older acknowledgements, and successful autosave clears its resolved
+failure feedback.
+
+Independent review found additional replay/discard races and offscreen-edit
+loss; those findings were reproduced before correction. Current managed checks
+pass 57 cases with one existing opt-in probe skipped; storage checks pass 24/24.
+NativeAOT publication passed; executable SHA-256 is
+`AFE14D2FDA3694F97DF90F3AECD91B2074996FCBA1193152071F9ABC8A3675FA`.
+The correction and storage contract are pushed as Notes `85660119`; its CI run
+`36649087309` passed.
+Evidence is under `artifacts/review-followups`; no desktop walkthrough is claimed.
