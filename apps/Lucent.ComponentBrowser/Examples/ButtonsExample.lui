@@ -49,7 +49,7 @@ public component ButtonsExample() {
         </Text>
         <Layout style={ButtonsRowStyle}>
             <Button
-                leadingIcon={() => Lucent.Icons.Lucide.LucideIcons.CircleCheck}
+                leadingIcon={Lucent.Icons.Lucide.LucideIcons.CircleCheck}
                 command={applyCommand}
                 name="component-browser.buttons.primary"
             >

@@ -268,6 +268,18 @@ public static partial class LuiCompiler
                 document.Source
             );
         }
+        // Default-content probes must use the same attribute readers as final emission.
+        var liveValues = new HashSet<int>();
+        var components = ComponentPlans(
+            document,
+            componentModel,
+            componentTree,
+            componentMap,
+            componentWriter,
+            statePlans,
+            liveValues,
+            diagnostics
+        );
         var contentPlans = ContentPlans(
                 probeModel,
                 probeTree,
@@ -276,6 +288,7 @@ public static partial class LuiCompiler
                 document,
                 identity,
                 contentContributions,
+                liveValues,
                 diagnostics,
                 namedComponent,
                 namedPlan
@@ -301,6 +314,7 @@ public static partial class LuiCompiler
                 document,
                 identity,
                 contentContributions,
+                liveValues,
                 implicitComponentDiagnostics,
                 namedComponent,
                 namedPlan
@@ -318,18 +332,8 @@ public static partial class LuiCompiler
             )
         )
             diagnostics.Add(diagnostic);
-        var liveValues = new HashSet<int>();
         var plans = new BindingPlans(
-            ComponentPlans(
-                document,
-                componentModel,
-                componentTree,
-                componentMap,
-                componentWriter,
-                statePlans,
-                liveValues,
-                diagnostics
-            ),
+            components,
             contentPlans,
             PropertyPlans(propertyModel, propertyTree, propertyMap, propertyWriter),
             styleValues,
@@ -2041,6 +2045,7 @@ public static partial class LuiCompiler
         LuiDocumentSyntax document,
         LuiFreshnessIdentity identity,
         IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
+        HashSet<int> liveValues,
         List<LuiDiagnostic> diagnostics,
         bool namedComponent,
         NamedComponentPlan? namedPlan
@@ -2158,6 +2163,7 @@ public static partial class LuiCompiler
                             mapped.Source.Start,
                             candidate,
                             contentContributions,
+                            liveValues,
                             true,
                             namedComponent,
                             namedPlan
@@ -2233,6 +2239,7 @@ public static partial class LuiCompiler
                             mapped.Source.Start,
                             item.Candidate,
                             contentContributions,
+                            liveValues,
                             item.WrapLiveReader,
                             namedComponent,
                             namedPlan
@@ -2254,6 +2261,7 @@ public static partial class LuiCompiler
                         mapped.Source.Start,
                         candidate,
                         contentContributions,
+                        liveValues,
                         true,
                         namedComponent,
                         namedPlan
@@ -2333,6 +2341,7 @@ public static partial class LuiCompiler
         int elementStart,
         IParameterSymbol parameter,
         IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
+        HashSet<int> liveValues,
         bool wrapLiveReader,
         bool namedComponent,
         NamedComponentPlan? namedPlan
@@ -2353,7 +2362,8 @@ public static partial class LuiCompiler
                 new Dictionary<int, IReadOnlyList<StyleValueBranchPlan>>(),
                 null,
                 null,
-                new HashSet<int>()
+                new HashSet<int>(),
+                liveValues: liveValues
             ),
             [parameter.ContainingSymbol.ContainingType.ToDisplayString()],
             suppressDefaultContentAttribute: true,
