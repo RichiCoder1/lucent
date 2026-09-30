@@ -209,10 +209,24 @@ public static partial class Components
                     if (row is null || row.Children.Count == 0)
                         return 0;
                     var chrome =
-                        popupRoot.ResolveValue(LayoutProperties.Padding).Horizontal
-                        + row.ResolveValue(LayoutProperties.Padding).Horizontal
+                        row.ResolveValue(LayoutProperties.Padding).Horizontal
                         + row.ResolveValue(LayoutProperties.Spacing)
                         + (row.Children[0].ResolveValue(LayoutProperties.Width) ?? 0);
+                    for (
+                        var ancestor = row.Parent;
+                        ancestor is not null;
+                        ancestor = ancestor.Parent
+                    )
+                    {
+                        chrome += ancestor.ResolveValue(LayoutProperties.Padding).Horizontal;
+                        if (
+                            ancestor.ResolveValue(ScrollBarProperties.Visibility)
+                            != ScrollBarVisibility.Hidden
+                        )
+                            chrome += ancestor.ResolveValue(ScrollBarProperties.Thickness);
+                        if (ancestor == popupRoot)
+                            break;
+                    }
                     var family = row.ResolveValue(TypographyProperties.FontFamily);
                     var size = row.ResolveValue(TypographyProperties.FontSize);
                     var language = row.ResolveValue(TypographyProperties.Language);

@@ -291,7 +291,12 @@ Both are fixed and independently reviewed in `57245db1`; 149 Core navigation cas
 pass. A fresh NativeAOT build (SHA-256 `FAE94457DD1B2F533D24941B81F54D901F93E827FE06D178996EBF6065282715`)
 saved `/issues/9915`, exited, and restored that detail in a new process. Evidence
 is under `artifacts/issue221-native-reviewed`; search and list state are explicitly
-outside this persistence snapshot. Final coherent package replay remains separate.
+outside this persistence snapshot. The final official 101.1 package-only NativeAOT
+replay now passes: process 50040 saved `/issues/9999`, and new process 28744
+reopened that issue with the expected details. Both exited normally with empty
+stderr. Exact package/source/executable identities and both journal snapshots are
+under `artifacts/issue221-package101-replay`; the initially absent test journal was
+removed after preserving evidence. This completes #221's final replay boundary.
 #222's optional Foundation/C#/WinRT dependency probe has
 passed locked NativeAOT publication and hidden-process redirection without a
 window. The optional adapter and its reviewed startup/close/reentrant-policy fixes
@@ -302,11 +307,22 @@ payload is only a packaging test. No registration, signing, installation or nati
 foreground proof has run. Review corrections in `7c4be47b` make Sandbox startup
 explicit, map evidence outside virtualized AppData, retain verified process handles
 before ACK, and bind preparation to descriptor/package bytes. An isolated child
-exit-code proof passes; it does not establish protocol or MSIX transport. Final
-coherent package proof is still required.
+exit-code proof passes; it does not establish protocol or MSIX transport.
+The official 101.1 MSIX transport proof now passes in a disposable Windows Sandbox.
+The installed executable matches `DDEDC2DDD9CE7FFE1438668BBAA31CDF6495BF85BAB743440ABDD94849479F90`;
+cold and warm protocol deliveries preserve raw input and provenance, an invalid
+secondary is rejected, and all valid deliveries reach the same primary. Package
+and guest-only certificate cleanup report no errors, and the host stops the named
+Sandbox session. Evidence is under
+`artifacts/windows-activation-sandbox/64eb810555e14a84966c2ee4e3ff117c`.
+This establishes packaged shell transport, not visible application foreground
+behavior or unpackaged registration. No signing identity or association was added
+to the host.
+
 The dependency probe identified the requirement to register and release
-AppInstance ownership on the same native STA thread. Actual OS protocol registration,
-MSIX delivery, application integration and foreground behavior remain unverified.
+AppInstance ownership on the same native STA thread. Unpackaged registration and
+delivery, application integration and foreground behavior remain
+unverified; packaged OS protocol delivery has the separate proof above.
 
 ### Compatible release sets — #245
 
@@ -462,7 +478,15 @@ after log setup failed, making their route-output mismatch inconclusive; one lat
 serial publish matched foreign generated output and completed. The failed snapshot
 is preserved in `artifacts/issue323-component-preparation-failure`.
 
-The owner paused Computer Use following another Escape interruption before the new
-Issue Browser window could be inspected. Its untouched test process was stopped and
-the Node session reset. The new geometry walkthroughs remain pending; prior native
-observations are not relabeled as verification of these new binaries.
+After the owner resumed Computer Use on September 30, the corrected Component
+Browser header passed its compact-density follow-up at captured width 1282 in
+dark and light themes. The official 101.1 Issue Browser exposed a remaining
+All statuses wrap: shared Select measurement omitted the reserved scrollbar gutter.
+The real-Skia regression failed at 100% and 150% before correction; all four tested
+scales pass afterward, alongside 14 existing Core list contracts. A fresh managed
+Windows app keeps every popup label on one line in comfortable and compact density;
+Closed and All statuses produce the expected 3,333/10,000 fixture counts. Exact
+source/binary identities and the failed trimmed-publish attempt are retained under
+`artifacts/issue221-package101-replay`. Publication remains separate. Earlier Escape
+interruptions remain failed attempts. Both test apps were closed and the Computer
+Use connection ended.

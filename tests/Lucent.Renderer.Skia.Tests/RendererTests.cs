@@ -9,6 +9,106 @@ namespace Lucent.Renderer.Skia.Tests;
 public sealed class RendererTests
 {
     [TestMethod]
+    [DataRow(1f)]
+    [DataRow(1.25f)]
+    [DataRow(1.5f)]
+    [DataRow(2f)]
+    public void SelectPopupKeepsShortNativeLabelsWithinTheirChoiceRows(float scale)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "select-native-label-width");
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Select(
+                "Status",
+                () =>
+                    new ChoiceItem<string>[]
+                    {
+                        new("all", "All statuses"),
+                        new("open", "Open"),
+                        new("closed", "Closed"),
+                    },
+                () => "all",
+                _ => { },
+                style: Style.Empty.Width(120).Height(36)
+            )
+        );
+        using var renderer = new SkiaSceneRenderer();
+        using var ownerScene = Install(composition, new(240, 80, scale));
+        var anchor = Semantics(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert(
+            composition.ExecuteSemanticCommand(anchor.Identity, new(SemanticCommandKind.Expand))
+                == SemanticCommandResult.Applied,
+            "Could not expand the Status Select."
+        );
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        var measured = request.Measure(renderer, new(600, 400, scale));
+        var popup = request.CreateComposition();
+        using var popupScene = Install(popup, new(measured.Width, measured.Height, scale));
+        var label = popupScene.Boxes.Single(box =>
+            popup.Find(box.Identity)?.ResolveValue(ProjectionProperties.Text) == "All statuses"
+        );
+        var selected = Semantics(popup.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ListItem && node.Selected);
+        var shaped =
+            label.Text ?? throw new InvalidOperationException("The choice label was not shaped.");
+        var row = popupScene.Boxes.Single(box =>
+            box.Identity.ElementId == selected.Identity.ElementId
+        );
+        var labelElement = popup.Find(label.Identity)!;
+        var unwrapped = renderer.Shape(
+            new TextMeasureRequest(
+                "All statuses",
+                labelElement.ResolveValue(TypographyProperties.FontFamily),
+                labelElement.ResolveValue(TypographyProperties.FontSize),
+                labelElement.ResolveValue(TypographyProperties.Language),
+                labelElement.ResolveValue(TypographyProperties.Direction),
+                scale,
+                FontWeight: labelElement.ResolveValue(TypographyProperties.FontWeight)
+            )
+        );
+        Assert(
+            label.Bounds.Width >= unwrapped.Width,
+            $"The popup reserved {label.Bounds.Width}px for a {unwrapped.Width}px choice label."
+        );
+        Assert(
+            shaped.Lines.Count == 1,
+            $"All statuses wrapped within {label.Bounds.Width}px of a {measured.Width}px popup at {scale}x."
+        );
+        Assert(
+            label.Bounds.Y >= row.Bounds.Y
+                && label.Bounds.Y + shaped.Height <= row.Bounds.Y + row.Bounds.Height,
+            "The selected choice highlight did not contain its label."
+        );
+
+        RetainedScene Install(Composition target, LayoutViewport viewport)
+        {
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                graph.Drain();
+                var scene = SceneLayout.Project(target, viewport, renderer);
+                if (target.Input.SetScene(scene))
+                    return scene;
+                scene.Dispose();
+            }
+            throw new InvalidOperationException("Select scene did not converge.");
+        }
+
+        static IEnumerable<SemanticSnapshot> Semantics(SemanticSnapshot node)
+        {
+            yield return node;
+            foreach (var child in node.Children)
+            foreach (var nested in Semantics(child))
+                yield return nested;
+        }
+    }
+
+    [TestMethod]
     public void ShapesTextAndPaintsBoundedImmutableScene()
     {
         var corpus = new[]

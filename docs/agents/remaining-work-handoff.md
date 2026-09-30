@@ -16,7 +16,11 @@ request from when Sol 6.1 was unavailable.
 The owner reauthorized work and UI/focus testing on September 30. Computer Use
 now connects successfully after resetting the previous connection. The corrected
 Component Browser compact header has been checked in dark and light themes;
-the official 101.1 Issue Browser restart replay is in progress. Earlier Escape
+the official 101.1 Issue Browser restart replay now passes in two processes.
+Its Status popup exposed a missing scrollbar gutter in shared Select measurement.
+The correction passes four real-Skia scale cases and a fresh managed Windows app
+smoke in comfortable/compact density. It awaits publication. Both test apps were
+closed and the Computer Use connection ended. Earlier Escape
 interruptions remain failed attempts and are not walkthrough evidence.
 Earlier representative Component Browser and Issue Browser
 presentation checks ran, as did a real Issue Browser journal restart.
@@ -119,16 +123,24 @@ the fix. All 89 extension tests pass, including real owned-process-tree cleanup.
 Failed CI logs and diagnosis are under `artifacts/ci104-failure`. Publication is
 still pending; these results do not complete the remaining #248 adapters.
 
+The timeout correction is pushed as `f2064144`. CI 105 passes the extension tests
+but its managed solution build exposed concurrent preparation processes writing
+the same referenced project's generated editorconfig. The original failure is
+retained in `artifacts/ci105-failure/managed.log`. Preparation-owned compiler-options
+files are being implemented; preserve project hooks and stable input identities.
+The owner approved deleting only the failed repository-local test cache; that
+710 MB directory has been removed, preserving the normal C: cache and failure logs.
+
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
 | Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
 | Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
 | Notes #12 | Published correction and real delayed-write Ctrl+S/typing/reopen pass; closed and Project Done | Presentation adoption remains separate |
-| Presentation #323 | Framework correction is published in 101.1; Notes adoption is in progress, including the unchanged 520-pixel regression | Verify official Notes consumer and finish browser walkthrough |
+| Presentation #323 | Base correction published in 101.1; additional Select scrollbar-gutter correction passes real-Skia and Windows smoke; header follow-up passes | Publish the gutter correction; verify the official Notes consumer, including the 520-pixel regression |
 | Repeated work #324 | All retained improvements published in 94.1; measured deferrals recorded; closed and Project Done | No new work required |
-| Restoration #221 | Reviewed app persistence and pending-state capture committed as `57245db1`; native restart reopens issue #9915; official 101.1 package-only NativeAOT replay app prepared | Execute final package-only replay when Computer Use resumes |
-| Activation #222 | Optional adapter has 22 passing model contracts; reviewed fixture corrections published; official 101.1 NativeAOT fixture and unsigned MSIX/Sandbox input prepared | Isolated native registration/foreground coverage remains |
+| Restoration #221 | Published codec/journal ownership and reviewed app persistence; final official 101.1 package-only NativeAOT restart reopens issue #9999 in a new process | Complete; evidence under `artifacts/issue221-package101-replay` |
+| Activation #222 | Optional adapter has 22 passing model contracts; official 101.1 MSIX cold/warm/hostile protocol transport passes in a disposable Sandbox with verified cleanup | Unpackaged registration and visible host foreground coverage remain |
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
 | Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
 | Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
@@ -144,11 +156,15 @@ define the next contracts. No protocol registration or runtime installation has
 been performed on the owner's machine.
 The official 101.1 activation fixture is at
 `artifacts/windows-activation-registered/09d23de4c31a449e83e99d06148c9f34`;
-its unsigned MSIX and unlaunched Sandbox input are recorded under
+its MSIX and completed Sandbox proof are recorded under
 `artifacts/windows-activation-sandbox/64eb810555e14a84966c2ee4e3ff117c`.
+The September 30 guest run verified the exact installed executable, cold and warm
+protocol delivery, invalid-secondary rejection, and package/certificate cleanup.
+The host stopped only its named Sandbox session. Signing and installation happened
+inside the disposable guest; the host received no certificate or registration.
 The package-only Issue Browser replay build is under
 `artifacts/issue221-package101-replay`, with exact package/executable hashes in
-`prepared.json`. None of these preparation steps ran a window or registered a protocol.
+`prepared.json`; its final two-process native replay is recorded beside it.
 
 Light Notes now restores and builds against `0.3.0-dev.94.1`. Its new
 command buttons, Field-aware TextArea, placeholder colors and metadata contrast
@@ -159,9 +175,10 @@ Its source update remains uncommitted until the next framework package fixes the
 known constrained-height failure. Diagnostic DLL substitution isolated the cause
 but is not consumer delivery proof; do not close #323 with that boundary outstanding.
 101.1 is now available. Its two pin edits are prepared in
-`artifacts/notes101-adoption/pins.patch`; automatic approval review rejected the
-separate-repository write because the visible authorization covered walkthroughs.
-The owner approval question is pending; no Notes edit has been applied by that attempt.
+`artifacts/notes101-adoption/pins.patch`. The owner subsequently approved the
+separate-repository update, lock refresh, verification and commit/push. Both pins
+are now 101.1; package-consumer verification is underway. The earlier rejected
+write applied no edits and remains a separate attempt.
 
 Fresh Component Browser NativeAOT presentation observations are recorded under
 `artifacts/review323-native-final/walkthrough.md`. The final Issue Browser binary
@@ -172,8 +189,9 @@ were exercised. This is representative desktop evidence, not every state, IME or
 screen-reader certification. Commit `03116311` corrects compact header wrapping and
 sizes the status-filter popup to stock labels, bounded by the available width.
 Fourteen Core list contracts and two browser contracts pass; fresh NativeAOT browser
-binaries are under `artifacts/review323-layout-final`. Their visual checks remain
-pending the owner's pause. Overlapping Component Browser publish attempts produced
+binaries are under `artifacts/review323-layout-final`. The header check now passes;
+the later shared Select correction has its own managed smoke evidence above.
+Overlapping Component Browser publish attempts produced
 an inconclusive prepared-output failure; the subsequent single serial publish
 matched generated routes and completed. Both attempts are preserved. Computer Use
 main-arrow delivery remains unverified.
