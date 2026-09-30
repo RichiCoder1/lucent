@@ -70,7 +70,8 @@ jobs:
       cancel-in-progress: true
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: windows-2025
-    timeout-minutes: 30
+    # CI105 finished verification/upload at 28 minutes, then timed out saving NuGet cache.
+    timeout-minutes: 40
     outputs:
       package-artifact-id: ${{ steps.upload-packages.outputs.artifact-id }}
       package-artifact-digest: ${{ steps.upload-packages.outputs.artifact-digest }}
