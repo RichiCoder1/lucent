@@ -602,7 +602,8 @@ public sealed partial class NavigationSession : IDisposable
         RouteMatch match,
         NavigationHistoryAction history,
         NavigationOrigin origin,
-        NavigationSnapshot? traversalTarget = null
+        NavigationSnapshot? traversalTarget = null,
+        NavigationRestoration? restorationFallback = null
     )
     {
         SupersedeActive();
@@ -616,7 +617,10 @@ public sealed partial class NavigationSession : IDisposable
             history,
             origin,
             checked(_generation + 1)
-        );
+        )
+        {
+            RestorationFallback = restorationFallback,
+        };
         _generation = attempt.Generation;
         _activeAttempt = attempt;
         SetPhase(
@@ -983,6 +987,8 @@ public sealed partial class NavigationSession : IDisposable
     {
         if (!IsCurrent(attempt))
             return;
+        if (TryRestorationFallback(attempt, kind))
+            return;
         _activeAttempt = null;
         _lastRedirectDefinitions = attempt.RedirectDefinitions.ToArray();
         attempt.Cancellation.Dispose();
@@ -1229,6 +1235,7 @@ public sealed partial class NavigationSession : IDisposable
         internal NavigationSnapshot Target { get; set; }
         internal NavigationHistoryAction History { get; set; }
         internal NavigationOrigin Origin { get; }
+        internal NavigationRestoration? RestorationFallback { get; set; }
         internal long Generation { get; }
         internal int RedirectCount { get; set; }
         internal List<string> RedirectDefinitions { get; }

@@ -534,22 +534,36 @@ static bool IsForbidden(string type) =>
         );
 
 static bool IsRuntimeDiscoveryType(string type) =>
+    !IsManualJsonTokenType(type)
+    && (
+        type
+            is "System.Reflection.Assembly"
+                or "System.Reflection.MemberInfo"
+                or "System.Reflection.MethodInfo"
+                or "System.Reflection.PropertyInfo"
+                or "System.Reflection.FieldInfo"
+                or "System.ComponentModel.TypeDescriptor"
+                or "System.ComponentModel.PropertyDescriptor"
+        || new[]
+        {
+            "System.Dynamic",
+            "System.Linq.Expressions",
+            "System.Runtime.Loader",
+            "System.Text.Json",
+            "System.Xml",
+        }.Any(prefix => type.StartsWith(prefix, StringComparison.Ordinal))
+    );
+
+// Restoration reads a closed, bounded envelope using token APIs only. Keep generic
+// serializers and metadata discovery forbidden, including new JSON APIs by default.
+static bool IsManualJsonTokenType(string type) =>
     type
-        is "System.Reflection.Assembly"
-            or "System.Reflection.MemberInfo"
-            or "System.Reflection.MethodInfo"
-            or "System.Reflection.PropertyInfo"
-            or "System.Reflection.FieldInfo"
-            or "System.ComponentModel.TypeDescriptor"
-            or "System.ComponentModel.PropertyDescriptor"
-    || new[]
-    {
-        "System.Dynamic",
-        "System.Linq.Expressions",
-        "System.Runtime.Loader",
-        "System.Text.Json",
-        "System.Xml",
-    }.Any(prefix => type.StartsWith(prefix, StringComparison.Ordinal));
+        is "System.Text.Json.Utf8JsonReader"
+            or "System.Text.Json.Utf8JsonWriter"
+            or "System.Text.Json.JsonReaderOptions"
+            or "System.Text.Json.JsonWriterOptions"
+            or "System.Text.Json.JsonTokenType"
+            or "System.Text.Json.JsonException";
 
 internal sealed class TypeNameProvider : ISignatureTypeProvider<string, object?>
 {

@@ -3,7 +3,7 @@ using Lucent.Core;
 namespace Lucent.Core.Tests;
 
 [TestClass]
-public sealed class NavigationSessionContracts
+public sealed partial class NavigationSessionContracts
 {
     [TestMethod]
     public void SessionStartsWithoutCommittedRouteAndCommitsPushesWithDistinctEntryIds()

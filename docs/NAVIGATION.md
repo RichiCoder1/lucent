@@ -145,6 +145,82 @@ publication batch, before effects and old-branch retirement. It must not perform
 fallible asynchronous work. Perform that work during preparation; an exception
 from a committed callback is terminal.
 
+## Opt-in startup location restoration
+
+`NavigationRestoration` captures one committed canonical location in a bounded,
+versioned UTF-8 envelope. The application owns the file, storage scheduling and
+workspace identity. Create the session without `initialLocation`, mount its root
+outlet, and call `Restore` from the application's `OnMounted` startup path:
+
+```csharp
+var navigation = new NavigationSession(owner, BrowserRouting.Table);
+var restoration = new NavigationRestoration(
+    BrowserRouting.Table,
+    "browser-workspace-routes-v1",
+    BrowserRoutes.Issues(),
+    static match => match.DefinitionId.Value is "issues" or "issue"
+);
+
+// Once the root outlet is mounted; empty bytes mean no saved snapshot.
+NavigationRestorePlan plan = restoration.Decode(savedUtf8.Span);
+NavigationOperation startup = navigation.Restore(plan);
+```
+
+Use a scope key that distinguishes the application, workspace/account and route
+contract revision. Scope and definition keys are nonblank and limited to 128 UTF-8
+bytes. The pure predicate explicitly admits persistable routes; exclude routes
+containing credentials or private values that must not survive restart. The typed
+fallback must belong to the exact table passed to the restoration policy. Guards
+remain responsible for resource availability and authorization.
+
+Version 1 location payloads have this fixed shape:
+
+```json
+{"schema":"lucent.navigation","version":1,"scope":"browser-workspace-routes-v1","mode":"location","active":{"definition":"issue","location":"/issues/42"}}
+```
+
+The default and hard payload limit is 256 KiB; applications can configure a smaller
+limit. Decoding rejects invalid UTF-8, malformed or truncated JSON, duplicate or
+unknown fields, trailing data, comments, trailing commas, unknown versions/modes,
+scope mismatches and values over their bounds. JSON depth is bounded at eight.
+Locations must already use Core's canonical text and satisfy the current table's
+limits. Both their matched definition ID and application admission policy must
+still agree with the snapshot. Results expose finite reason codes, and their
+diagnostic strings omit route values, scope keys and payload contents.
+
+`Decode` does not mutate a session. Even an absent or rejected snapshot returns a
+plan carrying the configured fallback. `Restore(plan)` requires an empty, idle
+session with its root attached and permits only one accepted startup restore.
+Wrong-table, populated or pending sessions return `InvalidRestorationState` without
+superseding their current work. The policy is checked again at replay admission.
+The selected route runs ordinary Enter preparation with `NavigationOrigin.Restoration`
+before staging and publication. A guard rejection tries the fallback once through
+that same path; a fallback rejection leaves the session empty. Redirects use the
+existing redirect bound and publish one fresh entry. Supersession, cancellation,
+disposal and terminal failures never launch an obsolete fallback. A cold activation
+that has already started or committed therefore takes precedence over restoration.
+
+`restoration.Capture(navigation)` reads the committed route, including while a later
+asynchronous preparation is pending. It rejects capture during staging, publication,
+retirement or outlet replacement. Schedule ordinary captures after retirement;
+`RegisterCommitted` runs inside publication, so its handler can post capture work
+to the owner rather than capture synchronously. `Ready` carries the UTF-8 bytes.
+`NoSnapshot` means the active route is absent or disallowed: clear any previously
+stored navigation snapshot. Other finite failures carry no partial output.
+
+Use atomic file replacement and write generations so an older asynchronous write
+cannot overwrite a newer capture. Capture before normal close disposes the outlet.
+Persistence errors must remain separate from accepted document writes and close
+negotiation. Resuming a location creates fresh route interaction state, using the
+existing heading/useful-target focus and authored viewport defaults after layout.
+
+This surface currently implements active-location restoration. It does not serialize
+journal history or entry IDs, focus/viewport state, page trees, services, editor undo,
+credentials or arbitrary objects. Bounded journal import and explicitly registered
+state codecs remain the next restoration slice. Application storage integration and
+package-only NativeAOT replay are separate proof boundaries; model/codec contracts do
+not establish physical focus behavior.
+
 ## Focus, scroll and commands
 
 `NavigationBoundary` provides its `NavigationInteraction` to descendants, labels
@@ -166,5 +242,5 @@ an entry does not turn it into a hidden retained application tree.
 
 See [Issue Browser](../apps/Lucent.IssueBrowser/IssueBrowser.lui) for a collection
 outside the detail outlet and [application ownership](APPLICATIONS.md) for the
-Hosting service boundary. OS activation, persisted history, route transitions
+Hosting service boundary. OS activation, persisted journal history, route transitions
 and multiple windows are separate capabilities.

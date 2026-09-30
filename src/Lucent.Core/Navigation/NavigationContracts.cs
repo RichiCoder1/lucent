@@ -42,6 +42,9 @@ public enum NavigationOrigin
 
     /// <summary>A redirect returned by a preparation participant.</summary>
     Redirect,
+
+    /// <summary>An opt-in startup restoration or its safe fallback.</summary>
+    Restoration,
 }
 
 /// <summary>Names the owner-visible phase of one navigation transaction.</summary>
@@ -123,6 +126,9 @@ public enum NavigationFailureKind
 
     /// <summary>An invariant, mount, publication, or cleanup failure terminated the session.</summary>
     Terminal,
+
+    /// <summary>Restoration requires an unused, empty, idle session with its root attached.</summary>
+    InvalidRestorationState,
 }
 
 /// <summary>Names the ordered preparation walk owned by the route participant.</summary>

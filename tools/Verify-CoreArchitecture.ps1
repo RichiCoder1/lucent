@@ -73,6 +73,14 @@ function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
         if ($exitCode -eq 0 -or $text -notmatch 'Forbidden Core public API type: .*SDL3.SDL\+WindowFlags' -or $text -notmatch 'Forbidden Core runtime discovery type: System.ComponentModel.TypeDescriptor' -or $text -notmatch 'Core component factories use an unexpected namespace: Misplaced.Components') {
             throw "Compiled metadata inspection did not report platform, runtime-discovery, and component-namespace fixture violations: $text"
         }
+        foreach ($type in @('System.Text.Json.JsonSerializer', 'System.Text.Json.JsonSerializerOptions', 'System.Text.Json.Serialization.JsonSerializerContext', 'System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver')) {
+            if ($text -notmatch ('Forbidden Core runtime discovery type: ' + [regex]::Escape($type) + '(\r?\n|$)')) {
+                throw "Compiled metadata inspection did not reject object serialization type ${type}: $text"
+            }
+        }
+        if ($text -match 'Forbidden Core runtime discovery type: System\.Text\.Json\.(Utf8JsonReader|Utf8JsonWriter|JsonReaderOptions|JsonWriterOptions|JsonTokenType|JsonException)(\r?\n|$)') {
+            throw "Compiled metadata inspection classified an explicit JSON token API as runtime discovery: $text"
+        }
     }
     elseif ($exitCode -ne 0) { throw "Compiled Core public API inspection failed: $($output -join "`n")" }
 }

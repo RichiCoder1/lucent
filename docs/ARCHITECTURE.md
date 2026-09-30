@@ -188,6 +188,8 @@ The accepted .lui language and build/editor boundaries are specified in the .lui
 
 .NET 10 LTS is the required baseline. NativeAOT and trimming analyzers are enabled from the first implementation commit. Runtime code generation, dynamic assembly loading, reflection-based discovery, built-in runtime COM marshalling, and unbounded metadata scanning are excluded. Use direct calls or generated/static registration tables.
 
+Core navigation restoration uses a closed, bounded UTF-8 envelope through the explicit `System.Text.Json` reader/writer token APIs. The architecture verifier permits only `Utf8JsonReader`, `Utf8JsonWriter`, their reader/writer options, `JsonTokenType`, and `JsonException`. Generic serializers, serializer options/contexts and metadata resolvers remain forbidden in Core; the compiled negative fixture checks those exclusions separately from the token API allowance. Applications continue to own storage and durable document serialization.
+
 .NET 11 is not a required preview target. After GA, a non-gating experiment may test new language/runtime features. Promotion requires dependency support, warning-clean NativeAOT publication, reproducible tooling, and measured benefit.
 
 ## Test architecture
