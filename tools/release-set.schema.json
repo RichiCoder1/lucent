@@ -439,12 +439,28 @@
           }
         },
         "serverDelivery": {
-          "const": "external-path"
+          "enum": ["external-path", "bundled"]
         },
         "bundledServer": {
-          "type": "null"
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["identity", "filesSha256"],
+              "properties": {
+                "identity": { "$ref": "#/definitions/serverIdentity" },
+                "filesSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            }
+          ]
         }
-      }
+      },
+      "allOf": [{
+        "if": { "properties": { "serverDelivery": { "const": "bundled" } } },
+        "then": { "properties": { "bundledServer": { "type": "object" } } },
+        "else": { "properties": { "bundledServer": { "type": "null" } } }
+      }]
     },
     "distributionPolicy": {
       "type": "object",

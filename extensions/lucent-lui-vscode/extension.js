@@ -2,7 +2,9 @@
 
 const childProcess = require("child_process");
 const path = require("path");
+const { isDeepStrictEqual } = require("node:util");
 const vscode = require("vscode");
+const { verifyBundledServer } = require("./server-bundle");
 const clientRelease = require("./package.json").lucentRelease;
 
 const semanticTokensLegend = ["keyword", "type", "property", "enumMember"];
@@ -265,7 +267,7 @@ async function selectProject() {
     return { folder, projectPath };
 }
 
-async function activateTrusted(isActive, onStarted) {
+async function activateTrusted(context, isActive, onStarted) {
     if (!vscode.workspace.isTrusted || !isActive()) return;
     let selection;
     try { selection = await selectProject(); }
@@ -276,15 +278,25 @@ async function activateTrusted(isActive, onStarted) {
     if (!selection || !isActive()) return;
     const { folder, projectPath } = selection;
     const configured = vscode.workspace.getConfiguration("lucentLui", folder?.uri).get("serverPath");
-    if (!configured) {
-        vscode.window.showErrorMessage("Set lucentLui.serverPath to Lucent.Lui.LanguageServer.dll.");
-        return;
-    }
-    if (!path.isAbsolute(configured)) {
+    if (configured && !path.isAbsolute(configured)) {
         vscode.window.showErrorMessage("lucentLui.serverPath must be an absolute path on the workspace host.");
         return;
     }
-    const server = configured;
+    let bundled;
+    let server = configured;
+    if (!server) {
+        if (clientRelease.serverDelivery !== "bundled" || !clientRelease.bundledServer) {
+            vscode.window.showErrorMessage("The Lucent extension has no bundled server. Set an absolute lucentLui.serverPath override.");
+            return;
+        }
+        try {
+            bundled = verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
+            server = bundled.serverPath;
+        } catch (error) {
+            vscode.window.showErrorMessage(`Bundled Lucent language server rejected: ${error.message}`);
+            return;
+        }
+    }
     let identity;
     try { identity = await identifyServer(server); }
     catch (error) {
@@ -292,9 +304,18 @@ async function activateTrusted(isActive, onStarted) {
         return;
     }
     if (!vscode.workspace.isTrusted || !isActive()) return;
+    if (bundled) {
+        try {
+            if (!isDeepStrictEqual(identity, bundled.identity)) throw new Error("The bundled server reported a different identity.");
+            verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Bundled Lucent language server rejected: ${error.message}`);
+            return;
+        }
+    }
     const log = vscode.window.createOutputChannel("Lucent LUI", { log: true });
-    log.info(`Starting language server: ${configured}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
-    log.info(`Server reports source ${identity.sourceCommit}, protocol ${identity.protocol.major}.${identity.protocol.minor}.`);
+    log.info(`Starting ${bundled ? "bundled" : "override"} language server: ${server}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
+    log.info(`${bundled ? "Verified bundled server" : "Override server reports"} source ${identity.sourceCommit}, protocol ${identity.protocol.major}.${identity.protocol.minor}.`);
     const process = childProcess.spawn("dotnet", [server], {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true
@@ -382,7 +403,7 @@ async function activateTrusted(isActive, onStarted) {
     const reportFailure = error => {
         log.error(error.message);
         return vscode.window.showErrorMessage(
-            `Lucent language server stopped. Check that dotnet is available and lucentLui.serverPath points to the server DLL. ${error.message} See Output > Lucent LUI.`
+            `Lucent language server stopped. Check that dotnet and the selected server are available. ${error.message} See Output > Lucent LUI.`
         );
     };
     rpc.onFailure = error => {
@@ -656,7 +677,7 @@ async function activate(context) {
             return Promise.resolve();
         }
         const isCurrent = () => !disposed && ticket === generation;
-        return activateTrusted(isCurrent, stop => {
+        return activateTrusted(context, isCurrent, stop => {
             if (isCurrent()) currentStop = stop;
             else stop.dispose();
         }).then(stop => {

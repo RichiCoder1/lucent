@@ -69,7 +69,7 @@ try {
     dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release --no-restore -o $serverStage
     if ($LASTEXITCODE) { throw 'Server publication failed.' }
     ./tools/Pack-LuiServer.ps1 -ServerDirectory $serverStage -OutputPath (Join-Path $directory 'server.zip')
-    ./tools/Pack-LuiExtension.ps1 -OutputPath (Join-Path $directory 'extension.vsix')
+    ./tools/Pack-LuiExtension.ps1 -ServerArchivePath (Join-Path $directory 'server.zip') -ServerDirectory $serverStage -OutputPath (Join-Path $directory 'extension.vsix')
     $candidatePath = Join-Path $directory 'candidate.json'
     $candidate = New-LuiReleaseSet -Directory $directory -Version $Version -SourceCommit $commit -SourceState clean -ServerArchive server.zip -Vsix extension.vsix -OutputPath $candidatePath
 
@@ -95,7 +95,7 @@ try {
         finally { $env:LUCENT_LSP_SERVER_DLL = $previousServer }
     }
     Invoke-RecordedCheck extension packaged-extension {
-        node --test extensions/lucent-lui-vscode/extension.test.cjs
+        node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs
         if ($LASTEXITCODE) { throw 'Extension tests failed.' }
         ./tools/Test-ReleaseSet.ps1 -RunFixtures -ServerArchivePath (Join-Path $directory 'server.zip') -VsixPath (Join-Path $directory 'extension.vsix')
         ./tools/Test-ReleaseSet.ps1 -DescriptorPath $candidatePath -ArtifactDirectory $directory

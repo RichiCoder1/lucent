@@ -163,12 +163,10 @@ function Assert-LuiDependencyFiles($Archive, [string] $DepsPath) {
     }
 }
 
-function Get-LuiServerArchive([string] $Path) {
-    $archive = Open-LuiArchive $Path
-    try {
+function Get-LuiServerContent($archive, [string] $prefix) {
         $policy = Get-LuiReleasePolicy
-        $identity = Read-LuiArchiveJson $archive 'lucent-server.json'
-        $manifest = Read-LuiArchiveJson $archive 'lucent-server-files.json'
+        $identity = Read-LuiArchiveJson $archive ($prefix + 'lucent-server.json')
+        $manifest = Read-LuiArchiveJson $archive ($prefix + 'lucent-server-files.json')
         if ($identity['schemaVersion'] -ne 1 -or $manifest['schemaVersion'] -ne 1) { throw 'Unsupported server identity or inventory schema.' }
         Assert-LuiSame $identity['language'] $policy['language'] 'server language'
         Assert-LuiSame $identity['protocol'] $policy['protocol'] 'server protocol'
@@ -177,27 +175,37 @@ function Get-LuiServerArchive([string] $Path) {
             $name = [string]$file['fileName']
             Assert-LuiRelativePath $name
             if ($name -eq 'lucent-server-files.json' -or !$listed.Add($name)) { throw 'Invalid server inventory path.' }
-            $bytes = Read-LuiArchiveBytes $archive $name
+            $bytes = Read-LuiArchiveBytes $archive ($prefix + $name)
             if ($file['bytes'] -ne $bytes.Length -or $file['sha256'] -cne (Get-LuiBytesHash $bytes)) { throw "Server inventory mismatch: $name" }
         }
-        if ($listed.Count -ne $archive.Entries.Count - 1) { throw 'Server inventory is incomplete.' }
+        $serverEntries = @($archive.Entries.Keys | Where-Object { $_.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })
+        if ($listed.Count -ne $serverEntries.Count - 1) { throw 'Server inventory is incomplete.' }
         foreach ($name in @($policy['serverFiles']) + @($policy['serverNotices'])) {
             if (!$listed.Contains($name)) { throw "Missing server deployment file: $name" }
         }
         foreach ($pair in @(@('server', 'Lucent.Lui.LanguageServer.dll'), @('compiler', 'Lucent.Lui.Compiler.dll'))) {
-            $bytes = Read-LuiArchiveBytes $archive $pair[1]
+            $bytes = Read-LuiArchiveBytes $archive ($prefix + $pair[1])
             if ($identity[$pair[0]]['sha256'] -cne (Get-LuiBytesHash $bytes) -or $identity[$pair[0]]['informationalVersion'] -cne (Get-LuiAssemblyVersion $bytes)) { throw "Server assembly identity mismatch: $($pair[0])" }
             if ($identity[$pair[0]]['informationalVersion'] -notmatch ('\+' + [regex]::Escape($identity['sourceCommit']) + '(\.|$)')) { throw 'Server assembly source identity mismatch.' }
         }
-        $runtime = Read-LuiArchiveJson $archive 'Lucent.Lui.LanguageServer.runtimeconfig.json'
+        $runtime = Read-LuiArchiveJson $archive ($prefix + 'Lucent.Lui.LanguageServer.runtimeconfig.json')
         Assert-LuiSame $identity['runtime'] $runtime['runtimeOptions'] 'server runtime configuration'
         if ($identity['runtime']['tfm'] -cne 'net10.0' -or $identity['runtime']['framework']['name'] -cne 'Microsoft.NETCore.App') { throw 'Unsupported server runtime.' }
-        Assert-LuiDependencyFiles $archive 'Lucent.Lui.LanguageServer.deps.json'
-        Assert-LuiDependencyFiles $archive 'BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json'
-        return $identity
-    }
+        Assert-LuiDependencyFiles $archive ($prefix + 'Lucent.Lui.LanguageServer.deps.json')
+        Assert-LuiDependencyFiles $archive ($prefix + 'BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json')
+        return [ordered]@{
+            identity = $identity
+            filesSha256 = Get-LuiBytesHash ([Text.Encoding]::UTF8.GetBytes((ConvertTo-LuiCanonicalJson $manifest)))
+        }
+}
+
+function Get-LuiServerBundle([string] $Path) {
+    $archive = Open-LuiArchive $Path
+    try { return Get-LuiServerContent $archive '' }
     finally { $archive.Zip.Dispose() }
 }
+
+function Get-LuiServerArchive([string] $Path) { (Get-LuiServerBundle $Path).identity }
 
 function Get-LuiVsix([string] $Path) {
     $archive = Open-LuiArchive $Path
@@ -210,11 +218,19 @@ function Get-LuiVsix([string] $Path) {
         $policy = Get-LuiReleasePolicy
         if ($id -cne $policy['distribution']['extensionId']) { throw 'Unsupported extension publisher or ID.' }
         $compatibility = $manifest['lucentRelease']
-        if (!$compatibility -or $compatibility['schemaVersion'] -ne 1 -or $compatibility['serverDelivery'] -cne 'external-path') { throw 'Unsupported extension delivery policy.' }
+        if (!$compatibility -or $compatibility['schemaVersion'] -ne 1 -or $compatibility['serverDelivery'] -cnotin @('external-path', 'bundled')) { throw 'Unsupported extension delivery policy.' }
         $protocol = $policy['protocol']
         $version = @{ major = $protocol['major']; minor = $protocol['minor'] }
         Assert-LuiSame $compatibility['protocol'] @{ id = $protocol['id']; minimum = $version; maximumInclusive = $version } 'extension protocol compatibility'
+        if ($compatibility['serverDelivery'] -ceq 'bundled') {
+            Assert-LuiSame $compatibility['language'] $policy['language'] 'extension language compatibility'
+            $bundle = Get-LuiServerContent $archive 'extension/server/'
+            Assert-LuiSame $compatibility['bundledServer'] $bundle 'bundled server manifest'
+            if ($compatibility['sourceCommit'] -cne $bundle['identity']['sourceCommit']) { throw 'Extension and bundled server source commits differ.' }
+        }
+        else { $bundle = $null }
         $declared = @(@{ path = $manifest['main']; json = $false })
+        if ($null -ne $bundle) { $declared += @{ path = './server-bundle.js'; json = $false } }
         foreach ($language in $manifest['contributes']['languages']) {
             $declared += @{ path = $language['configuration']; json = $true }
         }
@@ -229,9 +245,9 @@ function Get-LuiVsix([string] $Path) {
             if (!$archive.Entries.ContainsKey($entry)) { throw "Missing declared VSIX entry: $entry" }
             if ($file['json']) { $null = Read-LuiArchiveJson $archive $entry }
         }
-        if (@($archive.Entries.Keys | Where-Object { $_ -match '(^|/)Lucent\.Lui\.LanguageServer\.dll$' }).Count) { throw 'External-path extension contains an undeclared bundled server.' }
+        if ($null -eq $bundle -and @($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/server/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'External-path extension contains an undeclared bundled server.' }
         if (!$archive.Entries.ContainsKey('extension/LICENSE.txt')) { throw 'VSIX omitted its license.' }
-        return [ordered]@{ id = $id; version = $manifest['version']; vscodeEngine = $manifest['engines']['vscode']; protocol = $compatibility['protocol']; serverDelivery = 'external-path'; bundledServer = $null }
+        return [ordered]@{ id = $id; version = $manifest['version']; vscodeEngine = $manifest['engines']['vscode']; protocol = $compatibility['protocol']; serverDelivery = $compatibility['serverDelivery']; bundledServer = $bundle }
     }
     finally { $archive.Zip.Dispose() }
 }
@@ -293,6 +309,9 @@ function Assert-LuiReleaseSet($Descriptor, [string] $Directory) {
     $vsixFile = $extension['artifact']['fileName']
     Assert-LuiSame $extension['artifact'] (Get-LuiArtifact $Directory $vsixFile) 'VSIX bytes'
     Assert-LuiSame $extension['identity'] (Get-LuiVsix (Resolve-LuiArtifactPath $Directory $vsixFile)) 'VSIX identity'
+    if ($extension['identity']['serverDelivery'] -ceq 'bundled') {
+        Assert-LuiSame $extension['identity']['bundledServer'] (Get-LuiServerBundle (Resolve-LuiArtifactPath $Directory $serverFile)) 'bundled/standalone server bytes'
+    }
     $packages = Get-LuiPackageInventory $Directory $Descriptor['releaseSet']['version'] $Descriptor['releaseSet']['sourceCommit'] $actualServer['compiler']['sha256']
     Assert-LuiSame $Descriptor['packages'] $packages 'package set'
     if ($Descriptor['inputManifestSha256'] -cne (Get-LuiInputHash $Descriptor)) { throw 'Release input identity mismatch.' }
@@ -331,6 +350,9 @@ function New-LuiReleaseSet {
     $policy = Get-LuiReleasePolicy
     $identity = Get-LuiServerArchive (Resolve-LuiArtifactPath $Directory $ServerArchive)
     $extension = Get-LuiVsix (Resolve-LuiArtifactPath $Directory $Vsix)
+    if ($extension['serverDelivery'] -ceq 'bundled') {
+        Assert-LuiSame $extension['bundledServer'] (Get-LuiServerBundle (Resolve-LuiArtifactPath $Directory $ServerArchive)) 'bundled/standalone server bytes'
+    }
     $descriptor = [ordered]@{
         schemaVersion = 1
         releaseSet = [ordered]@{ version = $Version; sourceCommit = $SourceCommit; sourceState = $SourceState }
@@ -355,4 +377,4 @@ function New-LuiReleaseSet {
     return $descriptor
 }
 
-Export-ModuleMember -Function Get-LuiReleasePolicy, ConvertTo-LuiCanonicalJson, Get-LuiBytesHash, Assert-LuiRelativePath, Resolve-LuiArtifactPath, Get-LuiArtifact, Open-LuiArchive, Read-LuiArchiveBytes, Read-LuiArchiveJson, Get-LuiServerArchive, Get-LuiVsix, Get-LuiPackageInventory, Assert-LuiReleaseSet, Write-LuiImmutableJson, New-LuiReleaseSet
+Export-ModuleMember -Function Get-LuiReleasePolicy, ConvertTo-LuiCanonicalJson, Get-LuiBytesHash, Assert-LuiRelativePath, Resolve-LuiArtifactPath, Get-LuiArtifact, Open-LuiArchive, Read-LuiArchiveBytes, Read-LuiArchiveJson, Get-LuiServerArchive, Get-LuiServerBundle, Get-LuiVsix, Get-LuiPackageInventory, Assert-LuiReleaseSet, Write-LuiImmutableJson, New-LuiReleaseSet

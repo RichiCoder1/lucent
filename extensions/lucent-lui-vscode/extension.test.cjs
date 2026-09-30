@@ -302,15 +302,20 @@ function loadExtension(vscode, process, spawned, identityOutput = {
     compiler: { sha256: "3".repeat(64) },
     language: { id: "lui", version: "preview", featureLevel: "preview-1" },
     protocol: { id: "lucent-lui", major: 1, minor: 0 }
-}, identified) {
+}, identified, dependencies = {}) {
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "extension.js"), "utf8"), {
         Buffer,
         clearTimeout,
         console,
+        JSON,
         exports: module.exports,
         module,
-        require: name => name === "vscode" ? vscode : name === "child_process" ? {
+        require: name => name === "./package.json" && dependencies.packageRelease
+            ? { lucentRelease: dependencies.packageRelease }
+            : name === "./server-bundle" && dependencies.bundleVerifier
+                ? { verifyBundledServer: dependencies.bundleVerifier }
+                : name === "vscode" ? vscode : name === "child_process" ? {
             execFile: (_command, _args, _options, callback) => {
                 identified?.();
                 return typeof identityOutput === "function"
@@ -362,7 +367,7 @@ class MockProcess extends EventEmitter {
     }
 }
 
-function failureHarness(process, { trusted = true, identity, processes = [process], folders, selectedFolder = 0 } = {}) {
+function failureHarness(process, { trusted = true, identity, processes = [process], folders, selectedFolder = 0, serverPath = path.resolve("server.dll"), dependencies = {} } = {}) {
     let completionProvider;
     let codeActionsProvider;
     let symbolProvider;
@@ -384,7 +389,7 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
         isTrusted: trusted,
         onDidGrantWorkspaceTrust: callback => { onGrantTrust = callback; return own(); },
         workspaceFolders: folders ?? [{ uri: { fsPath: path.resolve("workspace") } }],
-            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : path.resolve("server.dll") }),
+            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : serverPath }),
         textDocuments: [],
         createFileSystemWatcher: () => Object.assign(own(), {
             onDidCreate: own, onDidChange: own, onDidDelete: own
@@ -421,11 +426,11 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
                     ? (_selector, provider) => { codeActionsProvider = provider; return own(); } : key === "registerDocumentSymbolProvider"
                         ? (_selector, provider) => { symbolProvider = provider; return own(); } : own })
     };
-    const context = { subscriptions: [] };
+    const context = { subscriptions: [], asAbsolutePath: relative => path.resolve("extension-host", relative) };
     let started;
     const startedPromise = new Promise(resolve => { started = resolve; });
     let nextProcess = 0;
-    const extension = loadExtension(vscode, () => processes[Math.min(nextProcess++, processes.length - 1)], () => { spawnCount++; started(); }, identity, () => { identityChecks++; });
+    const extension = loadExtension(vscode, () => processes[Math.min(nextProcess++, processes.length - 1)], () => { spawnCount++; started(); }, identity, () => { identityChecks++; }, dependencies);
     return { context, messages, resources, logs, workspace, started: startedPromise, get spawnCount() { return spawnCount; }, get identityChecks() { return identityChecks; }, grantTrust: () => { workspace.isTrusted = true; onGrantTrust(); }, restart: () => restart(), open: document => onOpen(document), codeActions: () => codeActionsProvider, completion: () => completionProvider, symbols: () => symbolProvider, activate: () => extension.activate(context),
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
@@ -459,6 +464,44 @@ test("incompatible server identity prevents project initialization", async () =>
     assert.equal(harness.spawnCount, 0);
     assert.equal(server.lastRequest, undefined);
     assert.match(harness.messages[0], /incompatible/);
+});
+
+test("bundled server verifies workspace-host bytes and exact identity before initialization", async () => {
+    const identity = {
+        schemaVersion: 1, sourceCommit: "1".repeat(40),
+        server: { sha256: "2".repeat(64) }, compiler: { sha256: "3".repeat(64) },
+        language: { id: "lui", version: "preview", featureLevel: "preview-1" },
+        protocol: { id: "lucent-lui", major: 1, minor: 0 }
+    };
+    const roots = [];
+    const packageRelease = {
+        ...require("./package.json").lucentRelease,
+        serverDelivery: "bundled", bundledServer: { identity }, sourceCommit: identity.sourceCommit
+    };
+    const server = new MockProcess();
+    const harness = failureHarness(server, {
+        identity, serverPath: null,
+        dependencies: {
+            packageRelease,
+            bundleVerifier: root => { roots.push(root); return { serverPath: path.join(root, "Lucent.Lui.LanguageServer.dll"), identity }; }
+        }
+    });
+    await harness.activate();
+    assert.equal(harness.spawnCount, 1, JSON.stringify({ messages: harness.messages, roots }));
+    assert.deepEqual(roots, [path.resolve("extension-host/server"), path.resolve("extension-host/server")]);
+    assert.equal(server.lastRequest.method, "initialized");
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+
+    const mismatch = failureHarness(new MockProcess(), {
+        identity: { ...identity, sourceCommit: "4".repeat(40) }, serverPath: null,
+        dependencies: {
+            packageRelease,
+            bundleVerifier: root => ({ serverPath: path.join(root, "Lucent.Lui.LanguageServer.dll"), identity })
+        }
+    });
+    await mismatch.activate();
+    assert.equal(mismatch.spawnCount, 0);
+    assert.match(mismatch.messages[0], /different identity/);
 });
 
 test("missing protocol minor and incompatible language fail the project-free identity check", async () => {
@@ -633,7 +676,7 @@ test("missing dotnet rejects activation, reports setup guidance and disposes wat
     process.emit("error", new Error("spawn dotnet ENOENT"));
     await assert.rejects(activation, /ENOENT/);
     assert.equal(harness.messages.length, 1);
-    assert.match(harness.messages[0], /dotnet.*serverPath.*ENOENT/);
+    assert.match(harness.messages[0], /dotnet.*selected server.*ENOENT/);
     assert.ok(harness.resources.length > 1);
     assert.ok(harness.resources.every(resource => resource.disposed === 1));
     harness.context.subscriptions.forEach(resource => resource.dispose());
@@ -651,7 +694,7 @@ test("server startup exit is reported separately from process launch failure", a
     process.emit("exit", 1, null);
     await assert.rejects(activation, /exited.*code 1/);
     assert.equal(harness.messages.length, 1);
-    assert.match(harness.messages[0], /serverPath.*exited/);
+    assert.match(harness.messages[0], /selected server.*exited/);
     assert.ok(harness.resources.every(resource => resource.disposed === 1));
 });
 

@@ -7,7 +7,7 @@
     "schemaVersion": 1,
     "language": { "id": "lui", "version": "preview", "featureLevel": "preview-1" },
     "protocol": { "id": "lucent-lui", "minimum": { "major": 1, "minor": 0 }, "maximumInclusive": { "major": 1, "minor": 0 } },
-    "serverDelivery": "external-path"
+    "serverDelivery": "bundled"
   },
   "description": "Language support and cross-language tooling for Lucent .lui files.",
   "license": "MIT",
@@ -33,6 +33,8 @@
   },
   "files": [
     "extension.js",
+    "server-bundle.js",
+    "server/**",
     "language-configuration.json",
     "syntaxes/**",
     "README.md",

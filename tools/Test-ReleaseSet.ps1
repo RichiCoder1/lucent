@@ -214,8 +214,7 @@ foreach ($case in @(
     @{ name = 'vsix-protocol'; mutate = { param($m) $m.lucentRelease.protocol.minimum.major = 99 }; pattern = 'protocol compatibility' },
     @{ name = 'vsix-publisher'; mutate = { param($m) $m.publisher = 'someone-else' }; pattern = 'VSIX identity mismatch' },
     @{ name = 'vsix-version'; mutate = { param($m) $m.version = '99.0.0' }; pattern = 'VSIX identity mismatch' },
-    @{ name = 'vsix-unsafe-main'; mutate = { param($m) $m.main = './../outside.js' }; pattern = 'Unsafe artifact path' },
-    @{ name = 'vsix-bundling-claim'; mutate = { param($m) $m.lucentRelease.serverDelivery = 'bundled' }; pattern = 'delivery policy' }
+    @{ name = 'vsix-unsafe-main'; mutate = { param($m) $m.main = './../outside.js' }; pattern = 'Unsafe artifact path' }
 )) {
     $changed = Copy-Json $manifest
     & $case.mutate $changed
@@ -227,7 +226,31 @@ foreach ($case in @(
 $path = Join-Path $rejections 'vsix-hidden-server.vsix'
 Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
 Replace-Entries $path @{ 'extension/server/Lucent.Lui.LanguageServer.dll' = [byte[]]@(1) }
-Expect-Rejected 'vsix-hidden-server' { Get-LuiVsix $path } 'undeclared bundled server'
+Expect-Rejected 'vsix-hidden-server' { Get-LuiVsix $path } $(if ($manifest.lucentRelease.serverDelivery -ceq 'bundled') { 'inventory mismatch' } else { 'undeclared bundled server' })
+if ($manifest.lucentRelease.serverDelivery -ceq 'bundled') {
+    $changed = Copy-Json $manifest
+    $changed.lucentRelease.serverDelivery = 'external-path'
+    $path = Join-Path $rejections 'vsix-false-external-claim.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
+    Expect-Rejected 'vsix-false-external-claim' { Get-LuiVsix $path } 'undeclared bundled server'
+    $path = Join-Path $rejections 'vsix-tampered-bundled-server.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/server/Lucent.Lui.LanguageServer.dll' = [byte[]]@(1) }
+    Expect-Rejected 'vsix-tampered-bundled-server' { Get-LuiVsix $path } 'inventory mismatch'
+    $path = Join-Path $rejections 'vsix-missing-bundled-notice.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/server/notices/Roslyn-LICENSE.txt' = $null }
+    Expect-Rejected 'vsix-missing-bundled-notice' { Get-LuiVsix $path } 'Missing archive entry'
+}
+else {
+    $changed = Copy-Json $manifest
+    $changed.lucentRelease.serverDelivery = 'bundled'
+    $path = Join-Path $rejections 'vsix-false-bundled-claim.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
+    Expect-Rejected 'vsix-false-bundled-claim' { Get-LuiVsix $path } 'extension language compatibility|extension/server/lucent-server.json|Missing archive entry'
+}
 foreach ($declared in @('extension/extension.js', 'extension/language-configuration.json', 'extension/syntaxes/lui.tmLanguage.json')) {
     $path = Join-Path $rejections ('vsix-missing-' + [IO.Path]::GetFileName($declared) + '.vsix')
     Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path

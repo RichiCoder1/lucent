@@ -1,6 +1,6 @@
 # Compatible release sets
 
-A release set binds exact Lucent package versions, the language server and the thin
+A release set binds exact Lucent package versions, the language server and the
 VS Code extension to one source commit. Its descriptor records the tested SDK
 selection policy, tooling runtime, language feature level, protocol range, target,
 archive lengths and SHA-256 hashes. Project SDK and package pins remain authoritative;
@@ -9,8 +9,9 @@ the descriptor never updates an application's dependencies.
 The initial distribution is authenticated GitHub Actions artifacts from
 `RichiCoder1/lucent`, with packages published separately to its authenticated GitHub
 Packages feed. There is no automatic acquisition or Marketplace publication yet.
-The extension identity is `lucent.lucent-lui`; its server remains explicitly configured
-through `lucentLui.serverPath`. The supported release target is Windows x64.
+The extension identity is `lucent.lucent-lui`; new VSIX packages carry the matching
+server, its runtime dependencies and notices. `lucentLui.serverPath` remains an
+advanced absolute-path override. The supported release target is Windows x64.
 
 ## Candidate and complete
 
@@ -44,6 +45,8 @@ and the format is [release-set.schema.json](../tools/release-set.schema.json).
 
 ```powershell
 ./tools/Pack-LuiServer.ps1 -ServerDirectory <published-server-directory> -OutputPath <server.zip>
+./tools/Pack-LuiExtension.ps1 -ServerArchivePath <server.zip> `
+  -ServerDirectory <published-server-directory> -OutputPath <extension.vsix>
 ./tools/New-ReleaseSet.ps1 -ArtifactDirectory <directory> -Version <exact-version> `
   -SourceCommit <commit> -ServerArchive server.zip -Vsix extension.vsix `
   -OutputPath <candidate.json>
@@ -54,5 +57,9 @@ Archive validation does not execute its contents. Packing the server runs its
 project-free `--identity` command against the supplied build, which reports actual
 assembly hashes and runtime requirements without loading an application project.
 Normal project evaluation remains the authoritative semantic path after trust.
-The thin extension does not bundle the server. See [packages](PACKAGES.md) for
-feed access and [SDK/tooling](LUI-SDK-TOOLING.md) for project integration.
+The extension package verifies the server inventory and source identity against
+the standalone server archive. At startup, it checks the bundled bytes again
+before running the project-free `--identity` command and opening a project.
+Older `external-path` VSIX files remain valid inputs for existing release sets;
+new packages use `bundled` delivery. See [packages](PACKAGES.md) for feed access
+and [SDK/tooling](LUI-SDK-TOOLING.md) for project integration.

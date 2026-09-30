@@ -2,17 +2,17 @@
 
 This extension provides syntax highlighting, language configuration, completion,
 diagnostics, navigation, and cross-language rename support for Lucent `.lui`
-files. The extension is a thin VS Code client; it does not include the Lucent
-language server or the .NET SDK.
+files. The VSIX includes the matching Lucent language server and its runtime
+dependencies. It does not include the .NET SDK.
 
 ## Setup
 
-Install the matching `Lucent.Lui.LanguageServer.dll` separately, then set the
-advanced `lucentLui.serverPath` override to its absolute path on the workspace
-host. The extension runs the server's project-free `--identity` check and refuses
-an incompatible protocol before it sends `initialize`. The package and compiler
-version still need to match the selected Lucent release set; managed bundled
-installation is pending. Set `lucentLui.projectPath` to the owning `.csproj` for
+Install a VSIX from a compatible Lucent release set. The extension verifies its
+bundled server files and exact project-free `--identity` response before it sends
+`initialize`. Advanced users may set `lucentLui.serverPath` to an absolute path
+on the workspace host; the override still gets the compatibility handshake, but
+the extension cannot authenticate it as part of the VSIX. Set `lucentLui.projectPath`
+to the owning `.csproj` for
 semantic features. Without a project setting, document/range formatting remains
 available. In a multi-root workspace, the extension asks which workspace folder
 to serve, then reads that folder's settings. One project is active at a time;
@@ -57,13 +57,14 @@ need to be checked in for these editor features.
 Run the extension tests from the repository root:
 
 ```powershell
-node --test extensions/lucent-lui-vscode/extension.test.cjs
+node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs
 ```
 
 Create a local VSIX with the maintained packaging script:
 
 ```powershell
-./tools/Pack-LuiExtension.ps1
+./tools/Pack-LuiExtension.ps1 -ServerArchivePath <server.zip> `
+  -ServerDirectory <published-server-directory>
 ```
 
 The package is written under `artifacts/`; the script stages the repository
