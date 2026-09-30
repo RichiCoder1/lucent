@@ -9,8 +9,9 @@ records and issues.
 
 The owner explicitly resumed UI and focus testing. Coordinate physical desktop
 ownership between workers; builds and model checks may continue independently.
-Notes #12's real input proof remains pending until exercised. The prior offscreen
-substitution was declined during the gaming pause; do not describe it as a pass.
+Notes #12's real pending-save input and reopen proof now passes on the published
+93.1 consumer fixture. The prior offscreen substitution was declined during the
+gaming pause and is not part of that evidence.
 
 If the owner interrupts Computer Use after testing resumes, ask to continue while
 working on independent tasks. Do not interpret the interruption as cancellation of
@@ -26,13 +27,13 @@ package verification and publication. `0.3.0-dev.93.1` is published.
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
-| Authoring #321 | Published in 93.1; frozen package proof and CI pass; CI 92's stale ambiguity assertion is corrected in `9fde6b46` | Close delivery tracking |
-| Default-content reader binding #325 | Published in 93.1; 154 compiler cases and the original implicit-icon Component Browser build pass | Close delivery tracking |
-| Notes #12 | `f61ae316`; CI, model/storage and NativeAOT maintenance checks pass | Focused Ctrl+S/editing continuity after desktop permission resumes |
-| Presentation #323 | `caaba2d7`; Core/browser contracts and headless images pass | Adopt the new public package in Light Notes, then its deferred visual/input proof |
-| Repeated work #324 | Parser, protocol line-index and font allocation improvements published with measured comparisons; source-map indexing and broad preparation caching deferred by measurements | Finish Notes filtering and native/UIA decisions |
-| Restoration #221 | Location slice `e67f7ac6` has 62 passing codec/session checks and no required corrections from independent Code Review | Journal/state implementation, public startup/package-only proof, then app persistence and interaction proof |
-| Activation #222 | Optional Foundation/C#/WinRT NativeAOT probe passes hidden-process redirection and raw URI projection | Implement isolated adapter and lifecycle policy; registered protocol, MSIX and window/foreground proof remain pending |
+| Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
+| Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
+| Notes #12 | Published correction, CI, model/storage and NativeAOT maintenance checks pass; real delayed-write Ctrl+S/typing and reopen pass | Record native evidence and close tracking with the consumer update |
+| Presentation #323 | New controls adopted in Notes against 93.1; default-size native proof passes; Field grouping exposed a route-outlet minimum-height defect | Publish framework sizing fix `9f3da89a`, update consumer, rerun constrained-size proof and finish browser walkthrough |
+| Repeated work #324 | Parser, protocol and font improvements published; projection buffer-copy removal committed; broader caches and Notes filtering deferred by measurements | Publish projection improvement; defer UIA change because real clients remain listening, with no production experiment retained |
+| Restoration #221 | Journal/state implementation and package-only location startup proof complete; review reproduced extreme imported scroll and stale focus requests | Finish correction review/publication, then app persistence and interaction proof |
+| Activation #222 | Optional adapter and bounded lifecycle policy implemented locally; source/model checks in progress | Correct rejected-warm/startup ordering, package-only proof, then native registration/foreground coverage |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
 processes pass and registration/cleanup remain on the same thread. The initial
@@ -42,10 +43,13 @@ and [journal implementation design](../plans/navigation-journal-implementation.m
 define the next contracts. No protocol registration or runtime installation has
 been performed on the owner's machine.
 
-Light Notes is upgrading from `0.3.0-dev.86.1` to published `0.3.0-dev.93.1`.
-Its new command buttons, Field-aware TextArea, placeholder colors and measured
-metadata-contrast correction are prepared separately; do not claim consumer
-integration based only on Lucent source builds.
+Light Notes restores, builds and publishes against `0.3.0-dev.93.1`. Its new
+command buttons, Field-aware TextArea, placeholder colors and metadata contrast
+were exercised with native typing and a real bounded SQLite writer delay. The
+latest text survived a new process. Evidence is in
+`artifacts/notes12-native/computer-use-proof.md` and Notes' consumer evidence.
+Its source update remains uncommitted until the next framework package fixes the
+known constrained-height failure; do not close #323 with that failure outstanding.
 
 After these corrections, continue navigation #205, onboarding #242, native
 preview #224, diagnostics #243 and transfer #244 according to their technical

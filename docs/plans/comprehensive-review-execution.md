@@ -145,10 +145,15 @@ pass 56/56, storage 31/31, and twelve NativeAOT console cases pass. CI run
 `36650745851` passed. The exact console evidence is under Notes
 `artifacts/notes12-console/1d327431e53e44a3bca91d63221c4c7a`.
 
-The owner has now resumed UI/focus tests. Automatic approval review declined a
-proposed offscreen focus/input substitution during the earlier gaming pause.
-Ctrl+S/input continuity remains unverified and #12 stays open until that focused
-check passes; no native input pass is claimed yet.
+After the owner resumed UI/focus tests, the published 93.1 consumer fixture passed
+a real native pending-save check. An independent bounded SQLite writer transaction
+held the save while Computer Use typed text, invoked Ctrl+S and typed newer text
+without refocusing. The same editor remained focused; releasing storage saved the
+latest text, which survived closing and reopening in a new process. A deterministic
+InputRouter test additionally verifies selection/caret offsets and rejects an older
+acknowledgement overwriting the newer draft. Exact timestamps and binary identity
+are in `artifacts/notes12-native/computer-use-proof.md`. The previously declined
+offscreen substitution is not part of the passing evidence.
 
 ### Stock presentation and consumers — #323
 
@@ -159,8 +164,12 @@ uses selection semantics for theme/state choices; Issue Browser action rows gain
 spacing without theme overrides. Focused Core/browser checks pass 110 cases;
 affected builds and formatting pass. Headless light/dark/high-contrast images are
 recorded under `artifacts/review-323`; they do not constitute a native walkthrough.
-Light Notes' exact package restore and locked restore pass. Consumer builds,
-contrasts, multiline relationships and the native walkthrough are in progress.
+Light Notes' exact package restore, locked restore, consumer build, contrast and
+multiline relationships pass. Its default-size native editing/save/reopen proof
+passes. One affected managed check still fails at minimum window height: the
+new Field group exposes a route-outlet sizing defect. Framework fix `9f3da89a`
+passes 41 outlet contracts, including two pre-fix failures; consumer verification
+waits for its published package. No app-specific height workaround is retained.
 
 ### Measured repeated work — #324
 
@@ -204,8 +213,22 @@ small allocation change without a latency claim. Input/projection and
 layout/custom-algorithm checks pass 48 cases; build and formatting pass. Evidence
 is under `artifacts/review324-projection`. Broader hashing, tree-walk and scrollbar
 redesign is deferred: this bounded change avoids weakening equality or adding
-persistent ownership/cache complexity. UIA listener admission and Notes filtering
-still need their scoped decisions before #324 can close.
+persistent ownership/cache complexity.
+
+Notes filtering needs no optimization from the bounded result: at 5,000 records
+with roughly 2 KiB bodies, changing queries cost a median 0.873 ms / 5,072 bytes;
+equivalent text cost 0.660 ms / 8,076 bytes. Repeated identical queries and unrelated
+draft edits publish no new filter result. The two dataset characterizations pass;
+retain the opt-in probe, not a cache. Evidence is in Notes'
+`artifacts/review324-filtering` and is not native interaction latency.
+
+The UIA no-listener experiment is deferred without a production change. Windows
+still reports real accessibility clients listening after the Computer Use session
+and fixture close. The experiment therefore exits before window creation with
+zero passed and one skipped check; no timing samples were collected. Preserve
+`artifacts/review324-uia/decision.md` and do not call this a measured speedup.
+All scoped performance decisions are now recorded; publication of the retained
+projection change is the remaining #324 delivery step.
 
 ### Navigation restoration and activation — #205
 
@@ -216,7 +239,15 @@ corrections from independent Code Review. A package-only managed and NativeAOT
 console fixture also proves root/nested outlet replay, typed route contexts,
 guarded fallback and the public OnMounted lifecycle. Evidence is under
 `artifacts/context-navigation-aot/generated-navigation-6c16340c2cb348c9967658bd30fe82cd`.
-Journal/interaction state implementation and application persistence follow.
+Journal/interaction implementation is committed in `ec092e68`. Independent review
+found extreme imported scroll coordinates could overflow before clamping and
+navigation-owned focus requests could outlive their owner. Both were reproduced
+before correction in `ba41f502`: imported positions wait for measured extents,
+and pending focus/scroll requests expire only for their owning generation. Newer
+application requests win; ordinary in-memory transfers keep their existing
+behavior. A disposed semantic callback is also guarded. The warning-clean build,
+architecture check and 207 affected contracts pass. Focused follow-up review,
+journal package proof and application persistence remain outstanding.
 #222's optional Foundation/C#/WinRT dependency probe has
 passed locked NativeAOT publication and hidden-process redirection without a
 window. It identified and now documents the requirement to register and release
