@@ -106,7 +106,12 @@ editor assertion that chose an arbitrary overloaded imported component. That
 failure was independently reproduced against the pre-performance binaries.
 `9fde6b46` now asserts rejection of ambiguity and retains exact navigation for an
 unambiguous imported component beside malformed C#. Its five affected protocol
-checks pass; the next public CI run must verify the corrected complete suite.
+checks pass. CI 93 passed the complete managed suite, package consumers and
+publication at `09ef196b`; `0.3.0-dev.93.1` is delivered and #321 is closed.
+
+The default-content reader follow-up #325 is also delivered in that package.
+Six regression rows and all 154 compiler cases pass; the original implicit-icon
+Component Browser example builds without a reader workaround. Its issue is closed.
 
 ### Notes integrity — #11
 
@@ -140,10 +145,22 @@ pass 56/56, storage 31/31, and twelve NativeAOT console cases pass. CI run
 `36650745851` passed. The exact console evidence is under Notes
 `artifacts/notes12-console/1d327431e53e44a3bca91d63221c4c7a`.
 
-The owner resumed general work while retaining the gaming pause on UI/focus
-tests. Automatic approval review also declined the proposed offscreen focus/input
-probe under that pause. Ctrl+S/input continuity remains unverified and #12 stays
-open for that focused check; no native input pass is claimed.
+The owner has now resumed UI/focus tests. Automatic approval review declined a
+proposed offscreen focus/input substitution during the earlier gaming pause.
+Ctrl+S/input continuity remains unverified and #12 stays open until that focused
+check passes; no native input pass is claimed yet.
+
+### Stock presentation and consumers — #323
+
+`caaba2d7`, published in `0.3.0-dev.93.1`, supplies semantic button roles, borrowed
+command buttons, Field-aware multiline editing and label/help/error style hooks,
+independent placeholder colors and a RadioGroup options style. Component Browser
+uses selection semantics for theme/state choices; Issue Browser action rows gain
+spacing without theme overrides. Focused Core/browser checks pass 110 cases;
+affected builds and formatting pass. Headless light/dark/high-contrast images are
+recorded under `artifacts/review-323`; they do not constitute a native walkthrough.
+Light Notes' exact package restore and locked restore pass. Consumer builds,
+contrasts, multiline relationships and the native walkthrough are in progress.
 
 ### Measured repeated work — #324
 
@@ -168,17 +185,31 @@ clean. Evidence is under `artifacts/review324-font`.
 These timings are characterization on an active machine, not frame-budget proof.
 No threshold was relaxed. The existing one-of-32-paragraph edit reshapes only the
 edited paragraph and reads zero additional font bytes; a larger shaping redesign
-is deferred. Source-map indexing, named/editor graph preparation, post-presentation
-projection, UIA listener admission and Notes filtering still need their scoped
-retain/defer decisions before #324 can close.
+is deferred. The source-map experiment improves isolated span lookup substantially
+but leaves full compilation near 450 ms and produces inconsistent real hover,
+completion and semantic-token timings. Production indexing is therefore deferred;
+the reusable bounded measurements are committed in `51eabc9c`. Named preparation
+lowers all ten documents after one changed body (~324 ms, 40.1 MB), while parsing
+costs ~1.6 ms. A parse-only rewrite and broad graph cache are deferred pending a
+design that preserves complete freshness. All experimental compiler changes were
+restored and shared binaries rebuilt before subsequent work. Evidence is under
+`artifacts/review324-authoring-followup`.
+
+Post-presentation projection, UIA listener admission and Notes filtering still
+need their scoped retain/defer decisions before #324 can close.
 
 ### Navigation restoration and activation — #205
 
 The [implementation plan](navigation-restoration-activation.md) separates portable
-restoration from Windows activation. #221 is implementing the active-location
-codec and guarded startup replay first; journal/interaction state and application
-persistence follow. #222's optional Foundation/C#/WinRT dependency probe has
+restoration from Windows activation. #221's active-location codec and guarded
+startup replay are published in 93.1, with 62 codec/session checks and no required
+corrections from independent Code Review. A package-only managed and NativeAOT
+console fixture also proves root/nested outlet replay, typed route contexts,
+guarded fallback and the public OnMounted lifecycle. Evidence is under
+`artifacts/context-navigation-aot/generated-navigation-6c16340c2cb348c9967658bd30fe82cd`.
+Journal/interaction state implementation and application persistence follow.
+#222's optional Foundation/C#/WinRT dependency probe has
 passed locked NativeAOT publication and hidden-process redirection without a
 window. It identified and now documents the requirement to register and release
-AppInstance ownership on the same native thread. Actual OS protocol registration,
+AppInstance ownership on the same native STA thread. Actual OS protocol registration,
 MSIX delivery, application integration and foreground behavior remain unverified.

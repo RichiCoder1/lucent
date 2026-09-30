@@ -7,12 +7,10 @@ records and issues.
 
 ## Current constraints
 
-The owner is gaming. All UI, focus-taking and input/focus dispatch tests are paused
-until explicit permission resumes them. General work resumed after a brief pause;
-that did not resume desktop testing. Console builds, model/codec tests, in-memory
-rendering, read-only review and pushes may continue. Do not substitute an offscreen
-focus test for the paused check. Automatic approval review declined that proposed
-substitution for Notes #12; its real input proof remains pending.
+The owner explicitly resumed UI and focus testing. Coordinate physical desktop
+ownership between workers; builds and model checks may continue independently.
+Notes #12's real input proof remains pending until exercised. The prior offscreen
+substitution was declined during the gaming pause; do not describe it as a pass.
 
 If the owner interrupts Computer Use after testing resumes, ask to continue while
 working on independent tasks. Do not interpret the interruption as cancellation of
@@ -22,17 +20,17 @@ the whole implementation request.
 
 The [review execution record](../plans/comprehensive-review-execution.md) owns the
 verification details. Main is pushed through `09ef196b2f136fe8fb6d5934bb1b61e6ab5eafef`;
-[CI 93](https://github.com/RichiCoder1/lucent/actions/runs/36653949217) is running.
-Do not claim `0.3.0-dev.93.1` is published until its publication job succeeds.
+[CI 93](https://github.com/RichiCoder1/lucent/actions/runs/36653949217) passed managed,
+package verification and publication. `0.3.0-dev.93.1` is published.
 
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
-| Authoring #321 | Pushed; frozen package proof passed; CI 92's stale ambiguity assertion is corrected in `9fde6b46` | Verify CI 93 delivery |
-| Default-content reader binding #325 | `09ef196b`; 154 compiler cases and the original implicit-icon Component Browser build pass | Verify CI 93 delivery |
+| Authoring #321 | Published in 93.1; frozen package proof and CI pass; CI 92's stale ambiguity assertion is corrected in `9fde6b46` | Close delivery tracking |
+| Default-content reader binding #325 | Published in 93.1; 154 compiler cases and the original implicit-icon Component Browser build pass | Close delivery tracking |
 | Notes #12 | `f61ae316`; CI, model/storage and NativeAOT maintenance checks pass | Focused Ctrl+S/editing continuity after desktop permission resumes |
 | Presentation #323 | `caaba2d7`; Core/browser contracts and headless images pass | Adopt the new public package in Light Notes, then its deferred visual/input proof |
-| Repeated work #324 | Parser, protocol line-index and font allocation improvements pushed with measured comparisons | Finish source-map/named-preparation and Notes filtering decisions; native/UIA work remains deferred |
+| Repeated work #324 | Parser, protocol line-index and font allocation improvements published with measured comparisons; source-map indexing and broad preparation caching deferred by measurements | Finish Notes filtering and native/UIA decisions |
 | Restoration #221 | Location slice `e67f7ac6` has 62 passing codec/session checks and no required corrections from independent Code Review | Journal/state implementation, public startup/package-only proof, then app persistence and interaction proof |
 | Activation #222 | Optional Foundation/C#/WinRT NativeAOT probe passes hidden-process redirection and raw URI projection | Implement isolated adapter and lifecycle policy; registered protocol, MSIX and window/foreground proof remain pending |
 
@@ -44,7 +42,7 @@ and [journal implementation design](../plans/navigation-journal-implementation.m
 define the next contracts. No protocol registration or runtime installation has
 been performed on the owner's machine.
 
-Light Notes still consumes `0.3.0-dev.86.1` until the current package is verified.
+Light Notes is upgrading from `0.3.0-dev.86.1` to published `0.3.0-dev.93.1`.
 Its new command buttons, Field-aware TextArea, placeholder colors and measured
 metadata-contrast correction are prepared separately; do not claim consumer
 integration based only on Lucent source builds.

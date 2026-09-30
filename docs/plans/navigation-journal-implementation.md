@@ -3,7 +3,7 @@
 This is the next implementation slice of [#221](https://github.com/RichiCoder1/lucent/issues/221),
 following the accepted [restoration and activation plan](navigation-restoration-activation.md).
 Baseline: active-location restoration commit `e67f7ac69ce71735d0be18d76130939eff5b5ad7`.
-The location slice is frozen for review. This document makes implementation decisions;
+Independent review of the location slice found no required corrections. This document makes implementation decisions;
 it does not claim that journal or interaction restoration is implemented or verified.
 
 ## Public boundary and format
