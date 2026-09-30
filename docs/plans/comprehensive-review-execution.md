@@ -176,8 +176,16 @@ Notes needs only `MainShrink: 1` on its Shell and Workspace styles. The unchange
 responsive contract passes against the corrected Core in an isolated diagnostic
 output; this is not public-package proof. The final package consumer check remains
 pending, with the original failed reports retained. No height threshold was changed.
-Both browsers publish as NativeAOT; their new walkthrough remains unperformed because
-Computer Use immediately reports Escape even after the authorized session reset.
+Both browsers publish as NativeAOT. After the app restart and renewed permission,
+Computer Use exercised fourteen Component Browser examples and Issue Browser's
+selection, filters and context menus. Calendar columns, slider thumb, submenu
+alignment, bounded dialog, password reveal, editable ComboBox reuse, table sorting
+and native-picker cancellation were observed. The recorded walkthrough is under
+`artifacts/review323-native-final`; it does not establish every state or accessibility
+certification. Compact header wrapping and a status popup label wrapping at a narrow
+width remain visual follow-ups. Native arrows failed to move both a radio and text
+caret through Computer Use; equivalent compiled application checks pass, so attribution
+to the tool, native transport or framework remains open.
 Heading semantics and broader system high-contrast palette mapping remain deferred;
 this slice preserves the existing stock high-contrast theme and optional minimal
 presentation mode. It does not claim those additional capabilities.
@@ -273,13 +281,17 @@ candidate `0.3.0-dev.local.activation.2`; this candidate predates `cd625961`, so
 establishes codec/distribution behavior rather than that final ownership correction.
 Evidence is under `artifacts/journal-package-review`; the normal package CI now
 runs the expanded fixture. CI 94 now publishes the final ownership corrections.
-Issue Browser's opt-in application persistence passes 43 managed contracts, including
+Issue Browser's opt-in application persistence passes 44 managed contracts, including
 real hosted replay, startup readiness, atomic generation-fenced writes, close decline
 and fresh interaction capture. Captures use the application event queue because
 ReactiveScope.Post can execute during navigation retirement. Review then reproduced
 close-before-first-layout losing the pending imported scroll position (saved zero
-instead of 90). That ownership correction is in progress; the initial 43-case pass
-does not cover it. NativeAOT publication and physical restart evidence remain.
+instead of 90), and then navigate-before-layout losing the same state for Back.
+Both are fixed and independently reviewed in `57245db1`; 149 Core navigation cases
+pass. A fresh NativeAOT build (SHA-256 `FAE94457DD1B2F533D24941B81F54D901F93E827FE06D178996EBF6065282715`)
+saved `/issues/9915`, exited, and restored that detail in a new process. Evidence
+is under `artifacts/issue221-native-reviewed`; search and list state are explicitly
+outside this persistence snapshot. Final coherent package replay remains separate.
 #222's optional Foundation/C#/WinRT dependency probe has
 passed locked NativeAOT publication and hidden-process redirection without a
 window. The optional adapter and its reviewed startup/close/reentrant-policy fixes
@@ -287,7 +299,11 @@ are committed in `45d00d6f`; all 22 adapter model contracts and the focused host
 attention contract pass. `1b6d081a` adds isolated registered and MSIX preparation
 fixtures. The unsigned MSIX manifest validates with MakeAppx, but its old probe
 payload is only a packaging test. No registration, signing, installation or native
-foreground proof has run. Final coherent package proof is still required.
+foreground proof has run. Review corrections in `7c4be47b` make Sandbox startup
+explicit, map evidence outside virtualized AppData, retain verified process handles
+before ACK, and bind preparation to descriptor/package bytes. An isolated child
+exit-code proof passes; it does not establish protocol or MSIX transport. Final
+coherent package proof is still required.
 The dependency probe identified the requirement to register and release
 AppInstance ownership on the same native STA thread. Actual OS protocol registration,
 MSIX delivery, application integration and foreground behavior remain unverified.
@@ -307,6 +323,17 @@ review has no confirmed outstanding findings: a path-escaping report was retract
 after inspecting literal AST values and file bytes. Actual producer-generated nested
 Windows paths pass as well. Evidence is under `artifacts/issue245`.
 
-The first coherent ten-package/server/VSIX candidate and CI completion/publication
-remain. Templates #246 are proceeding against this contract, without adding their
-package to this batch or claiming the full onboarding journey is delivered.
+CI 95–97 failed before publication; their failed evidence is retained. Corrections
+cover dependency-lock and optional metadata handling, BOM-aware XML reads and
+Windows command-line batching. CI 97 passed formatting and produced all ten packages,
+the server and VSIX, then failed architecture preflight and a NativeAOT wrong-thread
+test that allowed task inlining. The preflight correction is `a4b1ba96`; the
+dedicated-thread correction `e5bbada1` passes managed and NativeAOT execution.
+No new version is claimed published.
+
+Templates #246 pass four generation variants and await actual consumer proof against
+a coherent bundle. They are not yet added to the release inventory. Editor #247's
+trust, selected-project isolation, identity and restart work is in independent review;
+the first review found hung-startup cancellation, late-notification disposal and an
+excluded-root document-symbol path needing corrections. Bundled server delivery,
+cache/import and authenticated acquisition remain separate planned work.

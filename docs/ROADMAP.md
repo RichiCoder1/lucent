@@ -13,19 +13,21 @@ Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320,
 publication; Light Notes is integrating its presentation APIs. Measured
 repeated-work #324 is closed, with the final projection correction published.
 Presentation #323 has a further CommandScope/app shrink correction awaiting
-package delivery and the remaining native walkthrough. Navigation #205 now has an
+package delivery; representative browser walkthroughs resumed after the app restart.
+Native arrow-key delivery remains an unattributed test finding. Navigation #205 now has an
 [implementation plan](plans/navigation-restoration-activation.md): portable
 restoration first, then an optional Windows activation adapter. Its dependency
 probe is proven without a window; registered protocol and focus behavior remain
 separate work. Journal/interaction restoration and reviewed ownership corrections
 pass 210 affected contracts; package-only managed/AOT journal proof passes.
-Issue Browser opt-in persistence passes 43 application contracts and is under review;
-the activation adapter passes 22 model contracts. Their native delivery proof remains.
-The owner has resumed UI/focus testing, but Computer Use currently stops before an
-application action despite an authorized reset. Onboarding #245 implements the
-[release descriptor and project-free identity](RELEASE-SETS.md), with its first full
-CI run pending. Standard templates #246 are next. Automatic tooling acquisition and
-new publication channels are not enabled by the descriptor work.
+Issue Browser opt-in persistence is reviewed, passes 44 application contracts, and
+restores a saved route in a fresh NativeAOT process. The activation adapter passes
+22 model contracts; isolated transport fixtures are reviewed but not executed.
+Onboarding #245 implements the [release descriptor and project-free identity](RELEASE-SETS.md).
+CI 97 produced its artifacts but failed verification before publication; targeted
+corrections are in progress. Four standard templates #246 pass generation checks
+and await coherent package consumer proof. Editor trust/restart #247 is under review;
+bundled tooling, immutable cache/import and explicit authenticated acquisition follow.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
