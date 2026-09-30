@@ -41,12 +41,10 @@ style ComponentDetailActionStyle {
 style ComponentStateRowStyle {
     Axis: LayoutAxis.Row;
     Spacing: 8;
+    RowGap: 8;
     CrossAlignment: LayoutAlignment.Center;
     Wrap: true;
-}
-
-style ComponentStateLabelStyle {
-    MainShrink: 0;
+    TextWrap: TextWrap.NoWrap;
 }
 
 style ComponentExampleStyle {
@@ -57,6 +55,13 @@ style ComponentExampleStyle {
 }
 
 public component ComponentDetail(ComponentBrowserState browser, ComponentBrowserViewState view) {
+    readonly IReadOnlyList<RadioOption<ExampleState>> stateOptions = [
+        new(ExampleState.Default, "Default"),
+        new(ExampleState.Disabled, "Disabled"),
+        new(ExampleState.Busy, "Busy"),
+        new(ExampleState.Error, "Error"),
+    ];
+
     <Layout style={ComponentDetailStyle}>
         <ScrollViewport
             viewport={view.DetailViewport}
@@ -85,53 +90,14 @@ public component ComponentDetail(ComponentBrowserState browser, ComponentBrowser
                     </Text>
                 </Layout>
                 <Layout style={ComponentStateRowStyle}>
-                    <Text style={PresentationStyles.Caption.With(ComponentStateLabelStyle)}>
-                        EXAMPLE STATE
-                    </Text>
-                    <Button
-                        onInvoke={() => browser.SetExampleState(ExampleState.Default)}
-                        style={
-                            Style.Empty.Enabled(
-                                () => browser.CurrentExampleState != ExampleState.Default
-                            )
-                        }
-                        name="component-browser.state-default"
-                    >
-                        Default
-                    </Button>
-                    <Button
-                        onInvoke={() => browser.SetExampleState(ExampleState.Disabled)}
-                        style={
-                            Style.Empty.Enabled(
-                                () => browser.CurrentExampleState != ExampleState.Disabled
-                            )
-                        }
-                        name="component-browser.state-disabled"
-                    >
-                        Disabled
-                    </Button>
-                    <Button
-                        onInvoke={() => browser.SetExampleState(ExampleState.Busy)}
-                        style={
-                            Style.Empty.Enabled(
-                                () => browser.CurrentExampleState != ExampleState.Busy
-                            )
-                        }
-                        name="component-browser.state-busy"
-                    >
-                        Busy
-                    </Button>
-                    <Button
-                        onInvoke={() => browser.SetExampleState(ExampleState.Error)}
-                        style={
-                            Style.Empty.Enabled(
-                                () => browser.CurrentExampleState != ExampleState.Error
-                            )
-                        }
-                        name="component-browser.state-error"
-                    >
-                        Error
-                    </Button>
+                    <RadioGroup
+                        label="Example state"
+                        items={() => stateOptions}
+                        readSelectedKey={() => browser.CurrentExampleState}
+                        onSelectionRequested={browser.SetExampleState}
+                        optionsStyle={ComponentStateRowStyle}
+                        name="component-browser.state"
+                    />
                     <Status
                         content={() => browser.ExampleStateLabel}
                         style={PresentationStyles.Secondary}
@@ -141,14 +107,22 @@ public component ComponentDetail(ComponentBrowserState browser, ComponentBrowser
                 <Layout style={ComponentDetailActionStyle}>
                     <Button
                         onInvoke={browser.Back}
-                        style={Style.Empty.Enabled(() => browser.Navigation.CanGoBack)}
+                        style={
+                            Style.Empty.ButtonRole(ButtonRole.Secondary).Enabled(
+                                () => browser.Navigation.CanGoBack
+                            )
+                        }
                         name="component-browser.back"
                     >
                         Back
                     </Button>
                     <Button
                         onInvoke={browser.Forward}
-                        style={Style.Empty.Enabled(() => browser.Navigation.CanGoForward)}
+                        style={
+                            Style.Empty.ButtonRole(ButtonRole.Secondary).Enabled(
+                                () => browser.Navigation.CanGoForward
+                            )
+                        }
                         name="component-browser.forward"
                     >
                         Forward

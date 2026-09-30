@@ -61,12 +61,19 @@ public sealed class FieldContracts
     }
 
     [TestMethod]
-    public async Task LuiFieldFactoryKeepsAccessibleRelationshipsStableThroughSubmit()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task LuiFieldFactoryKeepsAccessibleRelationshipsStableThroughSubmit(bool multiline)
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "field-root");
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         using var form = new FormSession(composition.Root.Scope, "profile");
+        using var session = new EditorSession(
+            composition.Root.Scope,
+            "draft",
+            multiline: multiline
+        );
         var validation = graph.Signal(
             ValidationState.Invalid("Use a complete email address."),
             "email-validation"
@@ -80,13 +87,26 @@ public sealed class FieldContracts
                 field =>
                 {
                     captured = field;
-                    return Components.TextField(field, placeholder: "name@example.com");
+                    return multiline
+                        ? Components.TextArea(
+                            field,
+                            session: session,
+                            placeholder: "name@example.com"
+                        )
+                        : Components.TextField(
+                            field,
+                            session: session,
+                            placeholder: "name@example.com"
+                        );
                 },
                 () => validation.Value,
                 () => "Used for account recovery.",
                 form,
                 "email",
-                required: true
+                required: true,
+                labelStyle: Style.Empty.FontSize(17),
+                helpStyle: Style.Empty.FontSize(12),
+                errorStyle: Style.Empty.FontWeight(FontWeight.Bold)
             )
         );
         _ = composition.Mount(composition.Root, theme, Components.FormErrorSummary(form));
@@ -102,6 +122,20 @@ public sealed class FieldContracts
         Assert.AreEqual(help.Identity.ElementId, editor.Relationships.Help!.Value.ElementId);
         Assert.IsFalse(editor.Relationships.IsInvalid);
         Assert.AreEqual(0, editor.Relationships.Errors.Count);
+        Assert.AreEqual(
+            17f,
+            composition
+                .Find(new(label.Identity.CompositionEpoch, label.Identity.ElementId))!
+                .Resolve(TypographyProperties.FontSize)
+                .Value
+        );
+        Assert.AreEqual(
+            12f,
+            composition
+                .Find(new(help.Identity.CompositionEpoch, help.Identity.ElementId))!
+                .Resolve(TypographyProperties.FontSize)
+                .Value
+        );
 
         var submit = await form.SubmitAsync();
         graph.Drain();
@@ -117,6 +151,13 @@ public sealed class FieldContracts
         Assert.AreEqual("Used for account recovery.", editor.Relationships.HelpText);
         Assert.AreEqual("Use a complete email address.", editor.Relationships.ErrorText);
         Assert.IsTrue(editor.Relationships.IsInvalid);
+        Assert.AreEqual(
+            FontWeight.Bold,
+            composition
+                .Find(new(error.Identity.CompositionEpoch, error.Identity.ElementId))!
+                .Resolve(TypographyProperties.FontWeight)
+                .Value
+        );
         Assert.IsTrue(
             after.Any(node =>
                 node.Role == SemanticRole.Button
@@ -125,6 +166,8 @@ public sealed class FieldContracts
         );
 
         mounted.Dispose();
+        session.Text = "Draft survives unmount";
+        Assert.AreEqual("Draft survives unmount", session.Text);
         var empty = await form.SubmitAsync();
         Assert.AreEqual(FormSubmitStatus.Valid, empty.Status);
     }

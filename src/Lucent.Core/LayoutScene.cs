@@ -161,6 +161,15 @@ public static class VisualProperties
 [StylePropertyGroup]
 public static class TypographyProperties
 {
+    /// <summary>Sets empty, unfocused text-field and text-area hint paint independently of entered text.</summary>
+    /// <remarks>TextColor continues to control entered text. State-specific placeholder colors may be
+    /// authored with the same variants as other style properties.</remarks>
+    public static readonly Property<Color> PlaceholderTextColor = new(
+        "typography-placeholder-text-color",
+        Color.Parse("#475569"),
+        inherits: true
+    );
+
     /// <summary>Sets the color used to draw text.</summary>
     [StyleProperty(TransitionEligible = true)]
     public static readonly Property<Color> TextColor = new(
@@ -261,6 +270,10 @@ public enum FontWeight
 
 internal static class ProjectionProperties
 {
+    internal static readonly Property<bool> TextPlaceholder = new(
+        "projection-text-placeholder",
+        false
+    );
     internal static readonly Property<string?> Text = new("projection-text", null);
     internal static readonly Property<ResponsiveConstraints?> ResponsiveConstraints = new(
         "projection-responsive-constraints",

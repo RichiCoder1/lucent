@@ -6,6 +6,102 @@ namespace Lucent.Core.Tests;
 public sealed class CommandContracts
 {
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void CommandButtonsObserveAvailabilityGuardStaleInvocationsAndBorrowLifetime(bool icon)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "command-button");
+        composition.ConfigureImages(new ImageCache(new StockImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var enabled = graph.Signal(true, "available");
+        var authorEnabled = graph.Signal(true, "author-enabled");
+        var label = graph.Signal("Save", "label");
+        var pending = new TaskCompletionSource();
+        var runs = 0;
+        using var command = new ApplicationCommand(
+            composition.Root.Scope,
+            _ =>
+            {
+                runs++;
+                return pending.Task;
+            },
+            () => enabled.Value,
+            "save"
+        );
+        var mounted = composition.Mount(
+            composition.Root,
+            theme,
+            icon
+                ? Components.Button(
+                    "Save",
+                    command,
+                    Style.Empty.Enabled(() => authorEnabled.Value),
+                    () => Lucent.Icons.Lucide.LucideIcons.CircleCheck
+                )
+                : Components.Button(
+                    () => label.Value,
+                    command,
+                    Style.Empty.Enabled(() => authorEnabled.Value)
+                )
+        );
+        graph.Drain();
+        var button = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Button);
+        Assert.IsTrue(button.Enabled);
+        enabled.Value = false;
+        _ = composition.ExecuteSemanticCommand(button.Identity, new(SemanticCommandKind.Invoke));
+        Assert.AreEqual(
+            0,
+            runs,
+            "A stale enabled scene invoked a command after its guard became false."
+        );
+        graph.Drain();
+        Assert.IsFalse(
+            Flatten(composition.SemanticSnapshot()!)
+                .Single(node => node.Role == SemanticRole.Button)
+                .Enabled
+        );
+        enabled.Value = true;
+        graph.Drain();
+        button = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Button);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(button.Identity, new(SemanticCommandKind.Invoke))
+        );
+        _ = composition.ExecuteSemanticCommand(button.Identity, new(SemanticCommandKind.Invoke));
+        Assert.AreEqual(1, runs, "A busy command accepted a second invocation.");
+        graph.Drain();
+        Assert.IsFalse(
+            Flatten(composition.SemanticSnapshot()!)
+                .Single(node => node.Role == SemanticRole.Button)
+                .Enabled
+        );
+        using var completed = new ManualResetEventSlim();
+        graph.WorkAvailable += completed.Set;
+        pending.SetResult();
+        Assert.IsTrue(completed.Wait(TimeSpan.FromSeconds(2)));
+        graph.Drain();
+        label.Value = "Save again";
+        authorEnabled.Value = false;
+        graph.Drain();
+        button = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Button);
+        Assert.IsFalse(
+            button.Enabled,
+            "Command availability must not remove an author's disabled restriction."
+        );
+        Assert.AreEqual(icon ? "Save" : "Save again", button.Name);
+        mounted.Dispose();
+        Assert.IsTrue(
+            command.TryExecute(),
+            "Unmounting a button disposed its caller-owned command."
+        );
+        Assert.AreEqual(2, runs);
+    }
+
+    [TestMethod]
     public void AsyncCommandOwnsBusyErrorRetryAndCancellation()
     {
         var graph = new ReactiveGraph();

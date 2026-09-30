@@ -10,7 +10,6 @@ style RadioOptionLabelStyle {
     MainGrow: 1;
     MinWidth: 0;
     MinHeight: 20;
-    TextWrap: TextWrap.WordWithGraphemeFallback;
 }
 
 internal component RadioOptionContent(RadioOptionBinding binding) {

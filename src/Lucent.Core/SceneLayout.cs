@@ -2060,8 +2060,13 @@ public static partial class SceneLayout
         (
             element.ResolveValue(VisualProperties.Background),
             element.ResolveValue(VisualProperties.Opacity),
-            element.ResolveValue(TypographyProperties.TextColor)
+            element.ResolveValue(TextPaintProperty(element))
         );
+
+    private static Property<Color> TextPaintProperty(Element element) =>
+        element.ResolveValue(ProjectionProperties.TextPlaceholder)
+            ? TypographyProperties.PlaceholderTextColor
+            : TypographyProperties.TextColor;
 
     private static Values ReadResolved(
         Element element,

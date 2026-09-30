@@ -28,7 +28,7 @@ internal static partial class Controls
             Style.Empty.Transition(VisualProperties.Background, Motion.None)
         );
 
-    private static Style ButtonStyle(ThemeContext theme) =>
+    private static Style ButtonStyle(Element element, ThemeContext theme) =>
         RowStyle
             .Set(LayoutProperties.Clip, true)
             .Set(LayoutProperties.Padding, Insets.Symmetric(12, 8))
@@ -36,31 +36,19 @@ internal static partial class Controls
             .Set(LayoutProperties.MainAlignment, LayoutAlignment.Center)
             .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
             .Set(VisualProperties.CornerRadius, 6f)
-            .Bind(
-                VisualProperties.Background,
-                () => ResolveBrush(theme, ControlThemes.Accent, PresentationStyles.TransparentBrush)
-            )
-            .Bind(
-                TypographyProperties.TextColor,
-                () => ResolveButtonText(theme, ControlThemes.SurfaceColor)
-            )
-            .Bind(VisualProperties.Border, () => ResolveBorder(theme, ControlThemes.Border))
+            .With(ButtonPaint(theme, ButtonRole.Primary))
             .When(
-                VariantState.Hover,
-                Style
-                    .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
-                    .Bind(
-                        VisualProperties.Border,
-                        () => ResolveBorder(theme, ControlThemes.BorderHover)
-                    )
+                () => element.ResolveValue(ButtonProperties.Role) == ButtonRole.Secondary,
+                ButtonPaint(theme, ButtonRole.Secondary)
             )
             .When(
-                VariantState.Pressed,
-                Style
-                    .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
-                    .Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
+                () => element.ResolveValue(ButtonProperties.Role) == ButtonRole.Quiet,
+                ButtonPaint(theme, ButtonRole.Quiet)
             )
-            .When(VariantState.FocusVisible, AccentFocusStyle(theme))
+            .When(
+                () => element.ResolveValue(ButtonProperties.Role) == ButtonRole.Destructive,
+                ButtonPaint(theme, ButtonRole.Destructive)
+            )
             .When(
                 VariantState.Disabled,
                 Style
@@ -73,11 +61,103 @@ internal static partial class Controls
             )
             .With(HoverMotionStyle);
 
-    private static Style ComposedButtonStyle(ThemeContext theme) =>
-        ButtonStyle(theme).Set(LayoutProperties.Spacing, 8f);
+    private static Style ButtonPaint(ThemeContext theme, ButtonRole role)
+    {
+        var strong = role is ButtonRole.Primary or ButtonRole.Destructive;
+        var fill = role switch
+        {
+            ButtonRole.Primary => ControlThemes.Accent,
+            ButtonRole.Destructive => ControlThemes.Destructive,
+            _ => ControlThemes.Surface,
+        };
+        var hover = role switch
+        {
+            ButtonRole.Primary => ControlThemes.AccentHover,
+            ButtonRole.Destructive => ControlThemes.DestructiveHover,
+            _ => ControlThemes.Hover,
+        };
+        var pressed = role switch
+        {
+            ButtonRole.Primary => ControlThemes.AccentPressed,
+            ButtonRole.Destructive => ControlThemes.DestructivePressed,
+            _ => ControlThemes.Pressed,
+        };
+        var foreground = strong ? ControlThemes.SurfaceColor : ControlThemes.Foreground;
+        var resting =
+            role == ButtonRole.Quiet
+                ? Style
+                    .Empty.Set(VisualProperties.Background, PresentationStyles.TransparentBrush)
+                    .Set(VisualProperties.Border, Border.None)
+                : Style
+                    .Empty.Bind(
+                        VisualProperties.Background,
+                        () => ResolveBrush(theme, fill, PresentationStyles.TransparentBrush)
+                    )
+                    .Bind(
+                        VisualProperties.Border,
+                        () => ResolveBorder(theme, ControlThemes.Border)
+                    );
+        return resting
+            .Bind(TypographyProperties.TextColor, () => ResolveButtonText(theme, foreground))
+            .When(
+                VariantState.Hover,
+                Style
+                    .Empty.Set(VisualProperties.Background, hover)
+                    .Set(TypographyProperties.TextColor, foreground)
+                    .Bind(
+                        VisualProperties.Border,
+                        () =>
+                            role == ButtonRole.Quiet
+                                ? Border.None
+                                : ResolveBorder(theme, ControlThemes.BorderHover)
+                    )
+            )
+            .When(
+                VariantState.Pressed,
+                Style
+                    .Empty.Set(VisualProperties.Background, pressed)
+                    .Set(TypographyProperties.TextColor, foreground)
+            )
+            .With(ButtonFocusPaint(theme, strong));
+    }
 
-    private static Style IconButtonStyle(ThemeContext theme) =>
-        ButtonStyle(theme)
+    private static Style ButtonFocusPaint(ThemeContext theme, bool strong)
+    {
+        var ordinary = Style.Empty.Set(
+            VisualProperties.FocusRing,
+            strong ? ControlThemes.AccentFocusRing : ControlThemes.FocusRing
+        );
+        var highContrast = Style
+            .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
+            .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
+            .Set(VisualProperties.FocusRing, ControlThemes.FocusRing);
+        // Appearance and reset decisions are outside interaction variants, so an already
+        // mounted role supplies focus/press tokens on the first committed interaction frame.
+        return Style
+            .Empty.When(VariantState.FocusVisible, ordinary)
+            .When(
+                () => theme.PresentationMode == ControlPresentationMode.Minimal,
+                Style
+                    .Empty.When(
+                        VariantState.FocusVisible,
+                        Style.Empty.Set(VisualProperties.FocusRing, ControlThemes.FocusRing)
+                    )
+                    .When(VariantState.FocusVisible | VariantState.Hover, ordinary)
+                    .When(VariantState.FocusVisible | VariantState.Pressed, ordinary)
+            )
+            .When(
+                () => IsHighContrast(theme),
+                Style
+                    .Empty.When(VariantState.FocusVisible, highContrast)
+                    .When(VariantState.FocusVisible | VariantState.Pressed, highContrast)
+            );
+    }
+
+    private static Style ComposedButtonStyle(Element element, ThemeContext theme) =>
+        ButtonStyle(element, theme).Set(LayoutProperties.Spacing, 8f);
+
+    private static Style IconButtonStyle(Element element, ThemeContext theme) =>
+        ButtonStyle(element, theme)
             .Set(LayoutProperties.Width, 36f)
             .Set(LayoutProperties.Height, 36f)
             .Set(LayoutProperties.Padding, Insets.Uniform(10f))
@@ -99,7 +179,7 @@ internal static partial class Controls
             .Bind(TypographyProperties.TextColor, () => theme.Token(ControlThemes.Foreground))
             .When(
                 VariantState.Hover,
-                Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected)
+                Style.Empty.Set(VisualProperties.Background, ControlThemes.Hover)
             )
             .When(
                 VariantState.Selected,
@@ -139,7 +219,7 @@ internal static partial class Controls
         Configure(
             element,
             theme,
-            ButtonStyle(theme).Set(ProjectionProperties.Text, label),
+            ButtonStyle(element, theme).Set(ProjectionProperties.Text, label),
             style,
             new ButtonBehavior(
                 "button",
@@ -164,7 +244,7 @@ internal static partial class Controls
         Configure(
             element,
             theme,
-            ComposedButtonStyle(theme),
+            ComposedButtonStyle(element, theme),
             style,
             new ButtonBehavior(
                 "button",
@@ -190,7 +270,7 @@ internal static partial class Controls
         Configure(
             element,
             theme,
-            IconButtonStyle(theme).Set(ImageProperties.Source, source),
+            IconButtonStyle(element, theme).Set(ImageProperties.Source, source),
             style,
             new ButtonBehavior(
                 "icon-button",

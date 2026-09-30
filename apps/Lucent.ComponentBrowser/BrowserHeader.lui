@@ -27,6 +27,15 @@ style HeaderActionsStyle {
     Spacing: 8;
     Wrap: true;
     MainShrink: 0;
+    CrossAlignment: LayoutAlignment.End;
+}
+
+style HeaderThemeOptionsStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    RowGap: 8;
+    Wrap: true;
+    TextWrap: TextWrap.NoWrap;
 }
 
 style HeaderSearchStyle {
@@ -43,6 +52,12 @@ style HeaderSearchRowStyle {
 }
 
 public component BrowserHeader(ComponentBrowserState browser, ThemeContext theme) {
+    readonly IReadOnlyList<RadioOption<ThemeAppearance>> themeOptions = [
+        new(ThemeAppearance.Light, "Light"),
+        new(new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal), "Dark"),
+        new(new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High), "High contrast"),
+    ];
+
     <Layout style={BrowserHeaderStyle}>
         <Layout style={HeaderTopStyle}>
             <Layout style={HeaderTitleStyle}>
@@ -54,52 +69,20 @@ public component BrowserHeader(ComponentBrowserState browser, ThemeContext theme
                 </Text>
             </Layout>
             <Layout style={HeaderActionsStyle}>
-                <Button
-                    onInvoke={
-                        () => ComponentBrowserTheme.SetAppearance(theme, ThemeAppearance.Light)
+                <RadioGroup
+                    label="Theme"
+                    items={() => themeOptions}
+                    readSelectedKey={() => theme.Appearance}
+                    onSelectionRequested={
+                        appearance => ComponentBrowserTheme.SetAppearance(theme, appearance)
                     }
-                    style={Style.Empty.Enabled(() => theme.Appearance != ThemeAppearance.Light)}
-                    name="component-browser.theme-light"
-                >
-                    Light
-                </Button>
-                <Button
-                    onInvoke={
-                        () => ComponentBrowserTheme.SetAppearance(
-                            theme,
-                            new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal)
-                        )
-                    }
-                    style={
-                        Style.Empty.Enabled(
-                            () => theme.Appearance
-                                != new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal)
-                        )
-                    }
-                    name="component-browser.theme-dark"
-                >
-                    Dark
-                </Button>
-                <Button
-                    onInvoke={
-                        () => ComponentBrowserTheme.SetAppearance(
-                            theme,
-                            new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High)
-                        )
-                    }
-                    style={
-                        Style.Empty.Enabled(
-                            () => theme.Appearance
-                                != new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High)
-                        )
-                    }
-                    name="component-browser.theme-high-contrast"
-                >
-                    High contrast
-                </Button>
+                    optionsStyle={HeaderThemeOptionsStyle}
+                    name="component-browser.theme"
+                />
                 <Button
                     leadingIcon={Lucent.Icons.Lucide.LucideIcons.ListFilter}
                     onInvoke={browser.ToggleDensity}
+                    style={Style.Empty.ButtonRole(ButtonRole.Secondary)}
                     name="component-browser.density"
                 >
                     {

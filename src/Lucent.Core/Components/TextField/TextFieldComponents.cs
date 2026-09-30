@@ -245,6 +245,49 @@ public static partial class Components
         EditorSession? session = null,
         FocusTarget? focusTarget = null,
         string? placeholder = null
+    ) => TextAreaCore(initialValue, onChange, style, label, session, focusTarget, placeholder);
+
+    /// <summary>Creates the primary multiline editor for a typed field context.</summary>
+    /// <remarks>A supplied editor session remains owned by its caller and must be multiline.
+    /// Label, help, validation relationships, blur handling, and focus requests belong to the field.</remarks>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> TextArea(
+        FieldContext field,
+        string initialValue = "",
+        Action<string>? onChange = null,
+        Style? style = null,
+        EditorSession? session = null,
+        string? placeholder = null,
+        Func<bool>? enabled = null,
+        Func<bool>? readOnly = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        return TextAreaCore(
+            initialValue,
+            onChange,
+            style,
+            field.AccessibleName,
+            session,
+            field.FocusTarget,
+            placeholder,
+            field,
+            enabled,
+            readOnly
+        );
+    }
+
+    private static AuthorRecipe<StyledAccessibleCapability> TextAreaCore(
+        string initialValue,
+        Action<string>? onChange,
+        Style? style,
+        string label,
+        EditorSession? session,
+        FocusTarget? focusTarget,
+        string? placeholder,
+        FieldContext? field = null,
+        Func<bool>? enabled = null,
+        Func<bool>? readOnly = null
     )
     {
         TextFieldState.ValidateMultilineText(initialValue);
@@ -266,7 +309,10 @@ public static partial class Components
                     style,
                     session,
                     focusTarget,
-                    placeholder
+                    placeholder,
+                    field,
+                    enabled,
+                    readOnly
                 );
                 if (onChange is not null)
                 {

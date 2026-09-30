@@ -39,7 +39,9 @@ public static partial class SceneLayout
         (
             element.Composition.ReadPresentedValue(element, VisualProperties.Background),
             element.Composition.ReadPresentedValue(element, VisualProperties.Opacity),
-            element.Composition.ReadPresentedValue(element, TypographyProperties.TextColor)
+            element.ResolveValue(ProjectionProperties.TextPlaceholder)
+                ? element.ResolveValue(TypographyProperties.PlaceholderTextColor)
+                : element.Composition.ReadPresentedValue(element, TypographyProperties.TextColor)
         );
 
     internal sealed class PaintSnapshot

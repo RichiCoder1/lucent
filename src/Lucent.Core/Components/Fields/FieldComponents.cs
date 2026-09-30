@@ -23,7 +23,12 @@ public static partial class Components
     }
 
     [LucentComponent]
-    internal static ComponentRecipe FieldLabel(FieldContext field, string label, bool required)
+    internal static ComponentRecipe FieldLabel(
+        FieldContext field,
+        string label,
+        bool required,
+        Style? style = null
+    )
     {
         ArgumentNullException.ThrowIfNull(field);
         label = Required(label, nameof(label));
@@ -33,13 +38,17 @@ public static partial class Components
             (context, root) =>
             {
                 field.AttachLabel(root);
-                Controls.FieldLabel(root, context.Theme, content, field.FocusTarget);
+                Controls.FieldLabel(root, context.Theme, content, field.FocusTarget, style);
             }
         );
     }
 
     [LucentComponent]
-    internal static ComponentRecipe FieldHelp(FieldContext field, Func<string> content)
+    internal static ComponentRecipe FieldHelp(
+        FieldContext field,
+        Func<string> content,
+        Style? style = null
+    )
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(content);
@@ -52,7 +61,7 @@ public static partial class Components
                     () => Required(content(), nameof(content)),
                     root.Name + ".content"
                 );
-                Controls.FieldHelp(root, context.Theme, value.Value);
+                Controls.FieldHelp(root, context.Theme, value.Value, style);
                 _ = root.Scope.Effect(
                     () =>
                     {
@@ -70,7 +79,11 @@ public static partial class Components
     }
 
     [LucentComponent]
-    internal static ComponentRecipe FieldError(FieldContext field, Func<string> content)
+    internal static ComponentRecipe FieldError(
+        FieldContext field,
+        Func<string> content,
+        Style? style = null
+    )
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(content);
@@ -83,7 +96,7 @@ public static partial class Components
                     () => Required(content(), nameof(content)),
                     root.Name + ".content"
                 );
-                Controls.FieldError(root, context.Theme, value.Value);
+                Controls.FieldError(root, context.Theme, value.Value, style);
                 _ = root.Scope.Effect(
                     () =>
                     {

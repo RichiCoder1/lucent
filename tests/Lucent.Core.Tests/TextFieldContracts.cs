@@ -8,6 +8,109 @@ public sealed class TextFieldContracts
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
+    public void PlaceholderColorStaysSeparateAcrossRetainedPaintDisabledAndFocus(bool multiline)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "placeholder-color");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Width(200).Height(80));
+        var color = graph.Signal(Color.Parse("#166534"), "hint-color");
+        var field = composition.Child(composition.Root, "field");
+        var style = Style
+            .Empty.Width(180)
+            .Height(60)
+            .TextColor(Color.Parse("#7e22ce"))
+            .PlaceholderTextColor(() => color.Value)
+            .When(
+                VariantState.Disabled,
+                Style
+                    .Empty.TextColor(Color.Parse("#991b1b"))
+                    .PlaceholderTextColor(Color.Parse("#334155"))
+            );
+        var state = multiline
+            ? Controls.TextArea(field, theme, "Notes", style: style, placeholder: "Add notes")
+            : Controls.TextField(field, theme, "Notes", style: style, placeholder: "Add notes");
+        var shaper = new MetricShaper();
+        using var initial = Install(composition, composition.Input, shaper);
+        Color Paint(RetainedScene scene) =>
+            Flatten(scene.Nodes)
+                .OfType<TextSceneNode>()
+                .Single(node => node.Identity.Element.ElementId == field.Id)
+                .Color;
+        Assert(
+            Paint(initial) == Color.Parse("#166534"),
+            "The custom placeholder color was not projected."
+        );
+        color.Value = Color.Parse("#1e40af");
+        composition.Flush();
+        using var changed = SceneLayout.ProjectFrame(composition, new(200, 40, 1), shaper, initial);
+        Assert(
+            Paint(changed) == Color.Parse("#1e40af"),
+            "Retained paint did not observe a changed hint color."
+        );
+        field.SetVariants(VariantState.Disabled);
+        using var disabled = Install(composition, composition.Input, shaper);
+        Assert(
+            Paint(disabled) == Color.Parse("#334155"),
+            "Disabled hint paint was replaced by disabled entered-text paint."
+        );
+        field.SetVariants(VariantState.None);
+        using var ready = Install(composition, composition.Input, shaper);
+        Assert(
+            composition.Input.MoveFocus(FocusTraversalDirection.Next),
+            "Field could not receive portable focus."
+        );
+        using var focused = Install(composition, composition.Input, shaper);
+        Assert(
+            !Flatten(focused.Nodes)
+                .OfType<TextSceneNode>()
+                .Any(node => node.Identity.Element.ElementId == field.Id),
+            "Focused empty fields must stop painting their hint."
+        );
+        state.Insert("Entered");
+        using var entered = Install(composition, composition.Input, shaper);
+        Assert(
+            Paint(entered) == Color.Parse("#7e22ce"),
+            "Entered text inherited placeholder color."
+        );
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void AuthoredTextColorDoesNotReplacePlaceholderPaint(bool multiline)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "authored-placeholder");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Width(200).Height(80));
+        var field = composition.Child(composition.Root, "field");
+        var style = Style.Empty.Width(180).Height(60).TextColor(Color.Parse("#7e22ce"));
+        var state = multiline
+            ? Controls.TextArea(field, theme, "Notes", style: style, placeholder: "Add notes")
+            : Controls.TextField(field, theme, "Notes", style: style, placeholder: "Add notes");
+        using var empty = Install(composition, composition.Input);
+        var hint = Flatten(empty.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == field.Id);
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            Color.Parse("#475569"),
+            hint.Color
+        );
+        state.Value = "Entered text";
+        using var entered = Install(composition, composition.Input);
+        var text = Flatten(entered.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == field.Id);
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            Color.Parse("#7e22ce"),
+            text.Color
+        );
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
     public void CandidateCaretStaysWithinClippingAncestors(bool multiline)
     {
         var graph = new ReactiveGraph();

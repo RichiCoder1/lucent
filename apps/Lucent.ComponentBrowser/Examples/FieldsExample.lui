@@ -55,6 +55,8 @@ public component FieldsExample() {
             label="Workspace name"
             required={true}
             session={form}
+            helpStyle={PresentationStyles.Typography(TextRole.Caption)}
+            errorStyle={Style.Empty.FontWeight(FontWeight.SemiBold)}
             validation={NameValidation}
             help={
                 () => "The label, editor, help, and validation message share one field relationship."
@@ -73,13 +75,21 @@ public component FieldsExample() {
             }
             name="component-browser.fields.name"
         />
-        <TextArea
-            session={exampleNotes}
+        <Field
             label="Notes"
-            placeholder="Add a short implementation note"
-            style={
-                FieldsExampleAreaStyle.With(
-                    Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)
+            session={form}
+            help={
+                () => "Multiline drafts share the same label, help, and validation relationships."
+            }
+            helpStyle={PresentationStyles.Typography(TextRole.Caption)}
+            errorStyle={Style.Empty.FontWeight(FontWeight.SemiBold)}
+            editor={
+                field => Lucent.Core.Components.TextArea(
+                    field,
+                    session: exampleNotes,
+                    placeholder: "Add a short implementation note",
+                    enabled: () => browser.CurrentExampleState != ExampleState.Disabled,
+                    style: FieldsExampleAreaStyle
                 )
             }
             name="component-browser.fields.notes"

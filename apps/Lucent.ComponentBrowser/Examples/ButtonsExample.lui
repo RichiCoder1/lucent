@@ -9,14 +9,33 @@ style ButtonsExampleStyle {
 style ButtonsRowStyle {
     Axis: LayoutAxis.Row;
     Spacing: 10;
+    RowGap: 10;
     CrossAlignment: LayoutAlignment.Center;
     Wrap: true;
+}
+
+style SecondaryExampleButtonStyle {
+    ButtonProperties.Role: ButtonRole.Secondary;
+}
+
+style DestructiveExampleButtonStyle {
+    ButtonProperties.Role: ButtonRole.Destructive;
 }
 
 public component ButtonsExample() {
     context ComponentBrowserState browser;
     int activationCount = 0;
     string selectedOption = "native";
+    [Owned]
+    readonly ApplicationCommand applyCommand = new(
+        owner,
+        _ => {
+            Activate();
+            return System.Threading.Tasks.Task.CompletedTask;
+        },
+        () => browser.CurrentExampleState != ExampleState.Disabled,
+        "example-apply"
+    );
     void Activate() {
         activationCount += 1;
     }
@@ -30,21 +49,26 @@ public component ButtonsExample() {
         </Text>
         <Layout style={ButtonsRowStyle}>
             <Button
-                leadingIcon={Lucent.Icons.Lucide.LucideIcons.CircleCheck}
-                onInvoke={Activate}
-                style={
-                    Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)
-                }
+                leadingIcon={() => Lucent.Icons.Lucide.LucideIcons.CircleCheck}
+                command={applyCommand}
                 name="component-browser.buttons.primary"
             >
                 Apply change
+            </Button>
+            <Button command={applyCommand} style={SecondaryExampleButtonStyle}>
+                Secondary action
+            </Button>
+            <Button command={applyCommand} style={DestructiveExampleButtonStyle}>
+                Destructive action
             </Button>
             <IconButton
                 source={Lucent.Icons.Lucide.LucideIcons.RefreshCw}
                 label="Refresh example"
                 onInvoke={Activate}
                 style={
-                    Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)
+                    Style.Empty.ButtonRole(ButtonRole.Quiet).Enabled(
+                        () => browser.CurrentExampleState != ExampleState.Disabled
+                    )
                 }
                 name="component-browser.buttons.refresh"
             />

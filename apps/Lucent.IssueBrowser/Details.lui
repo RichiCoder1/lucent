@@ -16,6 +16,9 @@ style DetailsViewportStyle {
 
 style DetailsActionsStyle {
     Axis: LayoutAxis.Row;
+    Spacing: 8;
+    RowGap: 8;
+    Wrap: true;
 }
 
 public component Details(

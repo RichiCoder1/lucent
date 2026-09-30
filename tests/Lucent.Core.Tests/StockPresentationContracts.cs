@@ -7,6 +7,204 @@ namespace Lucent.Core.Tests;
 public sealed class StockPresentationContracts
 {
     [TestMethod]
+    public void ButtonRolesRemainReadableAcrossStockStatesThemesAndMinimalPresentation()
+    {
+        foreach (
+            var palette in new[]
+            {
+                ControlThemes.Light,
+                ControlThemes.Dark,
+                ControlThemes.HighContrast,
+            }
+        )
+        foreach (var role in Enum.GetValues<ButtonRole>())
+        {
+            var graph = new ReactiveGraph();
+            using var composition = new Composition(graph, "button-role");
+            using var theme = new ThemeContext(composition.Root.Scope, palette);
+            var button = composition.Child(composition.Root, "action");
+            Controls.Button(button, theme, "Action", style: Style.Empty.ButtonRole(role));
+            graph.Drain();
+            if (palette == ControlThemes.Light)
+                Assert.AreEqual(
+                    role switch
+                    {
+                        ButtonRole.Primary => Color.Parse("#2563eb"),
+                        ButtonRole.Secondary => Color.Parse("#ffffff"),
+                        ButtonRole.Quiet => Color.Parse("#00000000"),
+                        _ => Color.Parse("#b91c1c"),
+                    },
+                    button.Resolve(VisualProperties.Background).Value.Color
+                );
+            foreach (
+                var state in new[]
+                {
+                    VariantState.None,
+                    VariantState.Hover,
+                    VariantState.Pressed,
+                    VariantState.FocusVisible,
+                    VariantState.Hover | VariantState.FocusVisible,
+                    VariantState.Pressed | VariantState.FocusVisible,
+                }
+            )
+            {
+                button.SetVariants(state);
+                graph.Drain();
+                var fill = button.Resolve(VisualProperties.Background).Value.Color!.Value;
+                if (fill.A == 0)
+                    fill = theme.Token(ControlThemes.SurfaceColor);
+                Assert.IsTrue(
+                    Contrast(button.Resolve(TypographyProperties.TextColor).Value, fill) >= 4.5,
+                    $"{palette.Name} {role} {state} text must contrast with its stock fill."
+                );
+                if (state.HasFlag(VariantState.FocusVisible))
+                    Assert.IsTrue(
+                        Contrast(
+                            button.Resolve(VisualProperties.FocusRing).Value.Brush!.Color!.Value,
+                            fill
+                        ) >= 3,
+                        $"{palette.Name} {role} {state} focus must remain visible."
+                    );
+            }
+            button.SetVariants(VariantState.None);
+            theme.PresentationMode = ControlPresentationMode.Minimal;
+            graph.Drain();
+            Assert.AreEqual((byte?)0, button.Resolve(VisualProperties.Background).Value.Color?.A);
+            Assert.AreEqual(Border.None, button.Resolve(VisualProperties.Border).Value);
+            foreach (
+                var state in new[]
+                {
+                    VariantState.FocusVisible,
+                    VariantState.FocusVisible | VariantState.Hover,
+                    VariantState.FocusVisible | VariantState.Pressed,
+                }
+            )
+            {
+                button.SetVariants(state);
+                graph.Drain();
+                var focused = button.Resolve(VisualProperties.Background).Value.Color!.Value;
+                if (focused.A == 0)
+                    focused = theme.Token(ControlThemes.SurfaceColor);
+                Assert.IsTrue(
+                    Contrast(
+                        button.Resolve(VisualProperties.FocusRing).Value.Brush!.Color!.Value,
+                        focused
+                    ) >= 3,
+                    $"{palette.Name} minimal {role} {state} focus must remain visible."
+                );
+            }
+        }
+    }
+
+    [TestMethod]
+    public void ButtonRoleReaderUpdatesComposedAndIconButtonsWithoutRemounting()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "live-button-role");
+        composition.ConfigureImages(new ImageCache(new StockImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var role = graph.Signal(ButtonRole.Secondary, "role");
+        var style = Style.Empty.ButtonRole(() => role.Value);
+        var button = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Button("Action", LucideIcons.CircleCheck, style: style)
+        );
+        var icon = composition.Mount(
+            composition.Root,
+            theme,
+            Components.IconButton(LucideIcons.CircleCheck, "Action icon", style: style)
+        );
+        graph.Drain();
+        Assert.AreEqual(
+            Color.Parse("#ffffff"),
+            button.Resolve(VisualProperties.Background).Value.Color
+        );
+        Assert.AreEqual(
+            Color.Parse("#ffffff"),
+            icon.Resolve(VisualProperties.Background).Value.Color
+        );
+        role.Value = ButtonRole.Destructive;
+        graph.Drain();
+        Assert.AreEqual(
+            Color.Parse("#b91c1c"),
+            button.Resolve(VisualProperties.Background).Value.Color
+        );
+        Assert.AreEqual(
+            Color.Parse("#b91c1c"),
+            icon.Resolve(VisualProperties.Background).Value.Color
+        );
+    }
+
+    [TestMethod]
+    public void StockHoverSelectionAndPressHaveDistinctPaint()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "stock-state-paint");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var row = composition.Child(composition.Root, "row");
+        Controls.Selectable(row, theme, "Issue");
+        var button = composition.Child(composition.Root, "button");
+        Controls.Button(button, theme, "Action");
+        graph.Drain();
+
+        row.SetVariants(VariantState.Hover);
+        graph.Drain();
+        var hover = row.Resolve(VisualProperties.Background).Value;
+        row.SetVariants(VariantState.Selected | VariantState.Hover);
+        graph.Drain();
+        Assert.AreEqual(
+            Color.Parse("#dbeafe"),
+            row.Resolve(VisualProperties.Background).Value.Color
+        );
+        Assert.AreNotEqual(
+            hover,
+            row.Resolve(VisualProperties.Background).Value,
+            "An unselected hovered row must not appear selected."
+        );
+        button.SetVariants(VariantState.Hover);
+        graph.Drain();
+        hover = button.Resolve(VisualProperties.Background).Value;
+        button.SetVariants(VariantState.Hover | VariantState.Pressed);
+        graph.Drain();
+        Assert.AreNotEqual(
+            hover,
+            button.Resolve(VisualProperties.Background).Value,
+            "Press feedback must remain distinguishable from hover."
+        );
+    }
+
+    [TestMethod]
+    public void InvalidFieldPaintDistinguishesErrorsFromHelpAndRetainsFocus()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "invalid-field-paint");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var field = composition.Child(composition.Root, "field");
+        Controls.TextField(field, theme, "Name", placeholder: "");
+        var help = composition.Child(composition.Root, "help");
+        Controls.FieldHelp(help, theme, "Use your full name.");
+        var error = composition.Child(composition.Root, "error");
+        Controls.FieldError(error, theme, "A name is required.");
+        graph.Drain();
+        field.SetVariants(VariantState.Invalid | VariantState.FocusVisible);
+        graph.Drain();
+        Assert.AreEqual(
+            Color.Parse("#b91c1c"),
+            field.Resolve(VisualProperties.Border).Value.Brush?.Color
+        );
+        Assert.AreEqual(
+            Color.Parse("#b91c1c"),
+            error.Resolve(TypographyProperties.TextColor).Value
+        );
+        Assert.AreNotEqual(
+            help.Resolve(TypographyProperties.TextColor).Value,
+            error.Resolve(TypographyProperties.TextColor).Value
+        );
+        Assert.IsNotNull(field.Resolve(VisualProperties.FocusRing).Value.Brush);
+    }
+
+    [TestMethod]
     public void NamedTextRolesAreAuthorStylesBackedByLiveThemeTokens()
     {
         var graph = new ReactiveGraph();

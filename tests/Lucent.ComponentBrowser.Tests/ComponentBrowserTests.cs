@@ -633,6 +633,75 @@ public sealed class ComponentBrowserTests
         using var canvas = new SKCanvas(bitmap);
         renderer.Render(scene, canvas);
         Assert.IsTrue(scene.Boxes.Count != 0);
+
+        var themeChoices = Flatten(
+                nodes.Single(node => node.Role == SemanticRole.RadioGroup && node.Name == "Theme")
+            )
+            .ToArray();
+        var light = themeChoices.Single(node =>
+            node.Role == SemanticRole.RadioButton && node.Name == "Light"
+        );
+        var dark = themeChoices.Single(node =>
+            node.Role == SemanticRole.RadioButton && node.Name == "Dark"
+        );
+        Assert.IsTrue(
+            light.Selected && light.Enabled,
+            "The chosen theme must remain an enabled radio option."
+        );
+        var lightBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == light.Identity.ElementId)
+            .Bounds;
+        var darkBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == dark.Identity.ElementId)
+            .Bounds;
+        Assert.AreEqual(
+            lightBounds.Y,
+            darkBounds.Y,
+            "Theme choices should share one wrapped horizontal options layout."
+        );
+        Assert.IsTrue(darkBounds.X >= lightBounds.X + lightBounds.Width + 8);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(dark.Identity, new(SemanticCommandKind.Select))
+        );
+        composition.Flush();
+        var selectedDark = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == dark.Identity.ElementId);
+        Assert.IsTrue(selectedDark.Selected && selectedDark.Enabled);
+        Assert.AreEqual(
+            dark.Identity.ElementId,
+            composition.Input.FocusedElement?.ElementId,
+            "Applying a theme choice must retain its keyboard focus."
+        );
+
+        var stateChoices = Flatten(
+                Flatten(composition.SemanticSnapshot()!)
+                    .Single(node =>
+                        node.Role == SemanticRole.RadioGroup && node.Name == "Example state"
+                    )
+            )
+            .ToArray();
+        var disabled = stateChoices.Single(node =>
+            node.Role == SemanticRole.RadioButton && node.Name == "Disabled"
+        );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(disabled.Identity, new(SemanticCommandKind.Select))
+        );
+        composition.Flush();
+        var after = Flatten(composition.SemanticSnapshot()!).ToArray();
+        Assert.IsTrue(
+            after.Single(node => node.Identity.ElementId == disabled.Identity.ElementId).Selected
+        );
+        Assert.IsTrue(
+            after.Single(node => node.Identity.ElementId == disabled.Identity.ElementId).Enabled,
+            "Disabled is an example state, not an unavailable state selector."
+        );
+        Assert.IsFalse(
+            after
+                .Single(node => node.Role == SemanticRole.Button && node.Name == "Apply change")
+                .Enabled
+        );
     }
 
     [TestMethod]

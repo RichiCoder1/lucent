@@ -5,11 +5,6 @@ style RadioGroupLabelStyle {
     TextWrap: TextWrap.WordWithGraphemeFallback;
 }
 
-style RadioGroupOptionsStyle {
-    Axis: LayoutAxis.Column;
-    Spacing: 2;
-}
-
 internal component RadioGroupContent(
     RadioGroupBinding binding,
     [DefaultContent] ComponentContent options,
@@ -17,6 +12,6 @@ internal component RadioGroupContent(
 ) {
     <RadioGroupHost binding={binding} style={style}>
         <SelectionDecoration content={() => binding.Label} style={RadioGroupLabelStyle} />
-        <Layout style={RadioGroupOptionsStyle}>{options}</Layout>
+        {options}
     </RadioGroupHost>
 }

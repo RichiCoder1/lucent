@@ -1266,8 +1266,8 @@ public sealed partial class IssueBrowserTests
             "Generated Details rejected its ordinary semantic status action."
         );
         graph.Drain();
-        _ = Install(composition, renderer, viewport);
-        var semantics = Flatten(composition.SemanticSnapshot()!);
+        var mutationScene = Install(composition, renderer, viewport);
+        var semantics = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
             semantics.Any(node =>
                 node.Role == SemanticRole.Status
@@ -1281,6 +1281,20 @@ public sealed partial class IssueBrowserTests
                     node.Role == SemanticRole.Button && node.Name == "Retry status change"
                 ),
             "Generated Details did not publish transient status and Retry semantics."
+        );
+        var retry = semantics.Single(node =>
+            node.Role == SemanticRole.Button && node.Name == "Retry status change"
+        );
+        var actionBounds = mutationScene
+            .Boxes.Single(box => box.Identity.ElementId == action.Identity.ElementId)
+            .Bounds;
+        var retryBounds = mutationScene
+            .Boxes.Single(box => box.Identity.ElementId == retry.Identity.ElementId)
+            .Bounds;
+        Assert(
+            retryBounds.X >= actionBounds.X + actionBounds.Width + 8
+                || retryBounds.Y >= actionBounds.Y + actionBounds.Height + 8,
+            "Status and retry actions must have a visible gap, including when the action row wraps."
         );
     }
 

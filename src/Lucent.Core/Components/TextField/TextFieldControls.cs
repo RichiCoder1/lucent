@@ -21,6 +21,7 @@ internal static partial class Controls
                         ? theme.Token(ControlThemes.SecondaryForeground)
                         : theme.Token(ControlThemes.Foreground)
             )
+            .Set(TypographyProperties.PlaceholderTextColor, ControlThemes.SecondaryForeground)
             .Bind(VisualProperties.Border, () => ResolveBorder(theme, ControlThemes.Border))
             .When(
                 VariantState.Hover,
@@ -33,10 +34,24 @@ internal static partial class Controls
             )
             .When(VariantState.FocusVisible, FocusStyle(theme))
             .When(
+                VariantState.Invalid,
+                Style.Empty.Bind(
+                    VisualProperties.Border,
+                    () =>
+                        theme.PresentationMode == ControlPresentationMode.Minimal
+                            ? Border.None
+                            : Border.Hairline(theme.Token(ControlThemes.ErrorForeground))
+                )
+            )
+            .When(
                 VariantState.Disabled,
                 Style
                     .Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
                     .Set(TypographyProperties.TextColor, ControlThemes.DisabledForeground)
+                    .Set(
+                        TypographyProperties.PlaceholderTextColor,
+                        ControlThemes.DisabledForeground
+                    )
                     .Bind(
                         VisualProperties.Border,
                         () => ResolveBorder(theme, ControlThemes.Disabled)
@@ -136,6 +151,7 @@ internal static partial class Controls
                 var isPlaceholder =
                     placeholderText.Length != 0 && state.DisplayText.Length == 0 && !state.Focused;
                 placeholderActive.Value = isPlaceholder;
+                element.UpdateControl(ProjectionProperties.TextPlaceholder, isPlaceholder);
                 element.UpdateControl(
                     ProjectionProperties.Text,
                     isPlaceholder ? placeholderText : state.DisplayText
@@ -166,7 +182,10 @@ internal static partial class Controls
         Style? style = null,
         EditorSession? session = null,
         FocusTarget? focusTarget = null,
-        string? placeholder = null
+        string? placeholder = null,
+        FieldContext? field = null,
+        Func<bool>? enabled = null,
+        Func<bool>? readOnly = null
     )
     {
         name = Required(name, nameof(name));
@@ -203,9 +222,24 @@ internal static partial class Controls
             .Set(ProjectionProperties.TextCaretAffinity, editor.CaretAffinity)
             .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
             .Set(LayoutProperties.Scroll, editor.Viewport.Offset);
+        if (enabled is not null)
+            component = component.Bind(InputProperties.Enabled, enabled);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
         var state = new TextAreaState(element.Scope, element.Name + ".text", editor);
-        Configure(element, theme, component, style, new TextFieldBehavior(state, name));
+        field?.AttachEditor(element);
+        Configure(
+            element,
+            theme,
+            component,
+            style,
+            new TextFieldBehavior(
+                state,
+                name,
+                field is null ? null : () => field.Relationships,
+                field is null ? null : field.Blur,
+                readOnly
+            )
+        );
         if (focusTarget is not null)
             element.Composition.Input.RegisterFocusTarget(
                 element.Id,
@@ -219,6 +253,7 @@ internal static partial class Controls
                 var isPlaceholder =
                     placeholderText.Length != 0 && state.DisplayText.Length == 0 && !state.Focused;
                 placeholderActive.Value = isPlaceholder;
+                element.UpdateControl(ProjectionProperties.TextPlaceholder, isPlaceholder);
                 element.UpdateControl(
                     ProjectionProperties.Text,
                     isPlaceholder ? placeholderText : state.DisplayText

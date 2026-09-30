@@ -51,7 +51,8 @@ public static partial class Components
         Func<TKey> readSelectedKey,
         Action<TKey> onSelectionRequested,
         RadioSelectionRequirement requirement = RadioSelectionRequirement.Required,
-        Style? style = null
+        Style? style = null,
+        Style? optionsStyle = null
     )
         where TKey : notnull
     {
@@ -63,7 +64,8 @@ public static partial class Components
                 () => SelectedKey.Some(readSelectedKey()),
                 onSelectionRequested,
                 requirement,
-                style
+                style,
+                optionsStyle
             )
         );
     }
@@ -76,7 +78,8 @@ public static partial class Components
         Func<SelectedKey<TKey>> readSelectedKey,
         Action<TKey> onSelectionRequested,
         RadioSelectionRequirement requirement = RadioSelectionRequirement.Optional,
-        Style? style = null
+        Style? style = null,
+        Style? optionsStyle = null
     )
         where TKey : notnull
     {
@@ -104,28 +107,45 @@ public static partial class Components
                     readSelectedKey,
                     onSelectionRequested
                 );
-                var optionContent = ContentRecipe.ForEach(
-                    root.Name + ".options",
-                    () => currentItems.Value,
-                    item => item.Key,
-                    current =>
+                var optionContent = new ContentRecipe(
+                    (optionsContext, parent) =>
                     {
-                        var binding = new RadioOptionBinding
-                        {
-                            Label = () => current.Value.Label,
-                            Enabled = () => current.Value.Enabled,
-                            Selected = () => policy.IsApplied(current.Value.Key),
-                            Roving = () => policy.IsRoving(current.Value.Key),
-                            Register = behavior =>
-                                policy.RegisterTarget(current.Value.Key, behavior),
-                            Activate = (behavior, request) =>
+                        var region = optionsContext.ForEach(
+                            parent,
+                            root.Name + ".options",
+                            () => currentItems.Value,
+                            item => item.Key,
+                            (current, itemContext) =>
                             {
-                                var key = current.Value.Key;
-                                return policy.Activate(key, request) && policy.Focus(key, behavior);
-                            },
-                            Move = policy.Move,
-                        };
-                        return RadioOptionContent(binding);
+                                var binding = new RadioOptionBinding
+                                {
+                                    Label = () => current.Value.Label,
+                                    Enabled = () => current.Value.Enabled,
+                                    Selected = () => policy.IsApplied(current.Value.Key),
+                                    Roving = () => policy.IsRoving(current.Value.Key),
+                                    Register = behavior =>
+                                        policy.RegisterTarget(current.Value.Key, behavior),
+                                    Activate = (behavior, request) =>
+                                    {
+                                        var key = current.Value.Key;
+                                        return policy.Activate(key, request)
+                                            && policy.Focus(key, behavior);
+                                    },
+                                    Move = policy.Move,
+                                };
+                                return RadioOptionContent(binding).Mount(itemContext);
+                            }
+                        );
+                        // The keyed region directly owns the option roots. Style that owner so
+                        // row/wrap/gap inputs arrange options rather than an extra wrapper.
+                        region.Region.Present(
+                            optionsContext.Theme,
+                            Style
+                                .Empty.Axis(LayoutAxis.Column)
+                                .Spacing(2)
+                                .TextWrap(TextWrap.WordWithGraphemeFallback),
+                            optionsStyle
+                        );
                     }
                 );
                 RadioGroupContent(new RadioGroupBinding(label, requirement), [optionContent], style)

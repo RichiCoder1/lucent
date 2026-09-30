@@ -57,22 +57,6 @@ internal static partial class Controls
                     .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
             );
 
-    private static Style AccentFocusStyle(ThemeContext theme) =>
-        FocusStyle(theme)
-            .When(
-                () =>
-                    theme.PresentationMode != ControlPresentationMode.Minimal
-                    && !IsHighContrast(theme),
-                Style.Empty.Bind(
-                    VisualProperties.FocusRing,
-                    () =>
-                        global::Lucent.Core.FocusRing.Inset(
-                            theme.Token(ControlThemes.SurfaceColor),
-                            2
-                        )
-                )
-            );
-
     private static bool IsHighContrast(ThemeContext theme) =>
         theme.Appearance.Contrast == ThemeContrast.High
         || string.Equals(

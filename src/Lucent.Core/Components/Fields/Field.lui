@@ -11,18 +11,21 @@ public component Field(
     string? fieldId = null,
     FieldParticipation participation = FieldParticipation.WhenNotCollapsed,
     bool required = false,
-    Style? style = null
+    Style? style = null,
+    Style? labelStyle = null,
+    Style? helpStyle = null,
+    Style? errorStyle = null
 ) {
     readonly FieldContext field = new(owner, fieldId ?? label, label, validation, session);
 
     <FieldRoot field={field} participation={participation} style={style}>
-        <FieldLabel field={field} label={label} required={required} />
+        <FieldLabel field={field} label={label} required={required} style={labelStyle} />
         if (help is not null) {
-            <FieldHelp field={field} content={help} />
+            <FieldHelp field={field} content={help} style={helpStyle} />
         }
         {editor(field)}
         if (field.ShowErrors) {
-            <FieldError field={field} content={field.ReadErrorText} />
+            <FieldError field={field} content={field.ReadErrorText} style={errorStyle} />
         }
     </FieldRoot>
 }

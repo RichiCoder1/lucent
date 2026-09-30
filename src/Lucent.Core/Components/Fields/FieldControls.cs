@@ -12,7 +12,8 @@ internal static partial class Controls
         Element element,
         ThemeContext theme,
         string text,
-        FocusTarget focusTarget
+        FocusTarget focusTarget,
+        Style? style = null
     )
     {
         Configure(
@@ -21,12 +22,17 @@ internal static partial class Controls
             TextStyle
                 .Set(ProjectionProperties.Text, text)
                 .Set(TypographyProperties.FontWeight, FontWeight.SemiBold),
-            null,
+            style,
             new FieldLabelBehavior(text, focusTarget)
         );
     }
 
-    internal static void FieldHelp(Element element, ThemeContext theme, string text) =>
+    internal static void FieldHelp(
+        Element element,
+        ThemeContext theme,
+        string text,
+        Style? style = null
+    ) =>
         ConfigureSemantic(
             element,
             theme,
@@ -34,19 +40,24 @@ internal static partial class Controls
                 .Set(ProjectionProperties.Text, text)
                 .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
                 .Set(TypographyProperties.TextColor, ControlThemes.SecondaryForeground),
-            null,
+            style,
             SemanticDeclaration.Create(SemanticRole.Text, text).Build()
         );
 
-    internal static void FieldError(Element element, ThemeContext theme, string text) =>
+    internal static void FieldError(
+        Element element,
+        ThemeContext theme,
+        string text,
+        Style? style = null
+    ) =>
         ConfigureSemantic(
             element,
             theme,
             TextStyle
                 .Set(ProjectionProperties.Text, text)
                 .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
-                .Set(TypographyProperties.TextColor, ControlThemes.SecondaryForeground),
-            null,
+                .Set(TypographyProperties.TextColor, ControlThemes.ErrorForeground),
+            style,
             SemanticDeclaration.Create(SemanticRole.Status, text).Build()
         );
 }

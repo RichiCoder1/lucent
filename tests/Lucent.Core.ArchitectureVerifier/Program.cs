@@ -123,7 +123,7 @@ static void VerifyLuiMetadata(
         ["Text"] = 2,
         ["Image"] = 2,
         ["Icon"] = 2,
-        ["Button"] = 12,
+        ["Button"] = 14,
         ["IconButton"] = 4,
         ["TextField"] = 3,
         ["Field"] = 1,
@@ -152,7 +152,7 @@ static void VerifyLuiMetadata(
         ["Drawing"] = 1,
         ["InlineNotice"] = 1,
         ["Link"] = 1,
-        ["TextArea"] = 1,
+        ["TextArea"] = 2,
         ["Layout"] = 1,
         ["Selectable"] = 3,
         ["ScrollViewport"] = 1,
@@ -348,6 +348,7 @@ static void VerifyPropertySurface(
             ["Lucent.Core.TypographyProperties"] = new()
             {
                 ["TextColor"] = "Lucent.Core.Property`1|Lucent.Core.Color",
+                ["PlaceholderTextColor"] = "Lucent.Core.Property`1|Lucent.Core.Color",
                 ["FontFamily"] = "Lucent.Core.Property`1|System.String",
                 ["FontSize"] = "Lucent.Core.Property`1|System.Single",
                 ["FontWeight"] = "Lucent.Core.Property`1|Lucent.Core.FontWeight",
@@ -363,6 +364,10 @@ static void VerifyPropertySurface(
                 ["Enabled"] = "Lucent.Core.Property`1|System.Boolean",
                 ["Visible"] = "Lucent.Core.Property`1|System.Boolean",
                 ["PointerTransparent"] = "Lucent.Core.Property`1|System.Boolean",
+            },
+            ["Lucent.Core.ButtonProperties"] = new()
+            {
+                ["Role"] = "Lucent.Core.Property`1|Lucent.Core.ButtonRole",
             },
         }
     )
