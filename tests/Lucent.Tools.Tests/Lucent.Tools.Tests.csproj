@@ -10,9 +10,17 @@
     <ProjectReference Include="CancellationProducer/CancellationProducer.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../src/Lucent.Tools/Lucent.Tools.csproj" />
   </ItemGroup>
-  <Target Name="CopyCancellationProducer" AfterTargets="Build">
+  <Target Name="CopyCancellationProducer" AfterTargets="Build" DependsOnTargets="ResolveProjectReferences">
+    <MSBuild Projects="CancellationProducer/CancellationProducer.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration);TargetFramework=net10.0">
+      <Output TaskParameter="TargetOutputs" ItemName="CancellationProducerAssembly" />
+    </MSBuild>
+    <Error Condition="'@(CancellationProducerAssembly->Count())' != '1'" Text="Expected exactly one cancellation producer build output." />
+    <PropertyGroup>
+      <CancellationProducerOutput>@(CancellationProducerAssembly->'%(RootDir)%(Directory)')</CancellationProducerOutput>
+    </PropertyGroup>
+    <Error Condition="!Exists('@(CancellationProducerAssembly)') or !Exists('$(CancellationProducerOutput)CancellationProducer.runtimeconfig.json') or !Exists('$(CancellationProducerOutput)CancellationProducer.deps.json')" Text="The cancellation producer build payload is incomplete; build the helper with the solution configuration before running Tools tests." />
     <ItemGroup>
-      <ProducerFiles Include="CancellationProducer/bin/$(Configuration)/net10.0/CancellationProducer.*" />
+      <ProducerFiles Include="$(CancellationProducerOutput)CancellationProducer.*" />
     </ItemGroup>
     <Copy SourceFiles="@(ProducerFiles)" DestinationFolder="$(OutDir)CancellationProducer" />
   </Target>

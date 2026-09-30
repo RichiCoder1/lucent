@@ -20,13 +20,38 @@ public sealed class TrustedProjectContracts
             "CancellationProducer",
             "CancellationProducer.dll"
         );
+        Assert.IsTrue(
+            File.Exists(server),
+            "The cancellation producer DLL was not copied to the test output."
+        );
+        Assert.IsTrue(
+            File.Exists(Path.ChangeExtension(server, "runtimeconfig.json")),
+            "The cancellation producer runtime configuration was not copied to the test output."
+        );
+        Assert.IsTrue(
+            File.Exists(Path.ChangeExtension(server, "deps.json")),
+            "The cancellation producer dependency manifest was not copied to the test output."
+        );
         using var cancel = new CancellationTokenSource();
         var running = new TrustedProjectProcessProbe().RunAsync(server, marker, cancel.Token);
         try
         {
             using var ready = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             while (!File.Exists(marker))
-                await Task.Delay(20, ready.Token);
+            {
+                if (running.IsCompleted)
+                {
+                    var result = await running;
+                    Assert.Fail(
+                        $"Cancellation producer exited before readiness (success={result.Success})."
+                    );
+                }
+                Assert.IsFalse(
+                    ready.IsCancellationRequested,
+                    "Cancellation producer did not publish readiness within ten seconds."
+                );
+                await Task.WhenAny(running, Task.Delay(20));
+            }
             var pid = int.Parse(
                 await File.ReadAllTextAsync(marker),
                 System.Globalization.CultureInfo.InvariantCulture

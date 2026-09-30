@@ -15,7 +15,8 @@ jobs:
       group: managed-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: windows-2025
-    timeout-minutes: 25
+    # CI106 reached the final managed suite at 24 minutes; allow final checks and cache cleanup.
+    timeout-minutes: 40
     outputs:
       verification-artifact-id: ${{ steps.upload-managed.outputs.artifact-id }}
       verification-artifact-digest: ${{ steps.upload-managed.outputs.artifact-digest }}

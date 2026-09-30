@@ -144,6 +144,17 @@ was skipped. Both job logs are retained under `artifacts/ci105-failure`.
 The owner approved deleting only the failed repository-local test cache; that
 710 MB directory has been removed, preserving the normal C: cache and failure logs.
 
+CI 106 at `657b3891` passed complete package verification and cache cleanup. Its
+managed job reached the final suite, then exposed a fixture configuration mismatch:
+the solution built CancellationProducer in Debug while the copy target expected
+Release. The helper now participates in solution configuration, and the copy target
+resolves and requires its actual payload. An isolated solution reproduces the old
+failure; the corrected build and forced-cancellation test pass. Missing payload and
+early producer failure now report directly. The job also reached its 25-minute
+cleanup deadline; its budget is 40 minutes, with test thresholds unchanged.
+Failed evidence is under `artifacts/ci106-failure`. Publication was skipped;
+`101.1` remains the latest confirmed release.
+
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
@@ -309,7 +320,7 @@ remain. Use the existing absolute dependency cache, place substantial new eviden
 on C:, and serialize builds with packaging. The corrected VSIX uses C: temporary
 output; its small D: staging directory was cleaned by the packer.
 
-After these corrections, continue navigation #205, onboarding #242, native
+Navigation #205 is complete. Continue onboarding #242, native
 preview #224, diagnostics #243 and transfer #244 according to their technical
 dependencies. The [roadmap](../ROADMAP.md) and GitHub issue acceptance are
 current authority. Do not revive older instructions to stop before #205.

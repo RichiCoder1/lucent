@@ -70,6 +70,10 @@ now coordinates Lucent preparation processes through one per-user lease. Package
 contention/cancellation checks and the actual parallel sample build pass locally.
 CI 105's package verification/upload passed but cache
 cleanup exhausted the job budget; that budget now includes cleanup time.
+CI 106 passes package verification and cleanup, but its managed job exposed a
+test-helper Debug/Release mismatch. The helper's solution configuration and payload
+copy are corrected with a fresh isolated solution proof. The managed job now also
+has time for final verification and cache cleanup. Publication was skipped.
 `101.1` remains the latest confirmed release.
 Read-only environment doctor #248's static CLI, verified tool delivery and standard
 VS Code onboarding surfaces pass review and local package proof. Explicit editor
