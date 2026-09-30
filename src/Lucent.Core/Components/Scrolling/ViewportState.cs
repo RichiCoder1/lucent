@@ -5,6 +5,8 @@ public sealed class ViewportState : IDisposable
 {
     private readonly ReactiveScope _scope;
     private readonly Signal<ScrollOffset> _offset;
+    private readonly Signal<long> _restorationGeneration;
+    private (long Generation, ScrollOffset Offset)? _restoration;
     private readonly HashSet<MountLease> _mounts = [];
 
     /// <summary>Creates viewport state owned by <paramref name="owner"/>.</summary>
@@ -18,6 +20,7 @@ public sealed class ViewportState : IDisposable
         initialOffset.Validate();
         _scope = owner.CreateChild(name);
         _offset = _scope.Signal(initialOffset, name + ".offset");
+        _restorationGeneration = _scope.Signal(0L, name + ".restoration");
     }
 
     /// <summary>Gets or sets the retained logical scroll position.</summary>
@@ -32,6 +35,7 @@ public sealed class ViewportState : IDisposable
         {
             CheckMutation();
             value.Validate();
+            _restoration = null;
             _offset.Value = value;
         }
     }
@@ -41,6 +45,37 @@ public sealed class ViewportState : IDisposable
 
     /// <summary>Releases this viewport state and its reactive resources.</summary>
     public void Dispose() => _scope.Dispose();
+
+    // Imported coordinates remain separate from live geometry until an installed
+    // scene supplies the extent. An application write always wins, even at zero.
+    internal long RequestRestoration(ScrollOffset offset)
+    {
+        CheckMutation();
+        offset.Validate();
+        var generation = checked(_restorationGeneration.Value + 1);
+        _restoration = (generation, offset);
+        _restorationGeneration.Value = generation;
+        return generation;
+    }
+
+    internal long RestorationGeneration => _restorationGeneration.Value;
+
+    internal ScrollOffset? TakeRestoration()
+    {
+        CheckMutation();
+        var result = _restoration?.Offset;
+        _restoration = null;
+        return result;
+    }
+
+    internal void CancelRestoration(long generation)
+    {
+        if (_scope.IsDisposed)
+            return;
+        CheckMutation();
+        if (_restoration?.Generation == generation)
+            _restoration = null;
+    }
 
     internal IDisposable AcquireMount(ReactiveScope mountScope)
     {

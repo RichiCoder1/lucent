@@ -944,6 +944,18 @@ public sealed partial class InputRouter
             throw new InvalidOperationException("An element has one scroll behavior.");
         var entry = new Scrollable(state);
         _scrollable.Add(elementId, entry);
+        var restorationGeneration = 0L;
+        _ = scope.Effect(
+            () =>
+            {
+                var current = state.RestorationGeneration;
+                if (restorationGeneration == current)
+                    return;
+                restorationGeneration = current;
+                _composition.InvalidateInputProjection();
+            },
+            "scroll-restoration"
+        );
         scope.OnDispose(() =>
         {
             if (
@@ -2224,11 +2236,12 @@ public sealed partial class InputRouter
             )
             {
                 var projected = pair.Value.State.Offset;
+                var requested = pair.Value.State.TakeRestoration() ?? projected;
                 changed |= SetScroll(
                     retained.Identity,
                     pair.Value,
-                    projected.X,
-                    projected.Y,
+                    requested.X,
+                    requested.Y,
                     projected
                 );
             }

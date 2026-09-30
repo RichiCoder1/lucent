@@ -22,6 +22,8 @@ public sealed class NavigationInteraction : IDisposable
     private readonly ApplicationCommand _keyboardBackCommand;
     private readonly List<TargetRegistration> _targets = [];
     private readonly Dictionary<long, NavigationEntryInteractionState> _entryStates = [];
+    private readonly Dictionary<ViewportState, long> _pendingViewports = [];
+    private (FocusTarget Target, long Generation)? _pendingFocus;
     private BoundaryRegistration? _boundary;
     private Departure? _departure;
     private FocusReconciliation? _scheduledFocusReconciliation;
@@ -194,7 +196,11 @@ public sealed class NavigationInteraction : IDisposable
                 "A navigation interaction can have one live semantic boundary."
             );
         _boundary = new BoundaryRegistration(context, context.Composition, context.Identity);
-        context.OnDispose(() => _boundary = null);
+        context.OnDispose(() =>
+        {
+            SupersedeFocusReconciliation();
+            _boundary = null;
+        });
         context.RegisterCommandScope();
         context.OnKey(route =>
         {
@@ -205,10 +211,13 @@ public sealed class NavigationInteraction : IDisposable
         });
         context.BindSemantics(() =>
         {
-            _ = _announcementGeneration.Value;
             var builder = SemanticDeclaration.Create(SemanticRole.Group, label);
-            if (_announcement.Value is { } announcement)
-                builder.Description(announcement).Announcement(SemanticAnnouncement.Polite);
+            if (!_disposed)
+            {
+                _ = _announcementGeneration.Value;
+                if (_announcement.Value is { } announcement)
+                    builder.Description(announcement).Announcement(SemanticAnnouncement.Polite);
+            }
             return builder.Build();
         });
     }
@@ -274,7 +283,12 @@ public sealed class NavigationInteraction : IDisposable
                     active.TryGetValue(position.TargetId, out var target)
                     && target.Viewport is { IsDisposed: false } viewport
                 )
-                    viewport.Offset = position.Offset;
+                {
+                    if (desired.RequiresViewportClamp)
+                        _pendingViewports[viewport] = viewport.RequestRestoration(position.Offset);
+                    else
+                        viewport.Offset = position.Offset;
+                }
             _entryStates[publication.Current.EntryId] = desired;
         }
         else if (publication.History == NavigationHistoryAction.Push)
@@ -347,6 +361,10 @@ public sealed class NavigationInteraction : IDisposable
 
     private long SupersedeFocusReconciliation()
     {
+        ExpirePendingFocus();
+        foreach (var (viewport, generation) in _pendingViewports)
+            viewport.CancelRestoration(generation);
+        _pendingViewports.Clear();
         return _focusReconciliationGeneration = checked(_focusReconciliationGeneration + 1);
     }
 
@@ -509,17 +527,22 @@ public sealed class NavigationInteraction : IDisposable
         return result;
     }
 
-    private static void Focus(
-        string? requestedId,
-        IReadOnlyDictionary<string, TargetRegistration> active
-    )
+    private void Focus(string? requestedId, IReadOnlyDictionary<string, TargetRegistration> active)
     {
-        if (requestedId is not null && active.TryGetValue(requestedId, out var requested))
-        {
-            requested.FocusTarget.Request();
-            return;
-        }
-        Preferred(active)?.FocusTarget.Request();
+        var target =
+            requestedId is not null && active.TryGetValue(requestedId, out var requested)
+                ? requested
+                : Preferred(active);
+        ExpirePendingFocus();
+        if (target is not null)
+            _pendingFocus = (target.FocusTarget, target.FocusTarget.RequestWithGeneration());
+    }
+
+    private void ExpirePendingFocus()
+    {
+        if (_pendingFocus is { } pending)
+            _ = pending.Target.TryConsume(pending.Generation);
+        _pendingFocus = null;
     }
 
     private static TargetRegistration? Preferred(
@@ -589,6 +612,13 @@ public sealed class NavigationInteraction : IDisposable
 
     private void RemoveTarget(TargetRegistration target)
     {
+        if (_pendingFocus?.Target == target.FocusTarget)
+            ExpirePendingFocus();
+        if (
+            target.Viewport is { } viewport
+            && _pendingViewports.Remove(viewport, out var generation)
+        )
+            viewport.CancelRestoration(generation);
         target.Disposed -= RemoveTarget;
         _targets.Remove(target);
     }
@@ -604,6 +634,7 @@ public sealed class NavigationInteraction : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        SupersedeFocusReconciliation();
         _focusReconciliationDispatch?.Dispose();
         _focusReconciliationDispatch = null;
         _scheduledFocusReconciliation = null;

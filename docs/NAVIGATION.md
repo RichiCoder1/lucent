@@ -256,7 +256,13 @@ versions and invalid bounded state discard that entry's state, preserving its ro
 An oversized state rejects the whole payload. With no registered codec or interaction
 owner, the route history remains usable without interaction state.
 
-Imported state follows existing viewport clamping and focus reconciliation. Missing
+Imported viewport offsets remain pending until scene installation can clamp them to
+measured extents; even very large finite offsets never enter projected coordinates
+first. Capture reads the actual current offset, not a pending restoration request.
+New application scroll writes, newer navigation, target removal, and interaction
+disposal expire pending restoration. Navigation-owned focus requests use conditional
+generation cancellation so a newer application focus request survives cleanup.
+Imported state follows existing focus reconciliation. Missing
 targets use the normal authored fallback; later navigation supersedes pending
 reconciliation. Model/codec tests do not establish physical focus behavior. Real
 interaction checks remain a separate proof boundary, as do application storage and

@@ -35,13 +35,17 @@ public sealed class NavigationEntryInteractionState
 
     internal NavigationEntryInteractionState(
         string? focusTargetId,
-        IReadOnlyList<NavigationViewportPosition> viewports
+        IReadOnlyList<NavigationViewportPosition> viewports,
+        bool requiresViewportClamp = false
     )
     {
         ArgumentNullException.ThrowIfNull(viewports);
         FocusTargetId = focusTargetId;
         _viewports = Array.AsReadOnly(viewports.ToArray());
+        RequiresViewportClamp = requiresViewportClamp;
     }
+
+    internal bool RequiresViewportClamp { get; }
 
     /// <summary>Gets the stable authored target that held focus, when one was registered.</summary>
     public string? FocusTargetId { get; }

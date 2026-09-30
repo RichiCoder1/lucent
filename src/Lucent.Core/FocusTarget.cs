@@ -32,11 +32,15 @@ public sealed class FocusTarget : IDisposable
     }
 
     /// <summary>Requests keyboard focus, optionally selecting the target text after focus is accepted.</summary>
-    public void Request(bool selectAll = false)
+    public void Request(bool selectAll = false) => _ = RequestWithGeneration(selectAll);
+
+    internal long RequestWithGeneration(bool selectAll = false)
     {
         _scope.CheckMutationGuard();
         ObjectDisposedException.ThrowIf(_scope.IsDisposed, this);
-        _pending.Value = new(checked(++_nextGeneration), selectAll);
+        var generation = checked(++_nextGeneration);
+        _pending.Value = new(generation, selectAll);
+        return generation;
     }
 
     /// <summary>Withdraws the pending request without changing focus.</summary>

@@ -46,15 +46,27 @@ public sealed partial class NavigationInteractionContracts
     }
 
     [TestMethod]
-    public void RestoredMissingFocusFallsBackAndViewportClampsToLiveExtent()
+    [DataRow("9000", 1f)]
+    [DataRow("3e38", 2f)]
+    public void RestoredMissingFocusFallsBackAndViewportClampsToLiveExtent(
+        string offset,
+        float scale
+    )
     {
         using var fixture = new RestorationInteractionFixture();
         const string payload =
             """{"schema":"lucent.navigation","version":1,"scope":"interaction-v1","mode":"journal","activeKey":7,"entries":[{"key":7,"definition":"first","location":"/first","state":{"codec":"lucent.interaction","version":1,"focus":"removed-target","viewports":[{"target":"action","x":0,"y":9000}]}}]}""";
         Completed(
-            fixture.Session.Restore(fixture.Restoration.Decode(Encoding.UTF8.GetBytes(payload)))
+            fixture.Session.Restore(
+                fixture.Restoration.Decode(
+                    Encoding.UTF8.GetBytes(
+                        payload.Replace("9000", offset, StringComparison.Ordinal)
+                    )
+                )
+            )
         );
-        fixture.Install();
+        fixture.Install(scale);
+        Assert.AreEqual("first", fixture.Session.Current!.DefinitionId.Value);
         Assert.AreEqual("First restored action", FocusedName(fixture.Composition));
         Assert.AreEqual(new ScrollOffset(0, 160), fixture.FirstViewport.Offset);
         var recaptured = fixture.Restoration.Decode(
@@ -92,6 +104,91 @@ public sealed partial class NavigationInteractionContracts
         fixture.Install();
         Assert.AreEqual("second", fixture.Session.Current!.DefinitionId.Value);
         Assert.AreEqual("Second restored action", FocusedName(fixture.Composition));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void DisposedInteractionExpiresOnlyItsOwnPendingFocusRequest(
+        bool applicationReplacesRequest
+    )
+    {
+        using var fixture = new RestorationInteractionFixture();
+        fixture.RestoreFirst(90);
+        Assert.IsTrue(fixture.FirstFocus.IsPending);
+        if (applicationReplacesRequest)
+            fixture.FirstFocus.Request();
+        fixture.DisposeInteraction();
+        Assert.AreEqual(applicationReplacesRequest, fixture.FirstFocus.IsPending);
+        fixture.Install();
+        Assert.AreEqual(
+            applicationReplacesRequest ? "First restored action" : null,
+            FocusedName(fixture.Composition)
+        );
+        Assert.AreEqual(default(ScrollOffset), fixture.FirstViewport.Offset);
+    }
+
+    [TestMethod]
+    public void SupersededRestorationCannotFocusOrScrollAnApplicationOwnedTargetWhenItRemounts()
+    {
+        using var fixture = new RestorationInteractionFixture();
+        fixture.RestoreFirst(90);
+        Completed(fixture.Session.Navigate(Location("/second")));
+        fixture.Install();
+        Assert.AreEqual("Second restored action", FocusedName(fixture.Composition));
+        fixture.RemountFirstTarget();
+        fixture.Install();
+        Assert.AreEqual("Second restored action", FocusedName(fixture.Composition));
+        Assert.AreEqual(default(ScrollOffset), fixture.FirstViewport.Offset);
+    }
+
+    [TestMethod]
+    [DataRow(0f)]
+    [DataRow(17f)]
+    public void ApplicationViewportWriteSupersedesPendingRestoration(float offset)
+    {
+        using var fixture = new RestorationInteractionFixture();
+        fixture.RestoreFirst(90);
+        fixture.FirstViewport.Offset = new(0, offset);
+        fixture.Install();
+        Assert.AreEqual(new ScrollOffset(0, offset), fixture.FirstViewport.Offset);
+    }
+
+    [TestMethod]
+    public void CaptureBeforeSceneInstallationReadsActualViewportRatherThanPendingRestoration()
+    {
+        using var fixture = new RestorationInteractionFixture();
+        fixture.RestoreFirst(90);
+        var capture = fixture.Restoration.Decode(
+            fixture.Restoration.Capture(fixture.Session).Utf8.Span
+        );
+        Assert.AreEqual(
+            default(ScrollOffset),
+            capture.Journal!.Entries[0].State!.Viewports.Single().Offset
+        );
+        fixture.Install();
+        Assert.AreEqual(new ScrollOffset(0, 90), fixture.FirstViewport.Offset);
+    }
+
+    [TestMethod]
+    public void DormantImportedOffsetClampsBeforeProjectionWhenForwardRetainsTheRoute()
+    {
+        using var fixture = new RestorationInteractionFixture();
+        const string payload =
+            """{"schema":"lucent.navigation","version":1,"scope":"interaction-v1","mode":"journal","activeKey":1,"entries":[{"key":1,"definition":"first","location":"/first"},{"key":2,"definition":"first","location":"/first","state":{"codec":"lucent.interaction","version":1,"focus":"action","viewports":[{"target":"action","x":0,"y":3e38}]}}]}""";
+        Completed(
+            fixture.Session.Restore(fixture.Restoration.Decode(Encoding.UTF8.GetBytes(payload)))
+        );
+        fixture.Install(2);
+        var firstTarget = fixture.Composition.Input.FocusTargetIdentity(fixture.FirstFocus);
+        Completed(fixture.Session.Forward());
+        fixture.Install(2);
+        Assert.AreEqual(
+            firstTarget,
+            fixture.Composition.Input.FocusTargetIdentity(fixture.FirstFocus)
+        );
+        Assert.AreEqual(1, fixture.Session.Journal.CurrentIndex);
+        Assert.AreEqual(new ScrollOffset(0, 160), fixture.FirstViewport.Offset);
     }
 
     private sealed class RestorationInteractionFixture : IDisposable
@@ -205,12 +302,46 @@ public sealed partial class NavigationInteractionContracts
         internal Composition Composition { get; }
         internal ViewportState FirstViewport { get; }
         internal ViewportState SecondViewport { get; }
+        internal FocusTarget FirstFocus => _firstFocus;
 
-        internal void Install()
+        internal void Install(float scale = 1)
         {
             _scene?.Dispose();
-            _scene = NavigationInteractionContracts.Install(Composition, _graph);
+            _scene = NavigationInteractionContracts.Install(Composition, _graph, scale);
         }
+
+        internal void RestoreFirst(float offset)
+        {
+            var payload =
+                """{"schema":"lucent.navigation","version":1,"scope":"interaction-v1","mode":"journal","activeKey":1,"entries":[{"key":1,"definition":"first","location":"/first","state":{"codec":"lucent.interaction","version":1,"focus":"action","viewports":[{"target":"action","x":0,"y":90}]}}]}""";
+            Completed(
+                Session.Restore(
+                    Restoration.Decode(
+                        Encoding.UTF8.GetBytes(
+                            payload.Replace(
+                                "90",
+                                offset.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                StringComparison.Ordinal
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        internal void RemountFirstTarget() =>
+            Composition.Mount(
+                Composition.Root,
+                _theme,
+                Components.Column([
+                    Components.Button("Remounted first target", focusTarget: _firstFocus),
+                    Components.ScrollViewport(
+                        [Components.Column([], Style.Empty.Height(200))],
+                        style: Style.Empty.Width(100).Height(40),
+                        viewport: FirstViewport
+                    ),
+                ])
+            );
 
         internal void DisposeInteraction() => _interaction.Dispose();
 

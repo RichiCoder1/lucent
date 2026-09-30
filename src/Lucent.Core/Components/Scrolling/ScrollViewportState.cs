@@ -32,6 +32,10 @@ internal sealed class ScrollViewportState
         }
     }
 
+    internal long RestorationGeneration => _viewport.RestorationGeneration;
+
+    internal ScrollOffset? TakeRestoration() => _viewport.TakeRestoration();
+
     private void CheckRead()
     {
         _scope.Graph.CheckThread();

@@ -803,12 +803,16 @@ public sealed partial class NavigationInteractionContracts
         return operation.Completion.Result;
     }
 
-    private static RetainedScene Install(Composition composition, ReactiveGraph graph)
+    private static RetainedScene Install(
+        Composition composition,
+        ReactiveGraph graph,
+        float scale = 1
+    )
     {
         for (var attempt = 0; attempt < 5; attempt++)
         {
             graph.Drain();
-            var scene = SceneLayout.Project(composition, new(500, 320, 1), new MetricShaper());
+            var scene = SceneLayout.Project(composition, new(500, 320, scale), new MetricShaper());
             if (composition.Input.SetScene(scene))
                 return scene;
             scene.Dispose();

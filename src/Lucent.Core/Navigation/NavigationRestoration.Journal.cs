@@ -274,7 +274,7 @@ public sealed partial class NavigationRestoration
             }
             RequireToken(reader, JsonTokenType.EndObject);
             return fields == 15 && !reader.Read() && codec == "lucent.interaction" && version == 1
-                ? new(focus, viewports)
+                ? new(focus, viewports, requiresViewportClamp: true)
                 : null;
         }
         catch (Exception error)
