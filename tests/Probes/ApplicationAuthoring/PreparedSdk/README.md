@@ -35,4 +35,27 @@ After packing matching `Lucent.Core` and `Lucent.Lui.Sdk` candidates, exercise t
 
 That wrapper uses the packaged preparation host and SDK targets. It verifies a same-project edit against a persistent emitter cache, a warm missing-host failure, and a deliberately nondeterministic ordinary generator mismatch. Each failure must remove the consumer assembly. Its command log is written under `artifacts/a0-production-sdk-negatives/commands.log`.
 
+The production host leases `%LOCALAPPDATA%/Lucent/PreparationWorkspace/workspace.lock`
+across complete preparation and comparison operations. All package/source host
+versions share this per-user path, regardless of invocation temporary directories;
+the file remains in place after its exclusive handle is disposed. Known sharing
+contention waits for up to two minutes. Other I/O or access errors fail immediately.
+This serializes Lucent preparation work across unrelated repositories for that user;
+it does not coordinate independent IDE sessions or ordinary MSBuild writers.
+
+Ctrl+C cancels queued acquisition. When `LUCENT_PREPARATION_CANCEL_STDIN=1`, a line
+on standard input provides the same cancellation signal for process controllers.
+An active MSBuild workspace evaluation finishes before cancellation releases its
+lease; this does not establish bounded cancellation of active MSBuild descendants.
+The workspace is disposed before releasing the lease. Preparation and comparison
+remain separate phases, and a real input change between them still fails comparison.
+
+The wrapper verifies deterministic contention, a cancelled waiter that never
+enters its workspace, active cancellation/failure release, retained compiler-visible
+options and AdditionalFiles metadata, stable warm identity, and final comparison.
+`-ArtifactRoot <fresh-directory>` keeps outputs elsewhere and
+`-UseExistingPackageCache` reuses the normal cache. `-CoreVersion` explicitly selects
+a different Core dependency for a local SDK candidate; this is source evidence,
+not proof of official publication.
+
 This is an infrastructure feasibility probe. Its payload inputs are supplied fixture files rather than the Lucent compiler's named-component output, and it does not prove project-graph parity, LSP behavior, source mapping, packaging, or the full A0 gate. The production integration must also treat workspace and analyzer-load failures as build failures, preserve the original evaluated compiler inputs, and avoid exposing preparatory binding inputs as ordinary AdditionalFiles.

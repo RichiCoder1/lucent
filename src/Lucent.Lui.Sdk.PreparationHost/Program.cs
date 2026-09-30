@@ -15,12 +15,27 @@ using Microsoft.CodeAnalysis.Text;
 if (args.Length == 0)
     return Fail("Usage: Lucent.Lui.Sdk.PreparationHost <prepare|compare> ...");
 
+using var cancellation = new CancellationTokenSource();
+ConsoleCancelEventHandler cancelHandler = (_, signal) =>
+{
+    signal.Cancel = true;
+    cancellation.Cancel();
+};
+Console.CancelKeyPress += cancelHandler;
+if (Environment.GetEnvironmentVariable("LUCENT_PREPARATION_CANCEL_STDIN") == "1")
+    _ = Task.Run(async () =>
+    {
+        if (await Console.In.ReadLineAsync().ConfigureAwait(false) is not null)
+            cancellation.Cancel();
+    });
 try
 {
     return args[0] switch
     {
-        "prepare" => await PrepareAsync(args.Skip(1).ToArray()).ConfigureAwait(false),
-        "compare" => Compare(args.Skip(1).ToArray()),
+        "prepare" => await PrepareAsync(args.Skip(1).ToArray(), cancellation.Token)
+            .ConfigureAwait(false),
+        "compare" => await CompareAsync(args.Skip(1).ToArray(), cancellation.Token)
+            .ConfigureAwait(false),
         _ => Fail($"Unknown command '{args[0]}'."),
     };
 }
@@ -29,13 +44,20 @@ catch (Exception error)
     Console.Error.WriteLine(error.ToString());
     return 1;
 }
+finally
+{
+    Console.CancelKeyPress -= cancelHandler;
+}
 
-static async Task<int> PrepareAsync(string[] args)
+static async Task<int> PrepareAsync(string[] args, CancellationToken cancellationToken)
 {
     if (args.Length != 8)
         return Fail(
             "prepare requires project, manifest, emitter directory, configuration, target framework, runtime identifier, outer globals, and compiler-generated output directory"
         );
+    using var lease = await PreparationWorkspaceLease
+        .AcquireAsync(cancellationToken)
+        .ConfigureAwait(false);
     var projectPath = Path.GetFullPath(args[0]);
     var manifestPath = Path.GetFullPath(args[1]);
     var emitterDirectory = Path.GetFullPath(args[2]);
@@ -65,7 +87,11 @@ static async Task<int> PrepareAsync(string[] args)
     using var workspaceFailureRegistration = workspace.RegisterWorkspaceFailedHandler(failure =>
         workspaceDiagnostics.Enqueue(failure.Diagnostic)
     );
-    var project = await workspace.OpenProjectAsync(projectPath).ConfigureAwait(false);
+    // Let an active remote evaluation finish before cancellation can release its lease.
+    var project = await workspace
+        .OpenProjectAsync(projectPath, cancellationToken: CancellationToken.None)
+        .ConfigureAwait(false);
+    cancellationToken.ThrowIfCancellationRequested();
     var workspaceFailures = workspaceDiagnostics.Where(diagnostic =>
         diagnostic.Kind == WorkspaceDiagnosticKind.Failure
     );
@@ -78,7 +104,8 @@ static async Task<int> PrepareAsync(string[] args)
         .Solution.WithProjectAnalyzerReferences(project.Id, [])
         .GetProject(project.Id)!;
     var compilation =
-        await rawProject.GetCompilationAsync().ConfigureAwait(false) as CSharpCompilation
+        await rawProject.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
+            as CSharpCompilation
         ?? throw new InvalidOperationException("The evaluated project has no C# compilation.");
     var loaded = LoadGenerators(project.AnalyzerReferences);
     var parseOptions = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
@@ -117,7 +144,7 @@ static async Task<int> PrepareAsync(string[] args)
                         path
                     )
                     : logicalPath,
-                (await document.GetTextAsync().ConfigureAwait(false)).ToString(),
+                (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString(),
                 version ?? ""
             )
         );
@@ -126,7 +153,8 @@ static async Task<int> PrepareAsync(string[] args)
         throw new InvalidOperationException(
             "Prepared authoring requires at least one evaluated .lui input."
         );
-    var editorConfigs = await SnapshotEditorConfigsAsync(project).ConfigureAwait(false);
+    var editorConfigs = await SnapshotEditorConfigsAsync(project, cancellationToken)
+        .ConfigureAwait(false);
     var global = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
     var prepared = LuiPreparationEngine.Prepare(
         new LuiPreparationRequest(
@@ -143,7 +171,8 @@ static async Task<int> PrepareAsync(string[] args)
             Global(global, "LucentLuiDefines"),
             Global(global, "RootNamespace"),
             EditorConfigs: editorConfigs
-        )
+        ),
+        cancellationToken
     );
     foreach (var diagnostic in prepared.LuiDiagnostics)
         Console.Error.WriteLine(FormatPreparedDiagnostic(diagnostic, documents, compilation));
@@ -178,11 +207,16 @@ static async Task<int> PrepareAsync(string[] args)
         ))
         .OrderBy(output => output.HintIdentity, StringComparer.Ordinal)
         .ToImmutableArray();
-    var emitter = LuiPreparedEmitterCompiler.Compile(prepared.Payload, emitterDirectory);
+    var emitter = LuiPreparedEmitterCompiler.Compile(
+        prepared.Payload,
+        emitterDirectory,
+        cancellationToken
+    );
+    cancellationToken.ThrowIfCancellationRequested();
     var inputFiles = SnapshotInputFiles(project, compilation);
     var manifest = new PreparedManifest(
         projectPath,
-        await ProjectInputHashAsync(project, properties).ConfigureAwait(false),
+        await ProjectInputHashAsync(project, properties, cancellationToken).ConfigureAwait(false),
         emitter.AssemblyName,
         emitter.ImageSha256,
         loaded.Select(item => item.Identity).ToImmutableArray(),
@@ -210,6 +244,7 @@ static async Task<int> PrepareAsync(string[] args)
             .ToImmutableArray(),
         inputFiles
     );
+    cancellationToken.ThrowIfCancellationRequested();
     CleanOwnedGeneratedFiles(generatedRoot, previousManifest, manifest);
     WriteJsonAtomically(manifestPath, manifest);
     File.WriteAllText(
@@ -224,7 +259,8 @@ static async Task<int> PrepareAsync(string[] args)
 }
 
 static async Task<ImmutableArray<LuiEditorConfigSnapshot>> SnapshotEditorConfigsAsync(
-    Project project
+    Project project,
+    CancellationToken cancellationToken
 )
 {
     var documents = project
@@ -257,8 +293,8 @@ static async Task<ImmutableArray<LuiEditorConfigSnapshot>> SnapshotEditorConfigs
     foreach (var path in paths)
     {
         var source = documents.TryGetValue(path, out var document)
-            ? (await document.GetTextAsync().ConfigureAwait(false)).ToString()
-            : await File.ReadAllTextAsync(path).ConfigureAwait(false);
+            ? (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString()
+            : await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
         snapshots.Add(new LuiEditorConfigSnapshot(path, source));
     }
     return snapshots.ToImmutable();
@@ -314,12 +350,15 @@ static string FormatPreparedDiagnostic(
     return $"{path}{location}: {severity} {prepared.Diagnostic.Id}: {prepared.Diagnostic.Message}";
 }
 
-static int Compare(string[] args)
+static async Task<int> CompareAsync(string[] args, CancellationToken cancellationToken)
 {
     if (args.Length < 4)
         return Fail(
             "compare requires manifest, generated root, emitter assembly name, mismatch mode, and optional cleanup paths"
         );
+    using var lease = await PreparationWorkspaceLease
+        .AcquireAsync(cancellationToken)
+        .ConfigureAwait(false);
     var manifest =
         JsonSerializer.Deserialize<PreparedManifest>(File.ReadAllText(args[0]))
         ?? throw new InvalidOperationException("Prepared manifest was empty.");
@@ -363,6 +402,7 @@ static int Compare(string[] args)
             .ToList()
         : [];
     ApplyMismatch(mode, actual);
+    cancellationToken.ThrowIfCancellationRequested();
     var expectedByIdentity = manifest.ForeignOutputs.ToDictionary(
         output => Normalize(output.HintIdentity),
         StringComparer.Ordinal
@@ -468,7 +508,8 @@ static string Global(AnalyzerConfigOptions options, string property, string fall
 
 static async Task<string> ProjectInputHashAsync(
     Project project,
-    IReadOnlyDictionary<string, string> globalProperties
+    IReadOnlyDictionary<string, string> globalProperties,
+    CancellationToken cancellationToken
 )
 {
     using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -479,6 +520,7 @@ static async Task<string> ProjectInputHashAsync(
     pending.Enqueue(project);
     while (pending.TryDequeue(out var current))
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!visited.Add(current.Id))
             continue;
         Append(hash, "project", current.FilePath ?? current.Name, current.AssemblyName ?? "");
@@ -487,21 +529,21 @@ static async Task<string> ProjectInputHashAsync(
                 hash,
                 "source",
                 document.FilePath ?? document.Name,
-                (await document.GetTextAsync()).ToString()
+                (await document.GetTextAsync(cancellationToken)).ToString()
             );
         foreach (var document in current.AdditionalDocuments)
             Append(
                 hash,
                 "additional",
                 document.FilePath ?? document.Name,
-                (await document.GetTextAsync()).ToString()
+                (await document.GetTextAsync(cancellationToken)).ToString()
             );
         foreach (var document in current.AnalyzerConfigDocuments)
             Append(
                 hash,
                 "config",
                 document.FilePath ?? document.Name,
-                (await document.GetTextAsync()).ToString()
+                (await document.GetTextAsync(cancellationToken)).ToString()
             );
         var analyzerConfigPaths = current
             .AnalyzerConfigDocuments.Where(document =>
@@ -526,7 +568,7 @@ static async Task<string> ProjectInputHashAsync(
                 hash,
                 "config",
                 path,
-                file.GetText()?.ToString()
+                file.GetText(cancellationToken)?.ToString()
                     ?? (File.Exists(path) ? File.ReadAllText(path) : String.Empty)
             );
         }
@@ -788,6 +830,71 @@ static int Fail(string message)
 }
 
 sealed record LoadedGenerator(LuiPreparationGenerator Generator, ForeignGeneratorIdentity Identity);
+
+sealed class PreparationWorkspaceLease : IDisposable
+{
+    private readonly FileStream stream;
+
+    private PreparationWorkspaceLease(FileStream stream) => this.stream = stream;
+
+    public static async Task<PreparationWorkspaceLease> AcquireAsync(
+        CancellationToken cancellationToken
+    )
+    {
+        var userData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!Path.IsPathFullyQualified(userData))
+            throw new InvalidOperationException(
+                "A stable per-user application-data folder is required for preparation workspace coordination."
+            );
+        var root = Path.Combine(userData, "Lucent", "PreparationWorkspace");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "workspace.lock");
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var reportedContention = false;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var stream = new FileStream(
+                    path,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None
+                );
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return new PreparationWorkspaceLease(stream);
+                }
+                catch
+                {
+                    stream.Dispose();
+                    throw;
+                }
+            }
+            catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33)
+            {
+                if (!reportedContention)
+                {
+                    Console.Error.WriteLine(
+                        "Waiting for another Lucent preparation workspace to finish."
+                    );
+                    reportedContention = true;
+                }
+                if (elapsed.Elapsed >= TimeSpan.FromMinutes(2))
+                    throw new TimeoutException(
+                        "Timed out waiting for another Lucent preparation workspace to finish.",
+                        error
+                    );
+                await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    public void Dispose() => stream.Dispose();
+}
 
 sealed record ForeignGeneratorIdentity(
     int PreparationOrdinal,

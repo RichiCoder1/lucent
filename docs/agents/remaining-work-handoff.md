@@ -130,8 +130,13 @@ retained in `artifacts/ci105-failure/managed.log`. The editorconfig isolation
 prototype passed its narrow checks, but an actual parallel sample build exposed
 shared `AssemblyInfo.cs` and `AssemblyReference.cache` writes. Preserve that failed
 evidence. The replacement coordinates Lucent preparation processes with a stable
-per-user file lease through workspace-dependent reads/snapshots and Compare reads;
-validation is underway. It does not coordinate independent IDE/MSBuild writers.
+per-user file lease through workspace-dependent reads/snapshots and Compare reads.
+The warning-clean host build, packaged contention/cancellation/failure checks,
+metadata/warm-identity checks, and real parallel Sample/Companion build now pass.
+The latter retains existing LUI5003 advisories. Tested source and package hashes are
+in `artifacts/ci105-lease-source-manifest.json` and
+`artifacts/ci105-lease-package-inventory.json`; logs are on C: as recorded there.
+This does not coordinate independent IDE/MSBuild writers or claim a speedup.
 CI 105's package verification and artifact upload passed, but the job reached its
 30-minute limit during NuGet cache saving. The job budget is now 40 minutes to
 include cleanup overhead; verification requirements are unchanged. Publication

@@ -64,8 +64,9 @@ published-server check, then exposed an unreferenced Node timeout; `f2064144`
 corrects it. CI 105 passes the editor suites but exposed a shared generated
 editorconfig write during parallel application preparation. A focused isolation
 prototype exposed additional shared assembly-info/cache writes, so the correction
-now coordinates Lucent preparation processes through one per-user lease. Its
-validation is underway. CI 105's package verification/upload passed but cache
+now coordinates Lucent preparation processes through one per-user lease. Packaged
+contention/cancellation checks and the actual parallel sample build pass locally.
+CI 105's package verification/upload passed but cache
 cleanup exhausted the job budget; that budget now includes cleanup time.
 `101.1` remains the latest confirmed release.
 Read-only environment doctor #248's static CLI, verified tool delivery and standard
