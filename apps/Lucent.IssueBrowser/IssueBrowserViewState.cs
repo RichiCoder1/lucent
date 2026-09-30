@@ -4,11 +4,21 @@ namespace Lucent.IssueBrowser;
 public sealed class IssueBrowserViewState
 {
     private readonly IssueBrowserState _browser;
+    private readonly IssueBrowserNavigationPersistence? _persistence;
 
-    public IssueBrowserViewState(ReactiveScope owner, IssueBrowserState browser)
+    public IssueBrowserViewState(
+        ReactiveScope owner,
+        IssueBrowserState browser,
+        IssueBrowserNavigationPersistence? persistence = null
+    )
     {
         _browser = browser;
-        Navigation = new(owner, IssueBrowserRouting.Table, IssueBrowserRoutes.Issues().Location);
+        _persistence = persistence;
+        Navigation = new(
+            owner,
+            IssueBrowserRouting.Table,
+            persistence is null ? IssueBrowserRoutes.Issues().Location : null
+        );
         Interaction = new(owner, Navigation);
         Breakpoints = new(owner, IssueBrowserBreakpoints.Set, "browser-view.breakpoints");
         Split = new(owner, 380, 280, 320, name: "browser-view.split");
@@ -23,6 +33,7 @@ public sealed class IssueBrowserViewState
                     browser.Select(commit.Current.Match.GetValue(0).Signed32);
             }
         );
+        persistence?.Bind(owner, this, browser);
     }
 
     public WindowBreakpoints Breakpoints { get; }
@@ -66,6 +77,20 @@ public sealed class IssueBrowserViewState
     public void BackToList() => Navigation.Navigate(IssueBrowserRoutes.Issues());
 
     public void Back() => Navigation.Back();
+
+    internal NavigationPreparationResult PrepareNavigation(RouteOutletPreparationRequest request)
+    {
+        if (_persistence is { AllowsNavigation: false })
+            return NavigationPreparationResult.Stay;
+        return
+            request.Phase == NavigationPreparationPhase.Enter
+            && request.Target.DefinitionId.Value == "issue"
+            && !_browser.Issues.Any(issue =>
+                issue.Number == request.Target.Match.GetValue(0).Signed32
+            )
+            ? NavigationPreparationResult.Stay
+            : NavigationPreparationResult.Allow;
+    }
 
     public void ClearFilters()
     {

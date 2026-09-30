@@ -29,9 +29,13 @@ public sealed class ReactiveGraph
     // Ordinary reactive writes invalidate retained paint plans. Presentation samples
     // live outside this graph and therefore do not turn animation into layout work.
     internal long MutationRevision { get; private set; }
+    internal long ViewportWriteRevision { get; private set; }
     internal bool HasPendingProjectionWork => HasPendingWork();
 
     internal void RecordMutation() => MutationRevision = checked(MutationRevision + 1);
+
+    internal long RecordViewportWrite() =>
+        ViewportWriteRevision = checked(ViewportWriteRevision + 1);
 
     /// <summary>Raised when worker-posted work changes from empty to nonempty.</summary>
     /// <remarks>Observers are notified independently. Their failures are posted for aggregation by <see cref="Drain()"/>; a new edge for those failures re-notifies only still-subscribed observers that succeeded.</remarks>

@@ -1589,7 +1589,7 @@ public sealed partial class IssueBrowserTests
                             StringComparison.Ordinal
                         )
                         && program.Contains(
-                            ".Run(IssueBrowserStructure.CreateHosted())",
+                            ".Run(IssueBrowserStructure.CreateHosted(persistence))",
                             StringComparison.Ordinal
                         )
                         && !program.Contains("ReactiveGraph", StringComparison.Ordinal)

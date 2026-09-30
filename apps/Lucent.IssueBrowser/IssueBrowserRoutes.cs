@@ -27,14 +27,18 @@ internal static class IssueBrowserRouting
 
     internal static RouteTable Table => Bundle.Table;
 
-    internal static ComponentRecipe Outlet(NavigationInteraction interaction) =>
+    internal static ComponentRecipe Outlet(IssueBrowserViewState view) =>
         Lucent.Core.Components.Router(
             [
                 Lucent.Core.Components.RouterOutlet(
-                    options: new RouteOutletOptions(interaction: interaction)
+                    options: new RouteOutletOptions(
+                        prepare: (_, request, _) =>
+                            ValueTask.FromResult(view.PrepareNavigation(request)),
+                        interaction: view.Interaction
+                    )
                 ),
             ],
             Bundle,
-            session: interaction.Session
+            session: view.Navigation
         );
 }

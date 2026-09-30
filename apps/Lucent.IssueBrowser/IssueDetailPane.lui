@@ -30,6 +30,6 @@ public component IssueDetailPane() {
         >
             Back
         </Button>
-        {IssueBrowserRouting.Outlet(view.Interaction)}
+        {IssueBrowserRouting.Outlet(view)}
     </Layout>
 }

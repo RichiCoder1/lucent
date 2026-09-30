@@ -8,7 +8,9 @@ namespace Lucent.IssueBrowser;
 public static class IssueBrowserStructure
 {
     /// <summary>Creates the offline reference application with lifecycle-owned feature services.</summary>
-    public static HostedApplication CreateHosted() =>
+    public static HostedApplication CreateHosted(
+        IssueBrowserNavigationPersistence? persistence = null
+    ) =>
         new(
             _ =>
             {
@@ -24,7 +26,7 @@ public static class IssueBrowserStructure
                 builder.Services.AddScoped<IIssueStatusSource>(_ => new FixtureIssueStatusSource());
                 return builder.Build();
             },
-            (_, _) => Components.HostedIssueBrowser()
+            (_, _) => Components.HostedIssueBrowser(persistence)
         );
 
     public static ComponentRecipe Create() =>

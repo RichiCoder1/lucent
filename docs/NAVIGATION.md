@@ -203,8 +203,11 @@ that has already started or committed therefore takes precedence over restoratio
 `restoration.Capture(navigation)` reads the committed route, including while a later
 asynchronous preparation is pending. It rejects capture during staging, publication,
 retirement or outlet replacement. Schedule ordinary captures after retirement;
-`RegisterCommitted` runs inside publication, so its handler can post capture work
-to the owner rather than capture synchronously. `Ready` carries the UTF-8 bytes.
+`RegisterCommitted` runs inside publication, so its handler must schedule capture
+after the transaction returns to the application's owner loop. For an
+`ApplicationSession`, use its synchronization context captured by `OnMounted`.
+A `ReactiveScope.Post` alone is insufficient: the reactive batch can drain scope
+posts while the session is still retiring. `Ready` carries the UTF-8 bytes.
 `NoSnapshot` means the active route is absent or disallowed: clear any previously
 stored navigation snapshot. Other finite failures carry no partial output.
 
@@ -258,7 +261,12 @@ owner, the route history remains usable without interaction state.
 
 Imported viewport offsets remain pending until scene installation can clamp them to
 measured extents; even very large finite offsets never enter projected coordinates
-first. Capture reads the actual current offset, not a pending restoration request.
+first. Capture preserves a still-owned pending imported position and focus request
+without changing live geometry, so closing before the first layout does not replace
+restorable state with defaults. Once measured, capture uses the actual clamped offset.
+Targets mounted by generated conditional content receive one deferred reconciliation
+pass. A newer explicit application scroll write, including zero, wins during that
+gap; targets still absent after the pass are discarded.
 New application scroll writes, newer navigation, target removal, and interaction
 disposal expire pending restoration. Navigation-owned focus requests use conditional
 generation cancellation so a newer application focus request survives cleanup.
@@ -268,6 +276,38 @@ reconciliation. Model/codec tests do not establish physical focus behavior. Real
 interaction checks remain a separate proof boundary, as do application storage and
 package-only NativeAOT replay. Page trees, services, editor undo, credentials and
 arbitrary application objects are never serialized.
+
+### Issue Browser storage example
+
+Issue Browser enables persistence only with `--restore-navigation` (which can be
+combined with `--native-menus`). Ordinary launch and the default hosted fixture
+never read or create navigation files. The opt-in path is
+`%LOCALAPPDATA%/Lucent/IssueBrowser/navigation-v1.json`, with the fixed offline
+fixture scope `issue-browser-fixture-routes-v1`, at most 32 journal entries and
+the explicit interaction codec. Search filters, list selection, issue status
+mutations and credentials are outside this snapshot.
+
+The application creates an empty session, binds its persistence owner before the
+root outlet mounts, and replays through public `OnMounted` after issue loading
+settles. Missing, invalid or unavailable storage selects `/issues`; a current
+resource guard rejects unavailable issue numbers and applies the same safe
+fallback. A newer navigation while storage is pending remains authoritative.
+
+The application posts capture after committed navigation and captures current
+interaction state once more before normal close. Its storage owner stages a
+bounded file beside the destination, flushes it, then checks the latest accepted
+generation at atomic replacement. It retains one in-flight and one coalesced
+pending snapshot. Clearing a snapshot uses the same generation fence. Accepted
+writes drain during close; a declined close restores navigation admission and
+capture. Write errors report finite diagnostic categories, preserve the previous
+file, and do not cancel independently accepted issue status operations. Generation
+ordering belongs to one application instance; this storage example does not
+coordinate concurrent processes.
+
+The implementation lives in
+[IssueBrowserNavigationPersistence](../apps/Lucent.IssueBrowser/IssueBrowserNavigationPersistence.cs)
+and [IssueBrowserNavigationStorage](../apps/Lucent.IssueBrowser/IssueBrowserNavigationStorage.cs).
+Core remains independent of filesystem storage.
 
 ## Focus, scroll and commands
 

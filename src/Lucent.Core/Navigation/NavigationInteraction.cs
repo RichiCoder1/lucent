@@ -30,6 +30,7 @@ public sealed class NavigationInteraction : IDisposable
     private BoundaryRegistration? _boundary;
     private Departure? _departure;
     private FocusReconciliation? _scheduledFocusReconciliation;
+    private PendingViewportReconciliation? _pendingViewportReconciliation;
     private IDisposable? _focusReconciliationDispatch;
     private ReactiveEffect? _focusReconciliationEffect;
     private long _focusReconciliationGeneration;
@@ -174,9 +175,10 @@ public sealed class NavigationInteraction : IDisposable
         if (
             !ReferenceEquals(owner.Graph, _scope.Graph)
             || !ReferenceEquals(focusTarget.Graph, _scope.Graph)
+            || (viewport is not null && !ReferenceEquals(viewport.Graph, _scope.Graph))
         )
             throw new ArgumentException(
-                "A navigation target, focus target, and interaction must belong to the same reactive graph."
+                "A navigation target, focus target, viewport, and interaction must belong to the same reactive graph."
             );
         var registration = new TargetRegistration(id, label, kind, focusTarget, viewport);
         _targets.Add(registration);
@@ -234,10 +236,15 @@ public sealed class NavigationInteraction : IDisposable
         ArgumentNullException.ThrowIfNull(publication);
         ArgumentNullException.ThrowIfNull(committedOutlet);
         CheckLive();
-        SupersedeFocusReconciliation();
         var active = ResolveTargets(committedOutlet, failOnDuplicate: true);
         var focused = _boundary?.Composition.Input.FocusedElement;
-        var state = Capture(active, focused);
+        var state = Capture(
+            active,
+            focused,
+            preservePendingRestoration: publication.Previous is { } departing
+                && _entryStates.GetValueOrDefault(departing.EntryId)?.RequiresViewportClamp == true
+        );
+        SupersedeFocusReconciliation();
         if (publication.Previous is { } previous)
             _entryStates[previous.EntryId] = state;
         _departure = new Departure(
@@ -266,6 +273,7 @@ public sealed class NavigationInteraction : IDisposable
         ArgumentNullException.ThrowIfNull(committedOutlet);
         CheckLive();
         var reconciliationGeneration = SupersedeFocusReconciliation();
+        var viewportWriteRevision = _scope.Graph.ViewportWriteRevision;
         var active = ResolveTargets(committedOutlet, failOnDuplicate: true);
         if (publication.RestoredInteractionStates is { } restored)
             foreach (var entry in restored)
@@ -281,6 +289,7 @@ public sealed class NavigationInteraction : IDisposable
             };
         if (desired is not null)
         {
+            List<NavigationViewportPosition>? unresolved = null;
             foreach (var position in desired.Viewports)
                 if (
                     active.TryGetValue(position.TargetId, out var target)
@@ -295,6 +304,14 @@ public sealed class NavigationInteraction : IDisposable
                     else
                         viewport.Offset = position.Offset;
                 }
+                else if (desired.RequiresViewportClamp)
+                    (unresolved ??= []).Add(position);
+            if (unresolved is not null)
+                _pendingViewportReconciliation = new(
+                    reconciliationGeneration,
+                    viewportWriteRevision,
+                    unresolved
+                );
             _entryStates[publication.Current.EntryId] = desired;
         }
         else if (publication.History == NavigationHistoryAction.Push)
@@ -315,12 +332,14 @@ public sealed class NavigationInteraction : IDisposable
             _announcementGeneration.Value = checked(_announcementGeneration.Value + 1);
         }
         _departure = null;
-        if (shouldMoveFocus || departure?.FocusedLevelId is not null)
+        var reconcileFocus = shouldMoveFocus || departure?.FocusedLevelId is not null;
+        if (reconcileFocus || _pendingViewportReconciliation is not null)
             ScheduleFocusReconciliation(
                 publication,
                 committedOutlet,
                 desired?.FocusTargetId,
-                reconciliationGeneration
+                reconciliationGeneration,
+                reconcileFocus
             );
     }
 
@@ -341,7 +360,10 @@ public sealed class NavigationInteraction : IDisposable
         if (journal.Current is { } current && committedOutlet.EntryId == current.EntryId)
             result[current.EntryId] = Capture(
                 ResolveTargets(committedOutlet, failOnDuplicate: true),
-                _boundary?.Composition.Input.FocusedElement
+                _boundary?.Composition.Input.FocusedElement,
+                preservePendingRestoration: _entryStates
+                    .GetValueOrDefault(current.EntryId)
+                    ?.RequiresViewportClamp == true
             );
         states = result;
         return true;
@@ -351,7 +373,8 @@ public sealed class NavigationInteraction : IDisposable
         NavigationPublication publication,
         RouteOutletSnapshot committedOutlet,
         string? requestedTargetId,
-        long generation
+        long generation,
+        bool reconcileFocus
     )
     {
         if (_boundary is null || committedOutlet.Levels.Count == 0)
@@ -360,7 +383,8 @@ public sealed class NavigationInteraction : IDisposable
             generation,
             publication.Current.EntryId,
             committedOutlet,
-            requestedTargetId
+            requestedTargetId,
+            reconcileFocus
         );
         _focusReconciliationDispatch ??= _scope.Post(PublishFocusReconciliation);
     }
@@ -368,6 +392,7 @@ public sealed class NavigationInteraction : IDisposable
     private long SupersedeFocusReconciliation()
     {
         ExpirePendingFocus();
+        _pendingViewportReconciliation = null;
         foreach (var (viewport, request) in _pendingViewports)
             viewport.CancelRestoration(request.Generation);
         _pendingViewports.Clear();
@@ -403,6 +428,9 @@ public sealed class NavigationInteraction : IDisposable
         if (_session.IsDisposed || _session.IsTerminated || current?.EntryId != request.EntryId)
             return;
         var active = ResolveTargets(request.Outlet, failOnDuplicate: true);
+        ApplyPendingViewports(active, request.Generation);
+        if (!request.ReconcileFocus)
+            return;
         var focused = _boundary?.Composition.Input.FocusedElement;
         if (focused is { } identity && _boundary?.Composition.Find(identity) is not null)
             return;
@@ -422,6 +450,45 @@ public sealed class NavigationInteraction : IDisposable
             return;
         }
         Focus(request.RequestedTargetId, active);
+    }
+
+    private void ApplyPendingViewports(
+        IReadOnlyDictionary<string, TargetRegistration> active,
+        long generation
+    )
+    {
+        var pending = _pendingViewportReconciliation;
+        _pendingViewportReconciliation = null;
+        if (pending is null || pending.Generation != generation)
+            return;
+        // Generated conditional content can register after publication. Give it the
+        // same single reconciliation pass as focus; unknown targets are then dropped.
+        var missing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var position in pending.Positions)
+            if (
+                active.TryGetValue(position.TargetId, out var target)
+                && target.Viewport is { IsDisposed: false } viewport
+                && viewport.OffsetWriteRevision <= pending.WriteRevision
+            )
+                _pendingViewports[viewport] = (
+                    target,
+                    viewport.RequestRestoration(position.Offset)
+                );
+            else if (
+                !active.TryGetValue(position.TargetId, out target)
+                || target.Viewport is not { IsDisposed: false }
+            )
+                missing.Add(position.TargetId);
+        if (
+            missing.Count > 0
+            && _session.Current is { } current
+            && _entryStates.TryGetValue(current.EntryId, out var state)
+        )
+            _entryStates[current.EntryId] = new(
+                state.FocusTargetId,
+                state.Viewports.Where(position => !missing.Contains(position.TargetId)).ToArray(),
+                state.RequiresViewportClamp
+            );
     }
 
     private Dictionary<string, TargetRegistration> ResolveTargets(
@@ -468,11 +535,25 @@ public sealed class NavigationInteraction : IDisposable
 
     private NavigationEntryInteractionState Capture(
         IReadOnlyDictionary<string, TargetRegistration> active,
-        ElementIdentity? focused
+        ElementIdentity? focused,
+        bool preservePendingRestoration = false
     )
     {
         string? focusedId = null;
         var viewports = new List<NavigationViewportPosition>();
+        var requiresViewportClamp = false;
+        var pendingFocus =
+            preservePendingRestoration
+            && focused is null
+            && _pendingFocus is { } requested
+            && requested.Target.TryGetPending(out var focusRequest)
+            && focusRequest.Generation == requested.Generation
+            && _boundary?.Composition.Input.HasPendingFocusRequestExcept(
+                requested.Target,
+                requested.Generation
+            ) == false
+                ? requested.Target
+                : null;
         foreach (var pair in active.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
             var registration = pair.Value;
@@ -482,10 +563,27 @@ public sealed class NavigationInteraction : IDisposable
                     == identity
             )
                 focusedId = registration.Id;
+            else if (ReferenceEquals(registration.FocusTarget, pendingFocus))
+                focusedId = registration.Id;
             if (registration.Viewport is { IsDisposed: false } viewport)
-                viewports.Add(new(registration.Id, viewport.Offset));
+            {
+                var offset = viewport.Offset;
+                if (
+                    preservePendingRestoration
+                    && _pendingViewports.TryGetValue(viewport, out var pending)
+                    && ReferenceEquals(pending.Owner, registration)
+                    && viewport.TryGetRestoration(pending.Generation, out var imported)
+                )
+                {
+                    // Preserve unsettled imported data only in the snapshot. It must still
+                    // be measured and clamped before it can become a live geometry offset.
+                    offset = imported;
+                    requiresViewportClamp = true;
+                }
+                viewports.Add(new(registration.Id, offset));
+            }
         }
-        return new(focusedId, viewports);
+        return new(focusedId, viewports, requiresViewportClamp);
     }
 
     private void ResetFreshViewports(
@@ -689,7 +787,14 @@ public sealed class NavigationInteraction : IDisposable
         long Generation,
         long EntryId,
         RouteOutletSnapshot Outlet,
-        string? RequestedTargetId
+        string? RequestedTargetId,
+        bool ReconcileFocus
+    );
+
+    private sealed record PendingViewportReconciliation(
+        long Generation,
+        long WriteRevision,
+        IReadOnlyList<NavigationViewportPosition> Positions
     );
 
     private sealed class TargetRegistration(

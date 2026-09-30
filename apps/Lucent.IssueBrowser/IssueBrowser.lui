@@ -52,8 +52,11 @@ style IssueBrowserSplitterStyle(WindowBreakpoints breakpoints) {
     }
 }
 
-public component IssueBrowser(IssueBrowserState browser) {
-    readonly IssueBrowserViewState view = new(owner, browser);
+public component IssueBrowser(
+    IssueBrowserState browser,
+    IssueBrowserNavigationPersistence? persistence = null
+) {
+    readonly IssueBrowserViewState view = new(owner, browser, persistence);
 
     <Provide value={view.Navigation}>
         <Provide value={view}>

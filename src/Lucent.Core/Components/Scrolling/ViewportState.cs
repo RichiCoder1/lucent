@@ -35,6 +35,9 @@ public sealed class ViewportState : IDisposable
         {
             CheckMutation();
             value.Validate();
+            // Equal writes still express newer application intent while an imported
+            // route target is waiting for its first reactive mount.
+            OffsetWriteRevision = _scope.Graph.RecordViewportWrite();
             _restoration = null;
             _offset.Value = value;
         }
@@ -59,6 +62,20 @@ public sealed class ViewportState : IDisposable
     }
 
     internal long RestorationGeneration => _restorationGeneration.Value;
+    internal ReactiveGraph Graph => _scope.Graph;
+    internal long OffsetWriteRevision { get; private set; }
+
+    internal bool TryGetRestoration(long generation, out ScrollOffset offset)
+    {
+        CheckRead();
+        if (_restoration is { } pending && pending.Generation == generation)
+        {
+            offset = pending.Offset;
+            return true;
+        }
+        offset = default;
+        return false;
+    }
 
     internal ScrollOffset? TakeRestoration()
     {

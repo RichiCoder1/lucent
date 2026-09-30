@@ -6,6 +6,30 @@ namespace Lucent.Core.Tests;
 public sealed partial class NavigationInteractionContracts
 {
     [TestMethod]
+    public void NavigationTargetRejectsViewportFromAnotherGraph()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = graph.CreateScope("navigation-target-graph-owner");
+        using var session = new NavigationSession(owner, Table("first"));
+        using var interaction = new NavigationInteraction(owner, session);
+        using var focus = new FocusTarget(owner, "navigation-target-graph-focus");
+        var foreignGraph = new ReactiveGraph();
+        using var foreignOwner = foreignGraph.CreateScope("foreign-viewport-owner");
+        using var viewport = new ViewportState(foreignOwner);
+
+        Assert.ThrowsExactly<ArgumentException>(() =>
+            interaction.RegisterTarget(
+                owner,
+                "action",
+                "Action",
+                NavigationTargetKind.Heading,
+                focus,
+                viewport
+            )
+        );
+    }
+
+    [TestMethod]
     public void ComponentOwnedInteractionDefersNestedOutletInitialReconciliation()
     {
         var graph = new ReactiveGraph();

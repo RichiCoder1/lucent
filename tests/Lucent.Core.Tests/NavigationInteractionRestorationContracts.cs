@@ -143,6 +143,22 @@ public sealed partial class NavigationInteractionContracts
     }
 
     [TestMethod]
+    public void LeavingImportedRouteBeforeFirstLayoutPreservesItsOffsetForBack()
+    {
+        using var fixture = new RestorationInteractionFixture();
+        fixture.RestoreFirst(90);
+        Completed(fixture.Session.Navigate(Location("/second")));
+        fixture.Install();
+        Assert.AreEqual(default(ScrollOffset), fixture.FirstViewport.Offset);
+
+        Completed(fixture.Session.Back());
+        fixture.Install();
+
+        Assert.AreEqual("first", fixture.Session.Current!.DefinitionId.Value);
+        Assert.AreEqual(new ScrollOffset(0, 90), fixture.FirstViewport.Offset);
+    }
+
+    [TestMethod]
     [DataRow(0f)]
     [DataRow(17f)]
     public void ApplicationViewportWriteSupersedesPendingRestoration(float offset)
@@ -150,24 +166,95 @@ public sealed partial class NavigationInteractionContracts
         using var fixture = new RestorationInteractionFixture();
         fixture.RestoreFirst(90);
         fixture.FirstViewport.Offset = new(0, offset);
+        var capture = fixture.Restoration.Decode(
+            fixture.Restoration.Capture(fixture.Session).Utf8.Span
+        );
+        Assert.AreEqual(
+            new ScrollOffset(0, offset),
+            capture.Journal!.Entries[0].State!.Viewports.Single().Offset
+        );
         fixture.Install();
         Assert.AreEqual(new ScrollOffset(0, offset), fixture.FirstViewport.Offset);
     }
 
     [TestMethod]
-    public void CaptureBeforeSceneInstallationReadsActualViewportRatherThanPendingRestoration()
+    [DataRow(90f, 1f, 90f)]
+    [DataRow(3e38f, 2f, 160f)]
+    public void CaptureBeforeSceneInstallationPreservesOwnedImportWithoutChangingLiveGeometry(
+        float imported,
+        float scale,
+        float measured
+    )
     {
         using var fixture = new RestorationInteractionFixture();
+        fixture.RestoreFirst(imported);
+        var capture = fixture.Restoration.Decode(
+            fixture.Restoration.Capture(fixture.Session).Utf8.Span
+        );
+        Assert.AreEqual(
+            new ScrollOffset(0, imported),
+            capture.Journal!.Entries[0].State!.Viewports.Single().Offset
+        );
+        Assert.AreEqual("action", capture.Journal.Entries[0].State!.FocusTargetId);
+        Assert.AreEqual(default(ScrollOffset), fixture.FirstViewport.Offset);
+        fixture.Install(scale);
+        Assert.AreEqual(new ScrollOffset(0, measured), fixture.FirstViewport.Offset);
+        var settled = fixture.Restoration.Decode(
+            fixture.Restoration.Capture(fixture.Session).Utf8.Span
+        );
+        Assert.AreEqual(
+            new ScrollOffset(0, measured),
+            settled.Journal!.Entries[0].State!.Viewports.Single().Offset
+        );
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void DeferredRouteTargetPreservesImportUnlessApplicationWroteItsViewport(
+        bool applicationWrites
+    )
+    {
+        using var fixture = new RestorationInteractionFixture(deferredTarget: true);
+        if (applicationWrites)
+            fixture.Session.RegisterCommitted(
+                fixture.Composition.Root.Scope,
+                _ => fixture.FirstViewport.Offset = default
+            );
         fixture.RestoreFirst(90);
         var capture = fixture.Restoration.Decode(
             fixture.Restoration.Capture(fixture.Session).Utf8.Span
         );
         Assert.AreEqual(
-            default(ScrollOffset),
+            new ScrollOffset(0, applicationWrites ? 0 : 90),
             capture.Journal!.Entries[0].State!.Viewports.Single().Offset
         );
+        Assert.AreEqual(default(ScrollOffset), fixture.FirstViewport.Offset);
         fixture.Install();
+        Assert.AreEqual(
+            new ScrollOffset(0, applicationWrites ? 0 : 90),
+            fixture.FirstViewport.Offset
+        );
+    }
+
+    [TestMethod]
+    public void DeferredReconciliationDropsUnknownImportedViewportAfterOnePass()
+    {
+        using var fixture = new RestorationInteractionFixture(deferredTarget: true);
+        const string payload =
+            """{"schema":"lucent.navigation","version":1,"scope":"interaction-v1","mode":"journal","activeKey":1,"entries":[{"key":1,"definition":"first","location":"/first","state":{"codec":"lucent.interaction","version":1,"focus":"action","viewports":[{"target":"action","x":0,"y":90},{"target":"removed-target","x":0,"y":70}]}}]}""";
+        Completed(
+            fixture.Session.Restore(fixture.Restoration.Decode(Encoding.UTF8.GetBytes(payload)))
+        );
+
+        fixture.Install();
+
         Assert.AreEqual(new ScrollOffset(0, 90), fixture.FirstViewport.Offset);
+        Assert.IsTrue(
+            fixture.Interaction.TryGetEntryState(fixture.Session.Current!.EntryId, out var state)
+        );
+        Assert.AreEqual("action", state!.Viewports.Single().TargetId);
+        Assert.AreEqual(new ScrollOffset(0, 90), state.Viewports.Single().Offset);
     }
 
     [TestMethod]
@@ -200,6 +287,10 @@ public sealed partial class NavigationInteractionContracts
             _ => fixture.FirstFocus.Request(selectAll: true)
         );
         fixture.RestoreFirst(0);
+        var capture = fixture.Restoration.Decode(
+            fixture.Restoration.Capture(fixture.Session).Utf8.Span
+        );
+        Assert.IsNull(capture.Journal!.Entries[0].State!.FocusTargetId);
         fixture.Install();
         Assert.AreEqual("First restored action", FocusedName(fixture.Composition));
         Assert.AreEqual("Restored text", fixture.FirstEditor!.SelectedText);
@@ -215,6 +306,10 @@ public sealed partial class NavigationInteractionContracts
             _ => focus.Request(selectAll: true)
         );
         fixture.RestoreFirst(0);
+        var capture = fixture.Restoration.Decode(
+            fixture.Restoration.Capture(fixture.Session).Utf8.Span
+        );
+        Assert.IsNull(capture.Journal!.Entries[0].State!.FocusTargetId);
         fixture.Install();
         Assert.AreEqual("Application editor", FocusedName(fixture.Composition));
         Assert.AreEqual("Application text", editor.SelectedText);
@@ -248,7 +343,11 @@ public sealed partial class NavigationInteractionContracts
         private readonly FocusTarget _secondFocus;
         private RetainedScene? _scene;
 
-        internal RestorationInteractionFixture(bool sharedViewport = false, bool textTarget = false)
+        internal RestorationInteractionFixture(
+            bool sharedViewport = false,
+            bool textTarget = false,
+            bool deferredTarget = false
+        )
         {
             _owner = _graph.CreateScope("restoration-interaction-owner");
             var table = Table("first", "second");
@@ -327,7 +426,7 @@ public sealed partial class NavigationInteractionContracts
                             );
                         }
                     );
-                    return Components.NavigationTarget(
+                    var target = Components.NavigationTarget(
                         [content],
                         _interaction,
                         "action",
@@ -336,6 +435,11 @@ public sealed partial class NavigationInteractionContracts
                         NavigationTargetKind.Heading,
                         viewport
                     );
+                    return deferredTarget
+                        ? Components.Column([
+                            ContentRecipe.When("deferred-target", () => true, target),
+                        ])
+                        : target;
                 }
             );
             Composition.Mount(
@@ -364,6 +468,7 @@ public sealed partial class NavigationInteractionContracts
         internal Composition Composition { get; }
         internal ViewportState FirstViewport { get; }
         internal ViewportState SecondViewport { get; }
+        internal NavigationInteraction Interaction => _interaction;
         internal FocusTarget FirstFocus => _firstFocus;
         internal EditorSession? FirstEditor { get; }
 
