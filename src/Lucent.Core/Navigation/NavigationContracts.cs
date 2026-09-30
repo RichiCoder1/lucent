@@ -449,7 +449,13 @@ internal sealed record NavigationPublication(
     NavigationJournalSnapshot Journal,
     NavigationHistoryAction History,
     NavigationOrigin Origin
-);
+)
+{
+    internal IReadOnlyDictionary<
+        long,
+        NavigationEntryInteractionState
+    >? RestoredInteractionStates { get; init; }
+}
 
 /// <summary>Retirement data supplied after the new state has been published.</summary>
 internal sealed class NavigationRetirement
@@ -500,6 +506,15 @@ internal abstract class NavigationStage : IDisposable
 /// <summary>Private Core seam consumed by the retained RouteOutlet.</summary>
 internal interface INavigationTransactionParticipant
 {
+    bool TryCaptureRestorationStates(
+        NavigationJournalSnapshot journal,
+        out IReadOnlyDictionary<long, NavigationEntryInteractionState>? states
+    )
+    {
+        states = null;
+        return true;
+    }
+
     /// <summary>
     /// Prepares route guards and required reads. The token belongs to this transition only;
     /// application services must use their own lifetime for writes already accepted for saving.

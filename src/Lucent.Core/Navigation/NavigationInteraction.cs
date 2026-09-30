@@ -255,13 +255,18 @@ public sealed class NavigationInteraction : IDisposable
         CheckLive();
         var reconciliationGeneration = SupersedeFocusReconciliation();
         var active = ResolveTargets(committedOutlet, failOnDuplicate: true);
-        NavigationEntryInteractionState? desired = publication.History switch
-        {
-            NavigationHistoryAction.Replace => _departure?.State,
-            NavigationHistoryAction.Back or NavigationHistoryAction.Forward =>
-                _entryStates.GetValueOrDefault(publication.Current.EntryId),
-            _ => null,
-        };
+        if (publication.RestoredInteractionStates is { } restored)
+            foreach (var entry in restored)
+                _entryStates[entry.Key] = entry.Value;
+        NavigationEntryInteractionState? desired = publication.RestoredInteractionStates is not null
+            ? _entryStates.GetValueOrDefault(publication.Current.EntryId)
+            : publication.History switch
+            {
+                NavigationHistoryAction.Replace => _departure?.State,
+                NavigationHistoryAction.Back or NavigationHistoryAction.Forward =>
+                    _entryStates.GetValueOrDefault(publication.Current.EntryId),
+                _ => null,
+            };
         if (desired is not null)
         {
             foreach (var position in desired.Viewports)
@@ -297,6 +302,29 @@ public sealed class NavigationInteraction : IDisposable
                 desired?.FocusTargetId,
                 reconciliationGeneration
             );
+    }
+
+    internal bool TryCaptureRestorationStates(
+        NavigationJournalSnapshot journal,
+        RouteOutletSnapshot committedOutlet,
+        out IReadOnlyDictionary<long, NavigationEntryInteractionState>? states
+    )
+    {
+        _scope.Graph.CheckThread();
+        states = null;
+        if (_disposed || _scope.IsDisposed || journal.Current?.EntryId != committedOutlet.EntryId)
+            return false;
+        var result = new Dictionary<long, NavigationEntryInteractionState>();
+        foreach (var entry in journal.Entries)
+            if (_entryStates.TryGetValue(entry.EntryId, out var state))
+                result.Add(entry.EntryId, state);
+        if (journal.Current is { } current && committedOutlet.EntryId == current.EntryId)
+            result[current.EntryId] = Capture(
+                ResolveTargets(committedOutlet, failOnDuplicate: true),
+                _boundary?.Composition.Input.FocusedElement
+            );
+        states = result;
+        return true;
     }
 
     private void ScheduleFocusReconciliation(

@@ -6,7 +6,7 @@ namespace Lucent.Core;
 /// <summary>Finite, redacted results for opt-in navigation persistence.</summary>
 public enum NavigationRestorationStatus
 {
-    /// <summary>A bounded location snapshot is available.</summary>
+    /// <summary>A bounded navigation snapshot is available.</summary>
     Ready,
 
     /// <summary>No committed, persistable location was supplied.</summary>
@@ -63,30 +63,43 @@ public sealed class NavigationRestorePlan
     internal NavigationRestorePlan(
         NavigationRestoration restoration,
         NavigationRestorationStatus status,
-        NavigationRestorationTarget? target = null
+        NavigationRestorationTarget? target = null,
+        NavigationRestorationJournal? journal = null,
+        int droppedEntries = 0,
+        int droppedStates = 0
     )
     {
         Restoration = restoration;
         Status = status;
         Target = target;
+        Journal = journal;
+        DroppedEntries = droppedEntries;
+        DroppedStates = droppedStates;
     }
 
     /// <summary>Gets the result of decoding and validating the persisted input.</summary>
     public NavigationRestorationStatus Status { get; }
 
+    /// <summary>Gets the number of invalid inactive routes omitted from a valid journal.</summary>
+    public int DroppedEntries { get; }
+
+    /// <summary>Gets the number of unregistered or invalid bounded states omitted from valid input.</summary>
+    public int DroppedStates { get; }
+
     internal NavigationRestoration Restoration { get; }
     internal NavigationRestorationTarget? Target { get; }
+    internal NavigationRestorationJournal? Journal { get; }
 
     /// <summary>Returns a diagnostic that excludes route, scope and payload values.</summary>
     public override string ToString() => "navigation-restore-plan status=" + Status;
 }
 
-/// <summary>Explicit, bounded version 1 active-location persistence with application-owned storage.</summary>
+/// <summary>Explicit, bounded version 1 navigation persistence with application-owned storage.</summary>
 /// <remarks>
-/// No journal state, page objects, services or editor data are serialized. The application supplies
+/// No page objects, services or editor data are serialized. The application supplies
 /// a pure persistence predicate and a safe fallback; ordinary route guards remain authoritative.
 /// </remarks>
-public sealed class NavigationRestoration
+public sealed partial class NavigationRestoration
 {
     /// <summary>The hard bound for a persisted UTF-8 payload.</summary>
     public const int MaximumPayloadBytes = 256 * 1024;
@@ -97,6 +110,7 @@ public sealed class NavigationRestoration
     private readonly string _scope;
     private readonly Func<RouteMatch, bool> _canPersist;
     private readonly int _maximumPayloadBytes;
+    private readonly NavigationRestorationOptions _options;
 
     /// <summary>Creates an opt-in policy bound to an exact table, scope and typed fallback.</summary>
     public NavigationRestoration(
@@ -104,7 +118,8 @@ public sealed class NavigationRestoration
         string scope,
         RouteReference fallback,
         Func<RouteMatch, bool> canPersist,
-        int maximumPayloadBytes = MaximumPayloadBytes
+        int maximumPayloadBytes = MaximumPayloadBytes,
+        NavigationRestorationOptions? options = null
     )
     {
         ArgumentNullException.ThrowIfNull(routeTable);
@@ -127,6 +142,7 @@ public sealed class NavigationRestoration
         _scope = scope;
         _canPersist = canPersist;
         _maximumPayloadBytes = maximumPayloadBytes;
+        _options = options ?? new();
         Fallback = new(fallback.Location, match.Match);
     }
 
@@ -134,11 +150,13 @@ public sealed class NavigationRestoration
     public RouteTable RouteTable { get; }
     internal NavigationRestorationTarget Fallback { get; }
 
-    /// <summary>Captures only the committed location, including while asynchronous preparation is pending.</summary>
+    /// <summary>Captures committed navigation in the configured mode, including while asynchronous preparation is pending.</summary>
     /// <remarks>Call on the session owner thread outside staging, publication, retirement or outlet replacement.</remarks>
     public NavigationCaptureResult Capture(NavigationSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
+        if (_options.Mode == NavigationRestorationMode.Journal)
+            return CaptureJournal(session);
         if (!session.TryCaptureRestorationLocation(RouteTable, out var current))
             return new(NavigationRestorationStatus.InvalidState);
         if (current is null)
@@ -186,12 +204,14 @@ public sealed class NavigationRestoration
             definition = null,
             location = null;
         var version = 0;
+        var fields = 0;
+        var activeKey = 0;
+        List<EncodedEntry>? entries = null;
         try
         {
             _ = StrictUtf8.GetCharCount(utf8);
             var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { MaxDepth = 8 });
             RequireRead(ref reader, JsonTokenType.StartObject);
-            var fields = 0;
             while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
             {
                 RequireToken(reader, JsonTokenType.PropertyName);
@@ -201,6 +221,8 @@ public sealed class NavigationRestoration
                     : reader.ValueTextEquals("scope") ? 4
                     : reader.ValueTextEquals("mode") ? 8
                     : reader.ValueTextEquals("active") ? 16
+                    : reader.ValueTextEquals("activeKey") ? 32
+                    : reader.ValueTextEquals("entries") ? 64
                     : 0;
                 RequireUnique(ref fields, field);
                 if (!reader.Read())
@@ -226,10 +248,16 @@ public sealed class NavigationRestoration
                     case 16:
                         ReadActive(ref reader, out definition, out location);
                         break;
+                    case 32:
+                        activeKey = ReadKey(ref reader);
+                        break;
+                    case 64:
+                        entries = ReadEntries(ref reader, utf8);
+                        break;
                 }
             }
             RequireToken(reader, JsonTokenType.EndObject);
-            if (fields != 31 || reader.Read())
+            if ((fields & 15) != 15 || reader.Read())
                 throw new JsonException();
         }
         catch (SnapshotLimitException)
@@ -246,14 +274,20 @@ public sealed class NavigationRestoration
         {
             return Rejected(NavigationRestorationStatus.InvalidPayload);
         }
-        if (schema != "lucent.navigation" || !IsKey(scope) || !IsKey(definition))
+        if (schema != "lucent.navigation" || !IsKey(scope))
             return Rejected(NavigationRestorationStatus.InvalidPayload);
         if (version != 1)
             return Rejected(NavigationRestorationStatus.UnsupportedVersion);
         if (scope != _scope)
             return Rejected(NavigationRestorationStatus.ScopeMismatch);
+        if (mode == "journal" && _options.Mode == NavigationRestorationMode.Journal)
+            return fields == 111 && entries is not null
+                ? DecodeJournal(entries, activeKey)
+                : Rejected(NavigationRestorationStatus.InvalidPayload);
         if (mode != "location")
             return Rejected(NavigationRestorationStatus.UnsupportedMode);
+        if (fields != 31 || !IsKey(definition))
+            return Rejected(NavigationRestorationStatus.InvalidPayload);
         var parsed = RouteLocation.Parse(location, RouteTable.Limits);
         if (parsed.Location is not { } canonical || canonical.CanonicalText != location)
             return Rejected(NavigationRestorationStatus.InvalidRoute);

@@ -4,7 +4,7 @@ public sealed partial class NavigationSession
 {
     private bool _restorationRequested;
 
-    /// <summary>Replays a decoded startup location through ordinary preparation and publication.</summary>
+    /// <summary>Replays a decoded startup location or journal through ordinary preparation and publication.</summary>
     /// <remarks>
     /// Call once, after attaching the root outlet, on an empty idle session. Rejected snapshots
     /// use the configured fallback; an expected replay rejection tries that fallback once.
@@ -41,6 +41,20 @@ public sealed partial class NavigationSession
         var target = plan.Target;
         if (target is not null && !plan.Restoration.Allows(target.Match))
             target = null;
+        NavigationRestorationJournal? journal = null;
+        if (target is not null && plan.Journal is { } imported)
+        {
+            var active = imported.Entries[imported.ActiveIndex];
+            var retained = imported
+                .Entries.Where(entry =>
+                    ReferenceEquals(entry, active) || plan.Restoration.Allows(entry.Target.Match)
+                )
+                .ToArray();
+            if (retained.Length > _journalSnapshot.Capacity)
+                target = null;
+            else
+                journal = new(retained, Array.IndexOf(retained, active));
+        }
         // Application policy is expected to be pure, but cannot overwrite a newer intent
         // even if it re-enters navigation or tears down the owner while deciding admission.
         if (!CanRestore(plan.Restoration) || _nextOperationId != operation.Id + 1)
@@ -57,13 +71,15 @@ public sealed partial class NavigationSession
             return operation;
         }
         var selected = target ?? plan.Restoration.Fallback;
+        var importPlan = journal is null ? null : _journal.PlanImport(journal);
         StartIntent(
             operation,
             selected.Location,
             selected.Match,
             NavigationHistoryAction.Push,
             NavigationOrigin.Restoration,
-            restorationFallback: target is null ? null : plan.Restoration
+            restorationFallback: target is null ? null : plan.Restoration,
+            restorationJournal: importPlan
         );
         return operation;
     }
@@ -90,6 +106,32 @@ public sealed partial class NavigationSession
         return true;
     }
 
+    internal bool TryCaptureRestorationJournal(
+        RouteTable routeTable,
+        out NavigationJournalSnapshot journal
+    )
+    {
+        journal = _journalSnapshot;
+        return TryCaptureRestorationLocation(routeTable, out _);
+    }
+
+    internal bool TryCaptureRestorationStates(
+        RouteTable routeTable,
+        NavigationJournalSnapshot captured,
+        NavigationJournalSnapshot selected,
+        bool interaction,
+        out IReadOnlyDictionary<long, NavigationEntryInteractionState>? states
+    )
+    {
+        states = null;
+        if (
+            !TryCaptureRestorationLocation(routeTable, out _)
+            || !ReferenceEquals(_journalSnapshot, captured)
+        )
+            return false;
+        return !interaction || _participant.TryCaptureRestorationStates(selected, out states);
+    }
+
     private bool CanRestore(NavigationRestoration restoration) =>
         !_disposed
         && !_terminated
@@ -114,6 +156,7 @@ public sealed partial class NavigationSession
         )
             return false;
         attempt.RestorationFallback = null;
+        attempt.RestorationJournal = null;
         var fallback = restoration.Fallback;
         attempt.Location = fallback.Location;
         attempt.Match = fallback.Match;

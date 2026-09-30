@@ -629,6 +629,20 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
         }
     }
 
+    public bool TryCaptureRestorationStates(
+        NavigationJournalSnapshot journal,
+        out IReadOnlyDictionary<long, NavigationEntryInteractionState>? states
+    )
+    {
+        _composition.CheckThread();
+        states = null;
+        return !_disposed
+            && (
+                _interaction is null
+                || _interaction.TryCaptureRestorationStates(journal, _snapshot, out states)
+            );
+    }
+
     public void Publish(NavigationStage stage, NavigationPublication publication)
     {
         _composition.CheckThread();

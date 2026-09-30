@@ -603,12 +603,16 @@ public sealed partial class NavigationSession : IDisposable
         NavigationHistoryAction history,
         NavigationOrigin origin,
         NavigationSnapshot? traversalTarget = null,
-        NavigationRestoration? restorationFallback = null
+        NavigationRestoration? restorationFallback = null,
+        NavigationJournalPlan? restorationJournal = null
     )
     {
         SupersedeActive();
 
-        var target = traversalTarget ?? _journal.Preview(location, match, history);
+        var target =
+            restorationJournal?.Target
+            ?? traversalTarget
+            ?? _journal.Preview(location, match, history);
         var attempt = new NavigationAttempt(
             operation,
             location,
@@ -620,6 +624,7 @@ public sealed partial class NavigationSession : IDisposable
         )
         {
             RestorationFallback = restorationFallback,
+            RestorationJournal = restorationJournal,
         };
         _generation = attempt.Generation;
         _activeAttempt = attempt;
@@ -782,6 +787,7 @@ public sealed partial class NavigationSession : IDisposable
 
     private void ApplyRedirect(NavigationAttempt attempt, NavigationPreparationResult result)
     {
+        attempt.RestorationJournal = null;
         if (result.RedirectLocation is null)
         {
             HandlePreparationException(
@@ -835,7 +841,7 @@ public sealed partial class NavigationSession : IDisposable
         NavigationJournalPlan plan;
         try
         {
-            plan = _journal.Plan(attempt.History, attempt.Target);
+            plan = attempt.RestorationJournal ?? _journal.Plan(attempt.History, attempt.Target);
         }
         catch (Exception exception)
         {
@@ -901,6 +907,9 @@ public sealed partial class NavigationSession : IDisposable
                             attempt.History,
                             attempt.Origin
                         )
+                        {
+                            RestoredInteractionStates = plan.RestoredInteractionStates,
+                        }
                     );
                     if (_terminated || _disposed)
                         throw new InvalidOperationException(
@@ -1236,6 +1245,7 @@ public sealed partial class NavigationSession : IDisposable
         internal NavigationHistoryAction History { get; set; }
         internal NavigationOrigin Origin { get; }
         internal NavigationRestoration? RestorationFallback { get; set; }
+        internal NavigationJournalPlan? RestorationJournal { get; set; }
         internal long Generation { get; }
         internal int RedirectCount { get; set; }
         internal List<string> RedirectDefinitions { get; }

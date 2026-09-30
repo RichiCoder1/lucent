@@ -448,6 +448,21 @@ public sealed partial class NavigationSessionContracts
         internal Action? OnRetire { get; init; }
         internal List<NavigationPrepareRequest> Requests { get; } = [];
         internal List<NavigationPublication> Publications { get; } = [];
+        internal NavigationJournalSnapshot? CapturedJournal { get; private set; }
+        internal IReadOnlyDictionary<
+            long,
+            NavigationEntryInteractionState
+        >? CaptureStates { get; init; }
+
+        public bool TryCaptureRestorationStates(
+            NavigationJournalSnapshot journal,
+            out IReadOnlyDictionary<long, NavigationEntryInteractionState>? states
+        )
+        {
+            CapturedJournal = journal;
+            states = CaptureStates;
+            return true;
+        }
 
         public ValueTask<NavigationPreparationResult> PrepareAsync(
             NavigationPrepareRequest request,

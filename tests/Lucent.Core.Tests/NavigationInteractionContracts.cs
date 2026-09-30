@@ -3,7 +3,7 @@ using Lucent.Core;
 namespace Lucent.Core.Tests;
 
 [TestClass]
-public sealed class NavigationInteractionContracts
+public sealed partial class NavigationInteractionContracts
 {
     [TestMethod]
     public void ComponentOwnedInteractionDefersNestedOutletInitialReconciliation()

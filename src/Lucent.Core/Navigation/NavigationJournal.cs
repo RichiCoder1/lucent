@@ -63,6 +63,33 @@ internal sealed class NavigationJournal
         _nextEntryId = plan.NextEntryId;
     }
 
+    internal NavigationJournalPlan PlanImport(NavigationRestorationJournal journal)
+    {
+        if (_entries.Count != 0 || journal.Entries.Count == 0 || journal.Entries.Count > _capacity)
+            throw new InvalidOperationException(
+                "A journal import requires an empty session and bounded entries."
+            );
+        var entries = new List<NavigationSnapshot>();
+        var states = new Dictionary<long, NavigationEntryInteractionState>();
+        var nextEntryId = _nextEntryId;
+        foreach (var entry in journal.Entries)
+        {
+            var snapshot = new NavigationSnapshot(
+                nextEntryId,
+                entry.Target.Location,
+                entry.Target.Match
+            );
+            entries.Add(snapshot);
+            if (entry.State is { } state)
+                states.Add(nextEntryId, state);
+            nextEntryId = checked(nextEntryId + 1);
+        }
+        return new(entries, journal.ActiveIndex, nextEntryId, entries[journal.ActiveIndex], [])
+        {
+            RestoredInteractionStates = states,
+        };
+    }
+
     internal NavigationSnapshot Initialize(RouteLocation location, RouteMatch match)
     {
         ArgumentNullException.ThrowIfNull(location);
@@ -157,6 +184,11 @@ internal sealed class NavigationJournalPlan
     internal NavigationSnapshot Target { get; }
 
     internal IReadOnlyList<NavigationSnapshot> Retired { get; }
+
+    internal IReadOnlyDictionary<
+        long,
+        NavigationEntryInteractionState
+    >? RestoredInteractionStates { get; init; }
 
     internal NavigationJournalSnapshot Snapshot(int capacity) =>
         new(Entries, CurrentIndex, capacity);

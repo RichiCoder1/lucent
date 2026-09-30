@@ -4,7 +4,7 @@ using Lucent.Core;
 namespace Lucent.Core.Tests;
 
 [TestClass]
-public sealed class NavigationRestorationContracts
+public sealed partial class NavigationRestorationContracts
 {
     private const string Snapshot =
         """{"schema":"lucent.navigation","version":1,"scope":"workspace-v1","mode":"location","active":{"definition":"item","location":"/items/1"}}""";

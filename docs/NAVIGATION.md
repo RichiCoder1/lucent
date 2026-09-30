@@ -214,12 +214,54 @@ Persistence errors must remain separate from accepted document writes and close
 negotiation. Resuming a location creates fresh route interaction state, using the
 existing heading/useful-target focus and authored viewport defaults after layout.
 
-This surface currently implements active-location restoration. It does not serialize
-journal history or entry IDs, focus/viewport state, page trees, services, editor undo,
-credentials or arbitrary objects. Bounded journal import and explicitly registered
-state codecs remain the next restoration slice. Application storage integration and
-package-only NativeAOT replay are separate proof boundaries; model/codec contracts do
-not establish physical focus behavior.
+### Bounded journal and interaction state
+
+Opt in to retained history by appending `options` to the restoration constructor:
+
+```csharp
+options: new NavigationRestorationOptions(
+    NavigationRestorationMode.Journal,
+    maximumEntries: 32,
+    stateCodecs: NavigationRestorationStateCodecs.Interaction
+)
+```
+
+The default remains location-only with no registered state codecs. Journal mode can
+also decode an older location snapshot. It captures at most the configured entry
+count and session capacity, with a hard limit of 64. The contiguous capture window
+includes the active entry, prefers preceding history and then fills from forward
+history. Disallowed entries inside that window are omitted in order. Snapshot-local
+keys identify entries in the envelope; import allocates fresh runtime entry IDs.
+
+Version 1 journal envelopes replace `active` with `activeKey` and `entries`:
+
+```json
+{"schema":"lucent.navigation","version":1,"scope":"browser-workspace-routes-v1","mode":"journal","activeKey":2,"entries":[{"key":1,"definition":"issues","location":"/issues"},{"key":2,"definition":"issue","location":"/issues/42"}]}
+```
+
+Malformed structure, duplicate keys, an invalid active reference or an exceeded bound
+rejects the snapshot. Invalid inactive routes are dropped; an invalid active route
+selects fallback. `DroppedEntries` and `DroppedStates` expose finite decode counts.
+Replay rechecks policy, and a journal larger than the destination capacity selects
+fallback. Only the active route mounts and runs startup guards. The entire journal,
+active route and imported state publish together. Back/Forward runs normal guards.
+A redirect or fallback discards imported history and state and commits one fresh entry.
+
+The explicit `Interaction` codec persists only authored focus IDs and viewport offsets
+from the root outlet's existing `NavigationInteraction` owner. Capture reads current
+active targets freshly and uses retained state for inactive entries. Each encoded
+state is limited to 4 KiB and 16 viewport positions. Target IDs are nonblank and
+bounded to 128 UTF-8 bytes; offsets must be finite and nonnegative. Unknown codecs or
+versions and invalid bounded state discard that entry's state, preserving its route.
+An oversized state rejects the whole payload. With no registered codec or interaction
+owner, the route history remains usable without interaction state.
+
+Imported state follows existing viewport clamping and focus reconciliation. Missing
+targets use the normal authored fallback; later navigation supersedes pending
+reconciliation. Model/codec tests do not establish physical focus behavior. Real
+interaction checks remain a separate proof boundary, as do application storage and
+package-only NativeAOT replay. Page trees, services, editor undo, credentials and
+arbitrary application objects are never serialized.
 
 ## Focus, scroll and commands
 
