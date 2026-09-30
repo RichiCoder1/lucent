@@ -28,10 +28,13 @@ restores a saved route in a fresh NativeAOT process. The activation adapter pass
 Onboarding #245 implements the [release descriptor and project-free identity](RELEASE-SETS.md).
 CI 98 passed the corrected native thread and package journal checks, then failed an
 asset fixture's optional-field access under strict PowerShell. The correction passes
-the full asset suite against existing immutable packages; publication is pending.
-Four standard templates #246 pass generation checks and await coherent package
-consumer proof. Editor trust/restart #247 passed independent review; bundled tooling
-is in progress, with immutable cache/import and explicit authenticated acquisition next.
+the full asset suite against existing immutable packages. CI 99 passed that suite
+and managed tests, then failed optional notice metadata access; the focused
+correction is committed and publication remains pending. Reviewed templates #246
+pass generation checks and a Unicode library-name diagnostic, with coherent package
+consumer proof pending. Editor #247's bundled server and CI test wiring have passed
+source review; actual producer proof, immutable cache/import and authenticated
+acquisition remain.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

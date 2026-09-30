@@ -51,6 +51,14 @@ flags under strict PowerShell. The full asset proof passes against immutable 93.
 packages under `artifacts/issue245/assets-strict-ci93`; this verifies the script
 correction, not publication of the new batch.
 
+CI 99 passed managed tests, the full native asset proof and headless package
+consumers, then failed after publishing the package-only Issue Browser because
+SDK-only notice records have no runtime `output` property. `a50abdc8` reads that
+optional field safely under strict PowerShell. The extracted production loop
+accepts the 17 runtime notices and still rejects a missing required notice.
+The failed log is retained as `artifacts/issue245/ci99-package-job-109762477403.log`;
+publication was skipped and 94.1 remains the latest published version.
+
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
@@ -62,8 +70,9 @@ correction, not publication of the new batch.
 | Restoration #221 | Reviewed app persistence and pending-state capture committed as `57245db1`; 149 Core and 44 app contracts pass; native restart reopens issue #9915 | Publish and verify the final package-only replay boundary |
 | Activation #222 | Optional adapter has 22 passing model contracts; reviewed fixture corrections committed as `7c4be47b` | Coherent package proof, then isolated native registration/foreground coverage |
 | Release identity #245 | Exact server/package/client compatibility, immutable descriptors and CI completion implemented; 63 rejection/integrity contracts pass | First coherent CI publication; complete does not mean NuGet upload succeeded |
-| Templates #246 | Four template generation variants pass; source remains outside package inventory | Validate real generated consumers against a coherent release bundle |
-| Editor lifecycle #247 | Trust, identity and restart slice accepted by independent review and committed as `76bd62e9`; 25 Node contracts pass | Bundle and verify the server in the VSIX, then deliver cache/import and acquisition |
+| Templates #246 | Reviewed source committed as `053b5357`; four generation variants and a Unicode library-name package diagnostic pass; source remains outside package inventory | Validate real generated consumers against a coherent release bundle |
+| Editor lifecycle #247 | Trust/identity/restart committed as `76bd62e9`; bundled delivery and CI wiring pass independent source review and 29 Node contracts | Exercise the real server/archive/VSIX producer, then deliver cache/import and acquisition |
+| Windows keypad #326 | Num Lock-off adapter and popup routing committed as `28f13dc0`; three focused managed contracts pass | NativeAOT validation and publication |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
 processes pass and registration/cleanup remain on the same thread. The initial

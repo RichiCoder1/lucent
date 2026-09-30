@@ -338,14 +338,34 @@ NativeAOT consumers after source/feed/cache removal. Evidence is under
 `artifacts/issue245/assets-strict-ci93`; the failed CI log is retained alongside it.
 This is script-correction proof, not publication of a new version.
 
+CI 99 passed managed tests, the complete native asset proof and headless package
+consumers, then failed after the package-only Issue Browser publish on SDK-only
+notice records without a runtime `output` field. `a50abdc8` uses optional dictionary
+access. The actual production loop passes against 17 runtime notice paths and
+rejects a removed required notice; this is focused verifier evidence, not another
+NativeAOT build claim. The retained failed log is
+`artifacts/issue245/ci99-package-job-109762477403.log`, SHA-256
+`9FC3B8DD34A260E034610D4B4C801A1A8433AF574376CC93CE794DCF8F51FB5C`.
+Publication was skipped.
+
 Templates #246 pass four generation variants and await actual consumer proof against
 a coherent bundle. They are not yet added to the release inventory. Editor #247's
 trust, selected-project isolation, identity and restart work passed independent
 review after correcting hung-startup cancellation, late-notification disposal and
 an excluded-root document-symbol path. Commit `76bd62e9` passes 25 Node contracts;
 the review additionally exercised out-of-order identities and late callbacks.
-Bundled server delivery is in progress. Cache/import and authenticated acquisition
-remain separate planned work.
+Bundled server delivery and its CI wiring pass independent source review in the
+15-file snapshot `artifacts/issue247-bundled-review-source-2/source-manifest.json`.
+Both Node test files now run in CI and release checks; all 29 cases pass. Real
+server/archive/VSIX producer verification remains pending. Cache/import and
+authenticated acquisition remain separate planned work.
+
+Template source is committed as `053b5357` after independent review. The review
+found and corrected the default assembly name for library names containing spaces:
+the template now uses the sanitized namespace for its assembly name. A real
+package diagnostic reproduces the invalid asset domain before the change and
+builds `Équipe_Cards.dll` without warnings afterward, against immutable 93.1 inputs.
+That diagnostic does not replace the pending coherent-bundle consumer proof.
 
 The browser walkthrough's keyboard diagnostic found that Computer Use's Down and
 Right commands arrived as SDL keypad 2/6 events, while Tab mapped and moved focus.
