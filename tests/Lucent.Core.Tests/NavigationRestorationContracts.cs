@@ -194,7 +194,9 @@ public sealed partial class NavigationRestorationContracts
             table.Patterns.Single(pattern => pattern.Id.Value == "home"),
             []
         );
-        _ = new NavigationRestoration(table, new string('é', 64), fallback, _ => true);
+        var policy = new NavigationRestoration(table, new string('é', 64), fallback, _ => true);
+        Assert.AreSame(fallback, policy.SafeFallback);
+        Assert.AreSame(table, policy.RouteTable);
         Assert.ThrowsExactly<ArgumentException>(() =>
             new NavigationRestoration(table, new string('é', 65), fallback, _ => true)
         );

@@ -143,11 +143,17 @@ public sealed partial class NavigationRestoration
         _canPersist = canPersist;
         _maximumPayloadBytes = maximumPayloadBytes;
         _options = options ?? new();
+        SafeFallback = fallback;
         Fallback = new(fallback.Location, match.Match);
     }
 
     /// <summary>Gets the exact matching authority to which decoded plans are bound.</summary>
     public RouteTable RouteTable { get; }
+
+    /// <summary>Gets the validated typed fallback supplied by the application.</summary>
+    /// <remarks>Hosts may use ordinary guarded navigation to this route when newer activation supersedes startup replay.</remarks>
+    public RouteReference SafeFallback { get; }
+
     internal NavigationRestorationTarget Fallback { get; }
 
     /// <summary>Captures committed navigation in the configured mode, including while asynchronous preparation is pending.</summary>
