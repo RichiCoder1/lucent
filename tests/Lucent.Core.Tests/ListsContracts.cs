@@ -351,6 +351,54 @@ public sealed class ListsContracts
     }
 
     [TestMethod]
+    public void SelectPopupMeasuresShortChoiceLabelsBeyondNarrowAnchorAndClampsToScreen()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "select-popup-label-width");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var choices = graph.Signal(
+            new ChoiceItem<string>[]
+            {
+                new("all", "All statuses"),
+                new("open", "Open"),
+                new("closed", "Closed"),
+            },
+            "select-popup-label-width.items"
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Select(
+                "Status",
+                () => choices.Value,
+                () => "all",
+                _ => { },
+                style: Style.Empty.Width(120).Height(36)
+            )
+        );
+        graph.Drain();
+        using var ownerScene = Install(composition, graph, 240, 80);
+        var anchor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(anchor.Identity, new(SemanticCommandKind.Expand))
+        );
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        Assert.AreEqual(120f, request.Anchor.Width);
+        var shaper = new ChoiceWidthShaper();
+        var roomy = request.Measure(shaper, new(600, 400, 1));
+        Assert.IsTrue(roomy.Width >= 180 && roomy.Width < 220);
+        Assert.AreEqual(170f, request.Measure(shaper, new(170, 400, 1)).Width);
+
+        choices.Value = [new("open", "Open")];
+        graph.Drain();
+        Assert.AreEqual(160f, request.Measure(shaper, new(600, 400, 1)).Width);
+    }
+
+    [TestMethod]
     [DataRow(0, 100f)]
     [DataRow(1, 100f)]
     [DataRow(3, 160f)]
@@ -671,6 +719,42 @@ public sealed class ListsContracts
         foreach (var child in node.Children)
         foreach (var nested in Nodes(child))
             yield return nested;
+    }
+
+    private sealed class ChoiceWidthShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            var width = request.Text.Length * 8f;
+            return request.Text.Length == 0
+                ? new("choice-empty", 0, request.FontSize, [])
+                : new(
+                    "choice-width",
+                    width,
+                    request.FontSize,
+                    [
+                        new ShapedRun(
+                            "choice-width",
+                            "choice-width",
+                            400,
+                            5,
+                            0,
+                            "choice-width",
+                            0,
+                            "choice-width#0",
+                            request.Direction,
+                            request.Language,
+                            request.FontSize,
+                            0,
+                            request.FontSize,
+                            -request.FontSize,
+                            0,
+                            width,
+                            [new(1, 0, 0, 0, width, 0, 0)]
+                        ),
+                    ]
+                );
+        }
     }
 
     private sealed class MetricShaper : ITextShaper

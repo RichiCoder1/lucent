@@ -190,6 +190,72 @@ public static partial class Components
                     new TypeAheadController<TKey>(() => current.Value, policy, null)
                 );
                 OwnedSurfaceRequest? surface = null;
+                (
+                    ChoiceItem<TKey>[] Choices,
+                    ITextShaper Shaper,
+                    float Scale,
+                    string Family,
+                    float Size,
+                    string Language,
+                    TextDirection Direction,
+                    FontWeight Weight,
+                    float Chrome
+                )? widthCacheKey = null;
+                float cachedPreferredWidth = 0;
+
+                float PreferredWidth(Element popupRoot, ITextShaper shaper, float scale)
+                {
+                    var row = FindFirstChoiceRow(popupRoot);
+                    if (row is null || row.Children.Count == 0)
+                        return 0;
+                    var chrome =
+                        popupRoot.ResolveValue(LayoutProperties.Padding).Horizontal
+                        + row.ResolveValue(LayoutProperties.Padding).Horizontal
+                        + row.ResolveValue(LayoutProperties.Spacing)
+                        + (row.Children[0].ResolveValue(LayoutProperties.Width) ?? 0);
+                    var family = row.ResolveValue(TypographyProperties.FontFamily);
+                    var size = row.ResolveValue(TypographyProperties.FontSize);
+                    var language = row.ResolveValue(TypographyProperties.Language);
+                    var direction = row.ResolveValue(TypographyProperties.Direction);
+                    var weight = row.ResolveValue(TypographyProperties.FontWeight);
+                    var choices = current.Value;
+                    var key = (
+                        choices,
+                        shaper,
+                        scale,
+                        family,
+                        size,
+                        language,
+                        direction,
+                        weight,
+                        chrome
+                    );
+                    if (widthCacheKey is { } cached && cached == key)
+                        return cachedPreferredWidth;
+
+                    var longest = 0f;
+                    foreach (var choice in choices)
+                    {
+                        if (choice.Content is not null)
+                            continue;
+                        var request = new TextMeasureRequest(
+                            choice.Label,
+                            family,
+                            size,
+                            language,
+                            direction,
+                            scale,
+                            FontWeight: weight
+                        );
+                        request.Validate();
+                        var shaped = shaper.Shape(request);
+                        shaped.Validate(request);
+                        longest = Math.Max(longest, shaped.Width);
+                    }
+                    widthCacheKey = key;
+                    cachedPreferredWidth = (float)Math.Ceiling(longest + chrome);
+                    return cachedPreferredWidth;
+                }
 
                 void Close()
                 {
@@ -253,7 +319,8 @@ public static partial class Components
                                 consumeOutsideClick: true,
                                 closed: Close,
                                 minimumWidth: 160,
-                                matchAnchorWidth: true
+                                matchAnchorWidth: true,
+                                preferredWidth: PreferredWidth
                             );
                             root.Composition.Input.RequestSurface(surface);
                         }
@@ -267,6 +334,18 @@ public static partial class Components
                 );
             }
         );
+    }
+
+    private static Element? FindFirstChoiceRow(Element element)
+    {
+        if (element.DeclaredSemanticRole == SemanticRole.ListItem)
+            return element;
+        foreach (var child in element.Children)
+        {
+            if (FindFirstChoiceRow(child) is { } row)
+                return row;
+        }
+        return null;
     }
 
     [LucentComponent]

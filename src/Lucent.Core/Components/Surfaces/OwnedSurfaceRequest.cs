@@ -12,6 +12,7 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
     private readonly LayoutRect? _anchorOverride;
     private readonly float _minimumWidth;
     private readonly bool _matchAnchorWidth;
+    private readonly Func<Element, ITextShaper, float, float>? _preferredWidth;
     private readonly bool _retainsOwnerFocus;
     private Composition? _popup;
     private Element? _root;
@@ -29,7 +30,8 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         LayoutRect? anchorOverride = null,
         float minimumWidth = 0,
         bool retainOwnerFocus = false,
-        bool matchAnchorWidth = false
+        bool matchAnchorWidth = false,
+        Func<Element, ITextShaper, float, float>? preferredWidth = null
     )
     {
         if (!float.IsFinite(minimumWidth) || minimumWidth < 0)
@@ -43,6 +45,7 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         _anchorOverride = anchorOverride;
         _minimumWidth = minimumWidth;
         _matchAnchorWidth = matchAnchorWidth;
+        _preferredWidth = preferredWidth;
         _retainsOwnerFocus = retainOwnerFocus;
         _returnFocus = Owner.Input.FocusedElement;
         IsInteractive = interactive;
@@ -167,14 +170,28 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
     public override LayoutRect Measure(ITextShaper shaper, LayoutViewport available)
     {
         var popup = CreateComposition();
-        _root!.UpdateControl(
-            LayoutProperties.MinWidth,
-            Math.Max(_minimumWidth, _matchAnchorWidth && HasAnchor ? Anchor.Width : 0)
-        );
-        _root.UpdateControl(LayoutProperties.MaxWidth, available.Width);
-        _root.UpdateControl(LayoutProperties.MaxHeight, available.Height);
-        using var scene = SceneLayout.Project(popup, available, shaper);
-        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == _root.Id).Bounds;
+        var root = _root!;
+        LayoutRect ProjectBounds()
+        {
+            using var scene = SceneLayout.Project(popup, available, shaper);
+            return scene.Boxes.Single(box => box.Identity.ElementId == root.Id).Bounds;
+        }
+
+        var baseWidth = Math.Max(_minimumWidth, _matchAnchorWidth && HasAnchor ? Anchor.Width : 0);
+        var minimumWidth = baseWidth;
+        if (_preferredWidth is not null)
+            minimumWidth = Math.Max(minimumWidth, _preferredWidth(root, shaper, available.Scale));
+        root.UpdateControl(LayoutProperties.MinWidth, Math.Min(minimumWidth, available.Width));
+        root.UpdateControl(LayoutProperties.MaxWidth, available.Width);
+        root.UpdateControl(LayoutProperties.MaxHeight, available.Height);
+        var bounds = ProjectBounds();
+        var preferredWidth = _preferredWidth?.Invoke(root, shaper, available.Scale) ?? 0;
+        var resolvedWidth = Math.Min(Math.Max(baseWidth, preferredWidth), available.Width);
+        if (resolvedWidth != Math.Min(minimumWidth, available.Width))
+        {
+            root.UpdateControl(LayoutProperties.MinWidth, resolvedWidth);
+            bounds = ProjectBounds();
+        }
         return new(
             0,
             0,

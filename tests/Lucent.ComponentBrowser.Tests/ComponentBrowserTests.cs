@@ -671,6 +671,71 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
+    public void HeaderDensityActionStaysBesideThemeAtFixedWindowWidth()
+    {
+        using var composition = new Composition(
+            new ReactiveGraph(),
+            "component-browser-header-density"
+        );
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        _ = composition.Mount(composition.Root, theme, BrowserApplication(theme));
+        composition.Flush();
+        using var renderer = new SkiaSceneRenderer();
+        static LayoutRect Bounds(RetainedScene scene, SemanticSnapshot node) =>
+            scene.Boxes.Single(box => box.Identity.ElementId == node.Identity.ElementId).Bounds;
+        (LayoutRect Theme, LayoutRect Density, LayoutRect Search) Positions(RetainedScene scene)
+        {
+            var nodes = Flatten(composition.SemanticSnapshot()!).ToArray();
+            var group = nodes.Single(node =>
+                node is { Role: SemanticRole.RadioGroup, Name: "Theme" }
+            );
+            var density = nodes.Single(node =>
+                node.Role == SemanticRole.Button
+                && node.Name.StartsWith("Density: ", StringComparison.Ordinal)
+            );
+            var search = nodes.Single(node =>
+                node is { Role: SemanticRole.TextField, Name: "Search components" }
+            );
+            return (Bounds(scene, group), Bounds(scene, density), Bounds(scene, search));
+        }
+        (LayoutRect Theme, LayoutRect Density, LayoutRect Search) PositionsAt(int width)
+        {
+            using var scene = SceneLayout.Project(composition, new(width, 872, 1), renderer);
+            return Positions(scene);
+        }
+        var comfortableNarrow = PositionsAt(760);
+        var comfortableWide = PositionsAt(1282);
+
+        var densityControl = Flatten(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.Button
+                && node.Name.StartsWith("Density: ", StringComparison.Ordinal)
+            );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(
+                densityControl.Identity,
+                new(SemanticCommandKind.Invoke)
+            )
+        );
+        composition.Flush();
+        var compactNarrow = PositionsAt(760);
+        var compactWide = PositionsAt(1282);
+        foreach (
+            var position in new[] { comfortableNarrow, comfortableWide, compactNarrow, compactWide }
+        )
+        {
+            Assert.IsTrue(position.Density.X >= position.Theme.X + position.Theme.Width);
+            Assert.IsTrue(position.Density.Y < position.Theme.Y + position.Theme.Height);
+        }
+        Assert.AreEqual(comfortableNarrow.Search.Y, compactNarrow.Search.Y);
+        Assert.AreEqual(comfortableWide.Search.Y, compactWide.Search.Y);
+        Assert.IsTrue(compactNarrow.Density.X + compactNarrow.Density.Width <= 760 - 24);
+        Assert.IsTrue(compactWide.Density.X + compactWide.Density.Width <= 1282 - 24);
+    }
+
+    [TestMethod]
     public void MaintainedRootMountRendersCatalogAndSourceSurface()
     {
         using var composition = new Composition(new ReactiveGraph(), "component-browser-render");

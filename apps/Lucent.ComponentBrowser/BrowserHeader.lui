@@ -25,7 +25,7 @@ style HeaderTitleStyle {
 style HeaderActionsStyle {
     Axis: LayoutAxis.Row;
     Spacing: 8;
-    Wrap: true;
+    Wrap: false;
     MainShrink: 0;
     CrossAlignment: LayoutAlignment.End;
 }
