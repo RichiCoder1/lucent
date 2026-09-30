@@ -1016,6 +1016,18 @@ public sealed partial class InputRouter
         return new ElementIdentity(_composition.Epoch, registration.ElementId);
     }
 
+    internal bool HasPendingFocusRequestExcept(FocusTarget? ownedTarget, long ownedGeneration)
+    {
+        _composition.CheckThread();
+        foreach (var target in _focusTargets.Keys)
+            if (
+                target.TryGetPending(out var request)
+                && (target != ownedTarget || request.Generation != ownedGeneration)
+            )
+                return true;
+        return false;
+    }
+
     private void RegisterFocusTarget(
         long elementId,
         ReactiveScope scope,

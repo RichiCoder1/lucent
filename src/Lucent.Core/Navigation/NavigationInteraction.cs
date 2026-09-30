@@ -22,7 +22,10 @@ public sealed class NavigationInteraction : IDisposable
     private readonly ApplicationCommand _keyboardBackCommand;
     private readonly List<TargetRegistration> _targets = [];
     private readonly Dictionary<long, NavigationEntryInteractionState> _entryStates = [];
-    private readonly Dictionary<ViewportState, long> _pendingViewports = [];
+    private readonly Dictionary<
+        ViewportState,
+        (TargetRegistration Owner, long Generation)
+    > _pendingViewports = [];
     private (FocusTarget Target, long Generation)? _pendingFocus;
     private BoundaryRegistration? _boundary;
     private Departure? _departure;
@@ -285,7 +288,10 @@ public sealed class NavigationInteraction : IDisposable
                 )
                 {
                     if (desired.RequiresViewportClamp)
-                        _pendingViewports[viewport] = viewport.RequestRestoration(position.Offset);
+                        _pendingViewports[viewport] = (
+                            target,
+                            viewport.RequestRestoration(position.Offset)
+                        );
                     else
                         viewport.Offset = position.Offset;
                 }
@@ -362,8 +368,8 @@ public sealed class NavigationInteraction : IDisposable
     private long SupersedeFocusReconciliation()
     {
         ExpirePendingFocus();
-        foreach (var (viewport, generation) in _pendingViewports)
-            viewport.CancelRestoration(generation);
+        foreach (var (viewport, request) in _pendingViewports)
+            viewport.CancelRestoration(request.Generation);
         _pendingViewports.Clear();
         return _focusReconciliationGeneration = checked(_focusReconciliationGeneration + 1);
     }
@@ -400,6 +406,21 @@ public sealed class NavigationInteraction : IDisposable
         var focused = _boundary?.Composition.Input.FocusedElement;
         if (focused is { } identity && _boundary?.Composition.Find(identity) is not null)
             return;
+        // A committed observer can request application focus before the first scene.
+        // Delayed route repair yields even when that target belongs to the shell.
+        if (
+            _boundary is { } boundary
+            && _scope.Graph.Untracked(() =>
+                boundary.Composition.Input.HasPendingFocusRequestExcept(
+                    _pendingFocus?.Target,
+                    _pendingFocus?.Generation ?? 0
+                )
+            )
+        )
+        {
+            ExpirePendingFocus();
+            return;
+        }
         Focus(request.RequestedTargetId, active);
     }
 
@@ -616,9 +637,13 @@ public sealed class NavigationInteraction : IDisposable
             ExpirePendingFocus();
         if (
             target.Viewport is { } viewport
-            && _pendingViewports.Remove(viewport, out var generation)
+            && _pendingViewports.TryGetValue(viewport, out var pending)
+            && ReferenceEquals(pending.Owner, target)
         )
-            viewport.CancelRestoration(generation);
+        {
+            _pendingViewports.Remove(viewport);
+            viewport.CancelRestoration(pending.Generation);
+        }
         target.Disposed -= RemoveTarget;
         _targets.Remove(target);
     }

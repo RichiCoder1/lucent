@@ -191,6 +191,53 @@ public sealed partial class NavigationInteractionContracts
         Assert.AreEqual(new ScrollOffset(0, 160), fixture.FirstViewport.Offset);
     }
 
+    [TestMethod]
+    public void ReconciliationPreservesNewerApplicationSelectAllRequest()
+    {
+        using var fixture = new RestorationInteractionFixture(textTarget: true);
+        fixture.Session.RegisterCommitted(
+            fixture.Composition.Root.Scope,
+            _ => fixture.FirstFocus.Request(selectAll: true)
+        );
+        fixture.RestoreFirst(0);
+        fixture.Install();
+        Assert.AreEqual("First restored action", FocusedName(fixture.Composition));
+        Assert.AreEqual("Restored text", fixture.FirstEditor!.SelectedText);
+    }
+
+    [TestMethod]
+    public void ReconciliationPreservesNewerApplicationFocusOutsideTheRoute()
+    {
+        using var fixture = new RestorationInteractionFixture();
+        var (focus, editor) = fixture.MountApplicationEditor();
+        fixture.Session.RegisterCommitted(
+            fixture.Composition.Root.Scope,
+            _ => focus.Request(selectAll: true)
+        );
+        fixture.RestoreFirst(0);
+        fixture.Install();
+        Assert.AreEqual("Application editor", FocusedName(fixture.Composition));
+        Assert.AreEqual("Application text", editor.SelectedText);
+    }
+
+    [TestMethod]
+    public void RetiringRouteCannotCancelRestorationOwnedByNewTargetSharingItsViewport()
+    {
+        using var fixture = new RestorationInteractionFixture(sharedViewport: true);
+        const string payload =
+            """{"schema":"lucent.navigation","version":1,"scope":"interaction-v1","mode":"journal","activeKey":1,"entries":[{"key":1,"definition":"first","location":"/first"},{"key":2,"definition":"second","location":"/second","state":{"codec":"lucent.interaction","version":1,"focus":"action","viewports":[{"target":"action","x":0,"y":90}]}}]}""";
+        Completed(
+            fixture.Session.Restore(fixture.Restoration.Decode(Encoding.UTF8.GetBytes(payload)))
+        );
+        fixture.Install();
+        Assert.AreSame(fixture.FirstViewport, fixture.SecondViewport);
+        Completed(fixture.Session.Forward());
+        fixture.Install();
+        Assert.AreEqual("Second restored action", FocusedName(fixture.Composition));
+        Assert.AreEqual(1, fixture.Session.Journal.CurrentIndex);
+        Assert.AreEqual(new ScrollOffset(0, 90), fixture.SecondViewport.Offset);
+    }
+
     private sealed class RestorationInteractionFixture : IDisposable
     {
         private readonly ReactiveGraph _graph = new();
@@ -201,7 +248,7 @@ public sealed partial class NavigationInteractionContracts
         private readonly FocusTarget _secondFocus;
         private RetainedScene? _scene;
 
-        internal RestorationInteractionFixture()
+        internal RestorationInteractionFixture(bool sharedViewport = false, bool textTarget = false)
         {
             _owner = _graph.CreateScope("restoration-interaction-owner");
             var table = Table("first", "second");
@@ -225,10 +272,16 @@ public sealed partial class NavigationInteractionContracts
                 Composition.Root.Scope,
                 name: "restored-first-viewport"
             );
-            SecondViewport = new ViewportState(
-                Composition.Root.Scope,
-                name: "restored-second-viewport"
-            );
+            SecondViewport = sharedViewport
+                ? FirstViewport
+                : new ViewportState(Composition.Root.Scope, name: "restored-second-viewport");
+            FirstEditor = textTarget
+                ? new EditorSession(
+                    Composition.Root.Scope,
+                    "restored-first-editor",
+                    "Restored text"
+                )
+                : null;
             var routes = Bundle(
                 Descriptors(table),
                 level =>
@@ -245,7 +298,16 @@ public sealed partial class NavigationInteractionContracts
                                 context.Theme,
                                 author: Style.Empty.Axis(LayoutAxis.Column).Width(160).Height(100)
                             );
-                            context.Mount(root, Components.Button(label, focusTarget: focus));
+                            context.Mount(
+                                root,
+                                first && FirstEditor is { } editor
+                                    ? Components.TextField(
+                                        session: editor,
+                                        label: label,
+                                        focusTarget: focus
+                                    )
+                                    : Components.Button(label, focusTarget: focus)
+                            );
                             context.Mount(
                                 root,
                                 Components.ScrollViewport(
@@ -303,6 +365,27 @@ public sealed partial class NavigationInteractionContracts
         internal ViewportState FirstViewport { get; }
         internal ViewportState SecondViewport { get; }
         internal FocusTarget FirstFocus => _firstFocus;
+        internal EditorSession? FirstEditor { get; }
+
+        internal (FocusTarget, EditorSession) MountApplicationEditor()
+        {
+            var focus = new FocusTarget(Composition.Root.Scope, "application-editor-focus");
+            var editor = new EditorSession(
+                Composition.Root.Scope,
+                "application-editor",
+                "Application text"
+            );
+            Composition.Mount(
+                Composition.Root,
+                _theme,
+                Components.TextField(
+                    session: editor,
+                    label: "Application editor",
+                    focusTarget: focus
+                )
+            );
+            return (focus, editor);
+        }
 
         internal void Install(float scale = 1)
         {
