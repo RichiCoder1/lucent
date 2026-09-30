@@ -10,7 +10,8 @@ $proof = (Resolve-Path -LiteralPath $Fixture).Path
 if (-not $proof.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw 'Fixture must be within the isolated activation artifact directory.' }
 $manifestPath = Join-Path $proof 'manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-if ($manifest.schemaVersion -ne 1 -or $manifest.scheme -notmatch '^lucent[0-9a-f]{32}$' -or $manifest.host -ne 'navigation') { throw 'Unsupported fixture identity.' }
+if ($manifest.schemaVersion -ne 2 -or $manifest.scheme -notmatch '^lucent[0-9a-f]{32}$' -or $manifest.packageSourceCommit -notmatch '^[0-9a-f]{40}$' -or $manifest.host -ne 'navigation') { throw 'Unsupported fixture identity.' }
+if ((Get-FileHash -LiteralPath (Join-Path $proof 'candidate-descriptor.json') -Algorithm SHA256).Hash -cne $manifest.candidateDescriptorSha256) { throw 'Candidate descriptor changed after fixture preparation.' }
 if ((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash -ne $manifest.invokeScriptSha256) { throw 'Fixture run script changed after preparation.' }
 $exe = Join-Path $proof 'publish/Consumer.exe'
 if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $manifest.executableSha256) { throw 'Fixture executable changed after preparation.' }
@@ -44,9 +45,8 @@ function Open-Uri([string] $uri) {
     $start = [Diagnostics.ProcessStartInfo]::new($uri)
     $start.UseShellExecute = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    $process = [Diagnostics.Process]::Start($start)
-    if ($null -eq $process) { throw 'Shell did not provide a process handle for exit verification.' }
-    return $process
+    $broker = [Diagnostics.Process]::Start($start)
+    if ($null -ne $broker) { $broker.Dispose() }
 }
 function Wait-Event([int] $number) {
     $path = Join-Path $output ('event-{0:D4}.txt' -f $number)
@@ -55,15 +55,45 @@ function Wait-Event([int] $number) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Registered delivery $number did not arrive within ten seconds." }
     return ConvertFrom-StringData (Get-Content -LiteralPath $path -Raw)
 }
+function Open-VerifiedHandler([int] $processId) {
+    $process = [Diagnostics.Process]::GetProcessById($processId)
+    try {
+        if (-not [string]::Equals($process.MainModule.FileName, $exe, [StringComparison]::OrdinalIgnoreCase)) { throw "Recorded process $processId is not the exact fixture EXE." }
+        if ($process.Handle -eq [IntPtr]::Zero) { throw "Recorded process $processId has no waitable handle." }
+        return $process
+    }
+    catch { $process.Dispose(); throw }
+}
 function Wait-Completion([Diagnostics.Process] $process, [string] $kind, [int] $exit, [string] $failure) {
-    if (-not $process.WaitForExit(8000)) { throw "Shell process $($process.Id) did not exit within eight seconds." }
-    if ($process.ExitCode -ne $exit) { throw "Shell process $($process.Id) exited $($process.ExitCode), expected $exit." }
     $path = Join-Path $output ("process-$($process.Id).txt")
-    $deadline = [DateTime]::UtcNow.AddSeconds(2)
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while (-not (Test-Path -LiteralPath $path) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
-    if (-not (Test-Path -LiteralPath $path)) { throw "Shell process $($process.Id) omitted completion evidence." }
+    if (-not (Test-Path -LiteralPath $path)) { throw "Verified handler $($process.Id) omitted completion evidence." }
     $completion = ConvertFrom-StringData (Get-Content -LiteralPath $path -Raw)
-    if ($completion.kind -ne $kind -or $completion.exit -ne "$exit" -or $completion.failure -ne $failure) { throw "Shell process $($process.Id) reported an unexpected activation result." }
+    if ($completion.kind -ne $kind -or $completion.exit -ne "$exit" -or $completion.failure -ne $failure) { throw "Verified handler $($process.Id) reported an unexpected activation result." }
+    $acknowledgment = Join-Path $output ("ack-$($process.Id).txt")
+    $temporary = "$acknowledgment.$([Guid]::NewGuid().ToString('N')).tmp"
+    Set-Content -LiteralPath $temporary -Value $manifest.instanceKey
+    Move-Item -LiteralPath $temporary -Destination $acknowledgment
+    if (-not $process.WaitForExit(8000)) { throw "Verified handler $($process.Id) did not exit within eight seconds." }
+    if ($process.ExitCode -ne $exit) { throw "Verified handler $($process.Id) exited $($process.ExitCode), expected $exit." }
+}
+function Wait-NewHandler([string] $kind, [int] $exit, [string] $failure) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $fresh = @(Get-ChildItem -LiteralPath $output -Filter 'process-*.txt' -File | Where-Object {
+            $_.BaseName -match '^process-([0-9]+)$' -and -not $script:knownHandlerIds.Contains([int]$Matches[1])
+        })
+        if ($fresh.Count -gt 1) { throw 'More than one unclaimed handler completed for a single shell URI.' }
+        if ($fresh.Count -eq 1) { break }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($fresh.Count -ne 1 -or $fresh[0].BaseName -notmatch '^process-([0-9]+)$') { throw 'Shell URI produced no single fresh handler completion.' }
+    $processId = [int]$Matches[1]
+    $process = Open-VerifiedHandler $processId
+    $script:knownHandlerIds.Add($processId) | Out-Null
+    $script:ownedProcesses += $process
+    Wait-Completion $process $kind $exit $failure
 }
 function Stop-OwnedPrimary {
     $pidPath = Join-Path $output 'primary.pid'
@@ -86,10 +116,9 @@ function Stop-OwnedShellProcess([Diagnostics.Process] $process) {
     $process.Kill()
     if (-not $process.WaitForExit(3000)) { throw "Owned shell process $($process.Id) did not stop." }
 }
+$ownedProcesses = @()
+$knownHandlerIds = [Collections.Generic.HashSet[int]]::new()
 $coldProcess = $null
-$invalidProcess = $null
-$warmProcess = $null
-$lastProcess = $null
 try {
     $attempted = $true
     $manifest.registrationAttempted = $true
@@ -100,20 +129,23 @@ try {
     $invalidUri = "${scheme}://navigation:9/notes/12"
     $warmUri = "${scheme}://navigation/notes/%2F?tab=two"
     $lastUri = "${scheme}://navigation/notes/13?tab=three"
-    $coldProcess = Open-Uri $coldUri
+    Open-Uri $coldUri
     $cold = Wait-Event 1
     if ($cold.kind -ne 'Protocol' -or $cold.delivery -ne 'Cold' -or $cold.provenance -ne 'UntrustedExternal' -or [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($cold.rawBase64)) -cne $coldUri) { throw 'Cold registered delivery lost its raw protocol URI or provenance.' }
-    $invalidProcess = Open-Uri $invalidUri
-    Wait-Completion $invalidProcess 'RedirectFailed' 2 'RejectedInput'
+    $coldProcess = Open-VerifiedHandler ([int]$cold.pid)
+    $knownHandlerIds.Add($coldProcess.Id) | Out-Null
+    $ownedProcesses += $coldProcess
+    Open-Uri $invalidUri
+    Wait-NewHandler 'RedirectFailed' 2 'RejectedInput'
     if (Test-Path -LiteralPath (Join-Path $output 'event-0002.txt')) { throw 'Rejected secondary changed the primary inbox.' }
-    $warmProcess = Open-Uri $warmUri
+    Open-Uri $warmUri
     $warm = Wait-Event 2
     if ($warm.kind -ne 'Protocol' -or $warm.delivery -ne 'Redirected' -or $warm.provenance -ne 'UntrustedExternal' -or [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($warm.rawBase64)) -cne $warmUri) { throw 'Warm registered delivery lost its raw protocol URI or provenance.' }
-    Wait-Completion $warmProcess 'Redirected' 0 'None'
-    $lastProcess = Open-Uri $lastUri
+    Wait-NewHandler 'Redirected' 0 'None'
+    Open-Uri $lastUri
     $last = Wait-Event 3
     if ($last.kind -ne 'Protocol' -or $last.delivery -ne 'Redirected' -or [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($last.rawBase64)) -cne $lastUri) { throw 'Final warm registered delivery was lost.' }
-    Wait-Completion $lastProcess 'Redirected' 0 'None'
+    Wait-NewHandler 'Redirected' 0 'None'
     if ($cold.pid -ne $warm.pid -or $cold.pid -ne $last.pid) { throw 'A redirected delivery created a new primary.' }
     Wait-Completion $coldProcess 'Primary' 0 'None'
     $verified = $true
@@ -124,14 +156,14 @@ catch {
 }
 finally {
     try { Stop-OwnedPrimary } catch { $cleanupError = $_.Exception.Message }
-    foreach ($process in @($coldProcess, $invalidProcess, $warmProcess, $lastProcess)) {
+    foreach ($process in $ownedProcesses) {
         try { Stop-OwnedShellProcess $process } catch { $cleanupError = $_.Exception.Message }
     }
     if ($attempted) {
         try { Invoke-Setup '--unregister' } catch { $cleanupError = $_.Exception.Message }
     }
     if ((Test-Path -LiteralPath $association) -or (Test-Path -LiteralPath $userAssociation)) { $cleanupError = 'The unique protocol association remains after Unregister.' }
-    foreach ($process in @($coldProcess, $invalidProcess, $warmProcess, $lastProcess)) { if ($null -ne $process) { $process.Dispose() } }
+    foreach ($process in $ownedProcesses) { $process.Dispose() }
     [ordered]@{ succeeded = ($verified -and $null -eq $failure -and $null -eq $cleanupError -and $registered); registered = $registered; failure = $failure; cleanupError = $cleanupError; scheme = $scheme; executableSha256 = $manifest.executableSha256 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $proof 'registered-evidence.json')
     if ($null -ne $cleanupError) { Write-Error "Registered fixture cleanup failed: $cleanupError" }
 }

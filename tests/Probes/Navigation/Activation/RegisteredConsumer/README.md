@@ -1,11 +1,15 @@
 # Isolated registered protocol transport fixture
 
-`Prepare-Fixture.ps1 -Feed <local-candidate-feed> -Version <candidate-version>`
+`Prepare-Fixture.ps1 -Feed <local-candidate-feed> -Version <candidate-version> -CandidateDescriptor <validated-release-set-json>`
 publishes a package-only, self-contained NativeAOT handler and creates a random
 `lucent<GUID>` scheme under ignored `artifacts/windows-activation-registered`.
 Preparation does not register a protocol or launch an application. The fixture
-records its exact executable hash, source hash, package version, scheme, key and
-output directory. Review the manifest and executable before native execution.
+requires a coherent release-set descriptor, checks package hashes and nuspec
+repository commits, and rejects an unexpected Lucent package version during
+restore. It records the package source commit separately from the fixture
+preparation commit, plus the exact executable/source hashes, scheme, key and
+output directory. Older fixture manifests are refused. Review the manifest and
+executable before native execution.
 
 `Invoke-RegisteredFixture.ps1 -Fixture <prepared-directory> -RunRegistered`
 is the separate, explicit native step. Run it only in the reviewed isolated
@@ -14,7 +18,10 @@ unpackaged registration API with the absolute fixture EXE and its icon resource,
 uses the shell to deliver cold valid, invalid secondary and two warm valid URIs.
 The invalid secondary must exit with a finite rejection before redirecting;
 the primary receives only the valid URIs. The script checks copied raw URI,
-provenance, primary PID, and all observed process exit codes. A prepared fixture
+provenance, primary PID, and actual handler exit codes. Each handler holds its
+completion until the observer verifies its PID and exact executable, then
+acknowledges it. Shell broker handles may be absent and are not used as handler
+identity. A prepared fixture
 can run only once, so stale event files cannot establish a later pass.
 It creates no Lucent window and synthesizes no user input. A default-app picker,
 missing shell delivery or unexpected normalization causes a bounded failure,
@@ -34,13 +41,14 @@ shell protocol transport, not Lucent route guard or native foreground behavior.
 The model suite owns routing policy; visible foreground testing uses a separate
 desktop fixture coordinated with the owner.
 
-`Build-MsixFixture.ps1 -Fixture <prepared-directory> -GuestOutputDirectory
-<absolute-guest-path>` copies the published payload into a distinct staging
+`Build-MsixFixture.ps1 -Fixture <prepared-directory> -GuestOutputDirectory C:\LucentOutput\app-evidence\<scheme>`
+copies the published payload into a distinct staging
 directory and uses the pinned Windows SDK MakeAppx to produce an **unsigned,
 uninstalled** full-trust MSIX with a unique package identity and matching
 `windows.protocol` declaration. The output directory is embedded only in this
-disposable fixture's configuration; use a guest-owned path. Its manifest and
-package hashes are recorded beside the package.
+disposable fixture's configuration. Its manifest and package hashes are recorded
+beside the package. The required output path is inside the guest's writable
+mapped evidence directory, outside MSIX AppData virtualization.
 
 Installation proof requires signing with a certificate whose subject exactly
 matches the manifest publisher, trusting that certificate inside a disposable
@@ -57,13 +65,15 @@ The signed guest step must follow the [MSIX signing guide](https://learn.microso
 Microsoft documents the elevated all-users behavior of [unsigned executable packages](https://learn.microsoft.com/en-us/windows/msix/package/unsigned-package).
 
 For a disposable packaged test, build the MSIX with guest output exactly
-`C:\Users\WDAGUtilityAccount\AppData\Local\Temp\LucentActivation\<scheme>`
+`C:\LucentOutput\app-evidence\<scheme>`
 where `<scheme>` is the prepared manifest's random scheme. Then call
 `Prepare-MsixSandbox.ps1 -MsixBuild <msix-build-directory>`; the default only
 creates a reviewed input bundle, a fresh writable evidence directory, and a
 `.wsb` config. The config maps input read-only, maps only that fresh evidence
 directory writable, disables networking and device/clipboard redirection, and
-runs `Invoke-MsixGuest.ps1` after guest logon. The guest checks its Sandbox user
+runs `Invoke-MsixGuest.ps1` after guest logon. The CLI execution path connects
+the same named Sandbox session so its LogonCommand gets an active guest session.
+The guest checks its Sandbox user
 and nonce marker before any certificate trust or install; it signs with a new
 guest-only certificate, installs the exact identity, checks actual packaged URI
 deliveries, and removes the package and certificate in `finally`.

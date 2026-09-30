@@ -12,13 +12,15 @@ $package = Join-Path $build 'Lucent.ActivationFixture.msix'
 $manifest = Join-Path $build 'stage/AppxManifest.xml'
 $fixture = Split-Path $build -Parent
 $fixtureManifest = Get-Content -LiteralPath (Join-Path $fixture 'manifest.json') -Raw | ConvertFrom-Json
+if ((Get-FileHash -LiteralPath (Join-Path $fixture 'candidate-descriptor.json') -Algorithm SHA256).Hash -cne $fixtureManifest.candidateDescriptorSha256) { throw 'Candidate descriptor changed after fixture preparation.' }
 $program = Join-Path $fixture 'Program.cs'
 if (-not [string]::Equals((Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash, $msixEvidence.packageSha256, [StringComparison]::OrdinalIgnoreCase)) { throw 'MSIX package changed after build.' }
 if (-not [string]::Equals((Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash, $msixEvidence.manifestSha256, [StringComparison]::OrdinalIgnoreCase)) { throw 'MSIX manifest changed after build.' }
 if (-not [string]::Equals((Get-FileHash -LiteralPath $program -Algorithm SHA256).Hash, $fixtureManifest.consumerSourceSha256, [StringComparison]::OrdinalIgnoreCase)) { throw 'Published handler source changed after preparation.' }
 if (-not [string]::Equals((Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Build-MsixFixture.ps1') -Algorithm SHA256).Hash, $msixEvidence.buildScriptSha256, [StringComparison]::OrdinalIgnoreCase)) { throw 'MSIX build script changed after packaging.' }
-if ($msixEvidence.signed -or $msixEvidence.installed -or $fixtureManifest.scheme -ne $msixEvidence.protocolScheme -or $msixEvidence.packageIdentity -ne ('Lucent.Probe.' + $fixtureManifest.scheme.Substring('lucent'.Length)) -or $msixEvidence.publisher -ne 'CN=Lucent Activation Fixture') { throw 'MSIX build does not have the isolated unsigned fixture identity.' }
-$guestAppOutput = 'C:\Users\WDAGUtilityAccount\AppData\Local\Temp\LucentActivation\' + $fixtureManifest.scheme
+if ($msixEvidence.packageSourceCommit -cne $fixtureManifest.packageSourceCommit -or $msixEvidence.fixturePreparationCommit -cne $fixtureManifest.fixturePreparationCommit -or $msixEvidence.candidateDescriptorSha256 -cne $fixtureManifest.candidateDescriptorSha256) { throw 'MSIX build and prepared fixture identify different package inputs.' }
+if ($fixtureManifest.schemaVersion -ne 2 -or $msixEvidence.schemaVersion -ne 2 -or $msixEvidence.signed -or $msixEvidence.installed -or $fixtureManifest.scheme -ne $msixEvidence.protocolScheme -or $msixEvidence.packageIdentity -ne ('Lucent.Probe.' + $fixtureManifest.scheme.Substring('lucent'.Length)) -or $msixEvidence.publisher -ne 'CN=Lucent Activation Fixture') { throw 'MSIX build does not have the current isolated unsigned fixture identity.' }
+$guestAppOutput = 'C:\LucentOutput\app-evidence\' + $fixtureManifest.scheme
 if (-not [string]::Equals($msixEvidence.guestOutputDirectory, $guestAppOutput, [StringComparison]::OrdinalIgnoreCase)) { throw "Rebuild the MSIX with guest output $guestAppOutput." }
 $signToolSource = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe'
 if (-not (Test-Path -LiteralPath $signToolSource -PathType Leaf)) { throw 'Pinned Windows SDK SignTool.exe is unavailable.' }
@@ -35,14 +37,17 @@ Copy-Item -LiteralPath $signToolSource -Destination (Join-Path $inputFolder 'sig
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Invoke-MsixGuest.ps1') -Destination (Join-Path $inputFolder 'Invoke-MsixGuest.ps1')
 $nonce = [Guid]::NewGuid().ToString('N')
 $session = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     runId = $runId
     nonce = $nonce
-    packageSourceCommit = $fixtureManifest.sourceCommit
+    packageSourceCommit = $fixtureManifest.packageSourceCommit
+    fixturePreparationCommit = $fixtureManifest.fixturePreparationCommit
+    candidateDescriptorSha256 = $fixtureManifest.candidateDescriptorSha256
     hostPreparationCommit = (& git -C $root rev-parse HEAD).Trim()
     packageIdentity = $msixEvidence.packageIdentity
     publisher = $msixEvidence.publisher
     protocolScheme = $msixEvidence.protocolScheme
+    instanceKey = $fixtureManifest.instanceKey
     guestAppOutput = $guestAppOutput
     unsignedInputMsixSha256 = $msixEvidence.packageSha256
     packageManifestSha256 = $msixEvidence.manifestSha256
@@ -89,6 +94,7 @@ $sessionId = [Guid]::NewGuid().ToString()
 $startAttempted = $false
 $runError = $null
 $stopError = $null
+$connection = $null
 function Invoke-Wsb([string[]] $arguments) {
     $start = [Diagnostics.ProcessStartInfo]::new($wsb)
     $start.UseShellExecute = $false
@@ -114,6 +120,17 @@ function Invoke-Wsb([string[]] $arguments) {
 try {
     $startAttempted = $true
     Invoke-Wsb @('start', '--id', $sessionId, '--config', $config)
+    # The .wsb logon command needs a logged-on guest. `start` alone may create
+    # only the VM; `connect` establishes the session for this exact ID.
+    $connectStart = [Diagnostics.ProcessStartInfo]::new($wsb)
+    $connectStart.UseShellExecute = $false
+    $connectStart.ArgumentList.Add('connect')
+    $connectStart.ArgumentList.Add('--id')
+    $connectStart.ArgumentList.Add($sessionId)
+    $connection = [Diagnostics.Process]::Start($connectStart)
+    if ($null -eq $connection) { throw 'Windows Sandbox connect did not start.' }
+    Start-Sleep -Milliseconds 500
+    if ($connection.HasExited -and $connection.ExitCode -ne 0) { throw "Windows Sandbox connect failed ($($connection.ExitCode))." }
     $resultPath = Join-Path $outputFolder 'guest-result.json'
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     while (-not (Test-Path -LiteralPath $resultPath) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
@@ -124,6 +141,7 @@ try {
 catch { $runError = $_.Exception.Message }
 finally {
     if ($startAttempted) { try { Invoke-Wsb @('stop', '--id', $sessionId) } catch { $stopError = $_.Exception.Message } }
+    if ($null -ne $connection) { $connection.Dispose() }
     [ordered]@{ runId = $runId; sandboxSessionId = $sessionId; succeeded = ($null -eq $runError -and $null -eq $stopError); runError = $runError; stopError = $stopError } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'host-result.json')
 }
 if ($null -ne $runError -or $null -ne $stopError) { throw "MSIX Sandbox proof failed: $runError $stopError" }

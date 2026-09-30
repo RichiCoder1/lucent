@@ -77,7 +77,7 @@ internal static class Program
                     Record
                 );
                 Publish("primary.pid", Environment.ProcessId.ToString());
-                var deadline = Environment.TickCount64 + 20_000;
+                var deadline = Environment.TickCount64 + 45_000;
                 while (count < 3 && !File.Exists(stop) && Environment.TickCount64 < deadline)
                 {
                     while (queued.TryDequeue(out var action))
@@ -92,6 +92,14 @@ internal static class Program
             $"process-{Environment.ProcessId}.txt",
             $"kind={result.Kind}{Environment.NewLine}exit={result.ExitCode}{Environment.NewLine}failure={result.Failure}"
         );
-        return result.ExitCode;
+        // Keep the actual handler alive until the observer has opened its PID and
+        // checked its executable. A shell URI may return a broker or no handle.
+        var acknowledgment = Path.Combine(output, $"ack-{Environment.ProcessId}.txt");
+        var acknowledgmentDeadline = Environment.TickCount64 + 20_000;
+        while (!File.Exists(acknowledgment) && Environment.TickCount64 < acknowledgmentDeadline)
+            Thread.Sleep(25);
+        return File.Exists(acknowledgment) && File.ReadAllText(acknowledgment).Trim() == settings[0]
+            ? result.ExitCode
+            : 82;
     }
 }

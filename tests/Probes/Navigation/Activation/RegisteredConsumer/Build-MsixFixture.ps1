@@ -8,8 +8,11 @@ $allowed = [IO.Path]::GetFullPath((Join-Path $root 'artifacts/windows-activation
 $proof = (Resolve-Path -LiteralPath $Fixture).Path
 if (-not $proof.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw 'Fixture must be within the isolated activation artifact directory.' }
 $manifest = Get-Content -LiteralPath (Join-Path $proof 'manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.schemaVersion -ne 1 -or $manifest.scheme -notmatch '^lucent[0-9a-f]{32}$') { throw 'Unsupported fixture identity.' }
+if ($manifest.schemaVersion -ne 2 -or $manifest.scheme -notmatch '^lucent[0-9a-f]{32}$' -or $manifest.packageSourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Unsupported fixture identity.' }
+if ((Get-FileHash -LiteralPath (Join-Path $proof 'candidate-descriptor.json') -Algorithm SHA256).Hash -cne $manifest.candidateDescriptorSha256) { throw 'Candidate descriptor changed after fixture preparation.' }
 if (-not [IO.Path]::IsPathFullyQualified($GuestOutputDirectory)) { throw 'Provide an absolute guest output directory.' }
+$expectedOutput = 'C:\LucentOutput\app-evidence\' + $manifest.scheme
+if (-not [string]::Equals($GuestOutputDirectory.TrimEnd('\'), $expectedOutput, [StringComparison]::OrdinalIgnoreCase)) { throw "Guest output must be the mapped evidence directory $expectedOutput." }
 $sourceExe = Join-Path $proof 'publish/Consumer.exe'
 if ((Get-FileHash -LiteralPath $sourceExe -Algorithm SHA256).Hash -ne $manifest.executableSha256) { throw 'Fixture executable changed after preparation.' }
 $makeAppx = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe'
@@ -63,6 +66,7 @@ $package = Join-Path $build 'Lucent.ActivationFixture.msix'
 & $makeAppx pack /d $stage /p $package /h SHA256
 if ($LASTEXITCODE) { throw 'MakeAppx failed to build the unsigned MSIX fixture.' }
 [ordered]@{
+    schemaVersion = 2
     packageIdentity = $identity
     publisher = 'CN=Lucent Activation Fixture'
     protocolScheme = $scheme
@@ -70,7 +74,9 @@ if ($LASTEXITCODE) { throw 'MakeAppx failed to build the unsigned MSIX fixture.'
     manifestSha256 = (Get-FileHash -LiteralPath (Join-Path $stage 'AppxManifest.xml') -Algorithm SHA256).Hash
     packageSha256 = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash
     buildScriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
-    packageSourceCommit = $manifest.sourceCommit
+    packageSourceCommit = $manifest.packageSourceCommit
+    fixturePreparationCommit = $manifest.fixturePreparationCommit
+    candidateDescriptorSha256 = $manifest.candidateDescriptorSha256
     signed = $false
     installed = $false
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $build 'msix-evidence.json')

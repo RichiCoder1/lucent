@@ -12,6 +12,7 @@ $installAttempted = $false
 $signatureVerified = $false
 $installedExecutableSha256 = $null
 $shellProcesses = @()
+$knownHandlerIds = [Collections.Generic.HashSet[int]]::new()
 $runError = $null
 $cleanupErrors = [Collections.Generic.List[string]]::new()
 $verified = $false
@@ -27,29 +28,59 @@ function Open-Uri([string] $uri) {
     $start = [Diagnostics.ProcessStartInfo]::new($uri)
     $start.UseShellExecute = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-    $process = [Diagnostics.Process]::Start($start)
-    if ($null -eq $process) { throw 'Shell omitted a process handle for exit verification.' }
-    $script:shellProcesses += $process
-    return $process
+    $broker = [Diagnostics.Process]::Start($start)
+    if ($null -ne $broker) { $broker.Dispose() }
+}
+function Open-VerifiedHandler([int] $processId) {
+    $process = [Diagnostics.Process]::GetProcessById($processId)
+    try {
+        $expected = Join-Path $installedPackage.InstallLocation 'Consumer.exe'
+        if (-not [string]::Equals($process.MainModule.FileName, $expected, [StringComparison]::OrdinalIgnoreCase)) { throw "Recorded process $processId is not the installed fixture EXE." }
+        if ($process.Handle -eq [IntPtr]::Zero) { throw "Recorded process $processId has no waitable handle." }
+        return $process
+    }
+    catch { $process.Dispose(); throw }
 }
 function Wait-Completion([Diagnostics.Process] $process, [string] $kind, [int] $exit, [string] $failure) {
-    if (-not $process.WaitForExit(8000)) { throw "Packaged process $($process.Id) did not exit within eight seconds." }
-    if ($process.ExitCode -ne $exit) { throw "Packaged process $($process.Id) exited $($process.ExitCode), expected $exit." }
     $path = Join-Path $session.guestAppOutput ("process-$($process.Id).txt")
-    $deadline = [DateTime]::UtcNow.AddSeconds(2)
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while (-not (Test-Path -LiteralPath $path) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
     if (-not (Test-Path -LiteralPath $path)) { throw "Packaged process $($process.Id) omitted completion evidence." }
     $completion = ConvertFrom-StringData (Get-Content -LiteralPath $path -Raw)
     if ($completion.kind -ne $kind -or $completion.exit -ne "$exit" -or $completion.failure -ne $failure) { throw "Packaged process $($process.Id) reported an unexpected activation result." }
+    $acknowledgment = Join-Path $session.guestAppOutput ("ack-$($process.Id).txt")
+    $temporary = "$acknowledgment.$([Guid]::NewGuid().ToString('N')).tmp"
+    Set-Content -LiteralPath $temporary -Value $session.instanceKey
+    Move-Item -LiteralPath $temporary -Destination $acknowledgment
+    if (-not $process.WaitForExit(8000)) { throw "Packaged process $($process.Id) did not exit within eight seconds." }
+    if ($process.ExitCode -ne $exit) { throw "Packaged process $($process.Id) exited $($process.ExitCode), expected $exit." }
+}
+function Wait-NewHandler([string] $kind, [int] $exit, [string] $failure) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $fresh = @(Get-ChildItem -LiteralPath $session.guestAppOutput -Filter 'process-*.txt' -File | Where-Object {
+            $_.BaseName -match '^process-([0-9]+)$' -and -not $script:knownHandlerIds.Contains([int]$Matches[1])
+        })
+        if ($fresh.Count -gt 1) { throw 'More than one unclaimed packaged handler completed for a single shell URI.' }
+        if ($fresh.Count -eq 1) { break }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($fresh.Count -ne 1 -or $fresh[0].BaseName -notmatch '^process-([0-9]+)$') { throw 'Shell URI produced no single fresh packaged handler completion.' }
+    $processId = [int]$Matches[1]
+    $process = Open-VerifiedHandler $processId
+    $script:knownHandlerIds.Add($processId) | Out-Null
+    $script:shellProcesses += $process
+    Wait-Completion $process $kind $exit $failure
 }
 
 try {
     if ($env:USERNAME -ne 'WDAGUtilityAccount' -or -not [string]::Equals($env:USERPROFILE, 'C:\Users\WDAGUtilityAccount', [StringComparison]::OrdinalIgnoreCase)) { throw 'MSIX signing and installation require the disposable Windows Sandbox guest identity.' }
     $session = Get-Content -LiteralPath (Join-Path $guestInput 'session.json') -Raw | ConvertFrom-Json
     $marker = (Get-Content -LiteralPath (Join-Path $guestInput 'sandbox-marker.txt') -Raw).Trim()
-    if ($session.schemaVersion -ne 1 -or $session.nonce -ne $Nonce -or $marker -ne $Nonce -or $session.runId -notmatch '^[0-9a-f]{32}$' -or $session.protocolScheme -notmatch '^lucent[0-9a-f]{32}$' -or $session.packageIdentity -ne ('Lucent.Probe.' + $session.protocolScheme.Substring('lucent'.Length)) -or $session.publisher -ne 'CN=Lucent Activation Fixture') { throw 'Sandbox input identity or marker is invalid.' }
-    $expectedOutput = 'C:\Users\WDAGUtilityAccount\AppData\Local\Temp\LucentActivation\' + $session.protocolScheme
+    if ($session.schemaVersion -ne 2 -or $session.nonce -ne $Nonce -or $marker -ne $Nonce -or $session.runId -notmatch '^[0-9a-f]{32}$' -or $session.protocolScheme -notmatch '^lucent[0-9a-f]{32}$' -or $session.instanceKey -notmatch '^Lucent\.RegisteredProbe\.[0-9a-f]{32}$' -or $session.packageSourceCommit -notmatch '^[0-9a-f]{40}$' -or $session.packageIdentity -ne ('Lucent.Probe.' + $session.protocolScheme.Substring('lucent'.Length)) -or $session.publisher -ne 'CN=Lucent Activation Fixture') { throw 'Sandbox input identity or marker is invalid.' }
+    $expectedOutput = 'C:\LucentOutput\app-evidence\' + $session.protocolScheme
     if (-not [string]::Equals($session.guestAppOutput, $expectedOutput, [StringComparison]::OrdinalIgnoreCase)) { throw 'Packaged fixture output is outside its isolated guest directory.' }
+    if (Test-Path -LiteralPath $expectedOutput) { throw 'Packaged fixture evidence already exists; refusing a repeated or stale run.' }
     $packageInput = Join-Path $guestInput 'fixture.msix'
     $signToolInput = Join-Path $guestInput 'signtool.exe'
     $guestScript = Join-Path $guestInput 'Invoke-MsixGuest.ps1'
@@ -88,22 +119,23 @@ try {
     $invalidUri = "${scheme}://navigation:9/notes/12"
     $warmUri = "${scheme}://navigation/notes/%2F?tab=two"
     $lastUri = "${scheme}://navigation/notes/13?tab=three"
-    $coldProcess = Open-Uri $coldUri
+    Open-Uri $coldUri
     $cold = Wait-Event 1
     if ($cold.kind -ne 'Protocol' -or $cold.delivery -ne 'Cold' -or $cold.provenance -ne 'UntrustedExternal' -or [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($cold.rawBase64)) -cne $coldUri) { throw 'Packaged cold URI or provenance changed.' }
-    $primaryPath = (Get-Process -Id ([int]$cold.pid) -ErrorAction Stop).Path
-    if (-not [string]::Equals($primaryPath, (Join-Path $installedPackage.InstallLocation 'Consumer.exe'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Cold shell URI was handled outside the installed package.' }
-    $invalidProcess = Open-Uri $invalidUri
-    Wait-Completion $invalidProcess 'RedirectFailed' 2 'RejectedInput'
+    $coldProcess = Open-VerifiedHandler ([int]$cold.pid)
+    $knownHandlerIds.Add($coldProcess.Id) | Out-Null
+    $shellProcesses += $coldProcess
+    Open-Uri $invalidUri
+    Wait-NewHandler 'RedirectFailed' 2 'RejectedInput'
     if (Test-Path -LiteralPath (Join-Path $session.guestAppOutput 'event-0002.txt')) { throw 'Rejected packaged secondary changed primary inbox.' }
-    $warmProcess = Open-Uri $warmUri
+    Open-Uri $warmUri
     $warm = Wait-Event 2
     if ($warm.kind -ne 'Protocol' -or $warm.delivery -ne 'Redirected' -or $warm.provenance -ne 'UntrustedExternal' -or [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($warm.rawBase64)) -cne $warmUri) { throw 'Packaged warm URI or provenance changed.' }
-    Wait-Completion $warmProcess 'Redirected' 0 'None'
-    $lastProcess = Open-Uri $lastUri
+    Wait-NewHandler 'Redirected' 0 'None'
+    Open-Uri $lastUri
     $last = Wait-Event 3
     if ($last.kind -ne 'Protocol' -or $last.delivery -ne 'Redirected' -or [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($last.rawBase64)) -cne $lastUri) { throw 'Final packaged warm URI changed.' }
-    Wait-Completion $lastProcess 'Redirected' 0 'None'
+    Wait-NewHandler 'Redirected' 0 'None'
     if ($cold.pid -ne $warm.pid -or $cold.pid -ne $last.pid) { throw 'Packaged redirect created a new primary.' }
     Wait-Completion $coldProcess 'Primary' 0 'None'
     $verified = $true
@@ -115,7 +147,7 @@ finally {
             try {
                 if (-not $process.HasExited) {
                     $actual = $process.MainModule.FileName
-                    if ($null -eq $installedPackage -or -not $actual.StartsWith($installedPackage.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "Process $($process.Id) is not owned by the exact installed package; refusing to stop it." }
+                    if ($null -eq $installedPackage -or -not [string]::Equals($actual, (Join-Path $installedPackage.InstallLocation 'Consumer.exe'), [StringComparison]::OrdinalIgnoreCase)) { throw "Process $($process.Id) is not the exact installed fixture; refusing to stop it." }
                     $process.Kill()
                     if (-not $process.WaitForExit(3000)) { throw "Owned package process $($process.Id) did not stop." }
                 }
@@ -141,10 +173,6 @@ finally {
             catch { $cleanupErrors.Add($_.Exception.Message) }
         }
     }
-    try {
-        if ($identityValidated -and (Test-Path -LiteralPath $session.guestAppOutput)) { Copy-Item -LiteralPath $session.guestAppOutput -Destination (Join-Path $guestOutput 'app-evidence') -Recurse }
-    }
-    catch { $cleanupErrors.Add($_.Exception.Message) }
     $result = [ordered]@{
         runId = if ($null -ne $session) { $session.runId } else { $null }
         succeeded = ($verified -and $null -eq $runError -and $cleanupErrors.Count -eq 0)
