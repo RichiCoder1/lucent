@@ -6,6 +6,10 @@ The prior Avalonia implementation and Native validation spike are preserved on `
 
 Record architectural inspirations and dependencies in `CREDITS.md` before adopting them. Prefer executable, fail-closed evidence over prose-only claims.
 
+## Subagent models
+
+Use Sol 6.1 (`gpt-6.1-sol`) for all subagent coding work, including implementation, fixes, refactoring and tests. Use Astra 6 (`gpt-6-astra`) with `xhigh` reasoning for oracle consultation and adversarial review when warranted; have Sol 6.1 workers implement the resulting changes. Apply this policy to nested delegation as well.
+
 ## Agent skills
 
 ### Issue tracker

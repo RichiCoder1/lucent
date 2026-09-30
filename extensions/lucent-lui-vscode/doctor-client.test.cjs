@@ -333,6 +333,24 @@ test("timeout terminates a nonresponding doctor and returns a stable state", asy
     const result = await runDoctor(runOptions(input, { spawn: fake.spawn, timeoutMs: 25 }));
     assert.equal(result.reason, "doctor-timeout");
     assert.equal(fake.calls[1].child.killCount, 1);
+
+    // The test runner can keep an unreferenced deadline alive. A standalone caller cannot.
+    const script = [
+        'const {EventEmitter}=require("node:events");',
+        'const {PassThrough}=require("node:stream");',
+        `const {runDoctor}=require(${JSON.stringify(path.join(__dirname, "doctor-client.js"))});`,
+        fakeSpawn.toString(),
+        `const fake=fakeSpawn([${JSON.stringify(runtimeResponse())},()=>{}]);`,
+        `runDoctor({...${JSON.stringify(runOptions(input, { timeoutMs: 25 }))},spawn:fake.spawn})`,
+        '.then(result=>console.log(JSON.stringify({reason:result.reason,killCount:fake.calls[1].child.killCount})),',
+        'error=>{console.error(error);process.exitCode=1;});'
+    ].join("\n");
+    const standalone = childProcess.spawnSync(process.execPath, ["-e", script], {
+        cwd: os.tmpdir(), encoding: "utf8", timeout: 2_000, windowsHide: true
+    });
+    assert.equal(standalone.error, undefined);
+    assert.equal(standalone.status, 0, standalone.stderr);
+    assert.equal(standalone.stdout.trim(), JSON.stringify({ reason: "doctor-timeout", killCount: 1 }));
 });
 
 test("cancellation kills the doctor and ignores late output", async t => {

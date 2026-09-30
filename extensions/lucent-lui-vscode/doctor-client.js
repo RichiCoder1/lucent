@@ -259,8 +259,8 @@ function runProcess(program, args, { spawn, signal, timeoutMs, maxOutputBytes, e
                 terminate("output-too-large");
             }
         };
+        // Keep the pending result alive even when the child no longer owns an event-loop handle.
         deadline = setTimeout(() => terminate("timeout"), timeoutMs);
-        deadline.unref?.();
         child.stdout.on("data", onOutput);
         child.stderr.on("data", onErrorOutput);
         child.once("error", () => {

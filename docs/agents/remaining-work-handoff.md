@@ -7,11 +7,17 @@ records and issues.
 
 ## Current constraints
 
-The owner reauthorized Computer Use again on September 30, but its first app-list
-call immediately reported another physical Escape interruption before any window
-inspection or input. A fresh question to reset and retry is pending; wait for the
-owner's answer before further desktop input. The prior connection was reset and
-the untouched Issue Browser fixture was stopped; this attempt launched no app.
+Subagent coding work uses Sol 6.1 (`gpt-6.1-sol`). Astra 6 (`gpt-6-astra`) with
+`xhigh` reasoning remains available for oracle consultation and adversarial review
+when warranted; Sol 6.1 workers implement the resulting changes. This applies to
+nested delegation and supersedes the earlier Sol/Luna worker mix and the withdrawn
+request from when Sol 6.1 was unavailable.
+
+The owner reauthorized work and UI/focus testing on September 30. Computer Use
+now connects successfully after resetting the previous connection. The corrected
+Component Browser compact header has been checked in dark and light themes;
+the official 101.1 Issue Browser restart replay is in progress. Earlier Escape
+interruptions remain failed attempts and are not walkthrough evidence.
 Earlier representative Component Browser and Issue Browser
 presentation checks ran, as did a real Issue Browser journal restart.
 Computer Use's Down and Right commands arrived at SDL as keypad 2 and keypad 6,
@@ -103,6 +109,15 @@ observations pass. Evidence and failed logs are in `artifacts/ci103-package-fail
 The full nested published-server replay remains for CI because local D: capacity
 blocked the isolated cache restore; do not claim a completed local pipeline.
 `101.1` remains the latest confirmed publication; #246/#247 await official delivery.
+
+Commit `18e1d549` pushed the static environment doctor and reviewed onboarding
+slice. CI 104 passed the previously failing published-server checks, then both
+jobs failed the same doctor timeout test: an unreferenced timer let Node exit
+before returning its pending result. The correction keeps that deadline alive;
+the existing test now includes an isolated Node invocation that failed before
+the fix. All 89 extension tests pass, including real owned-process-tree cleanup.
+Failed CI logs and diagnosis are under `artifacts/ci104-failure`. Publication is
+still pending; these results do not complete the remaining #248 adapters.
 
 | Work | Current boundary | Next action |
 | --- | --- | --- |
