@@ -6,6 +6,56 @@ namespace Lucent.Core.Tests;
 public sealed class CommandContracts
 {
     [TestMethod]
+    public void CommandScopeKeepsFlexibleContentWithinAssignedHeight()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "command-scope-constrained-layout");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var flexible = Style.Empty.MainGrow(1).MainShrink(1).MinWidth(0).MinHeight(0);
+        composition.Root.Present(theme, author: Style.Empty.Axis(LayoutAxis.Column));
+        var scope = composition.Mount(
+            composition.Root,
+            theme,
+            Components.CommandScope(
+                [
+                    Components.Column(
+                        [
+                            Components.Column([], Style.Empty.Height(354)),
+                            Components.Column([], flexible.Height(160)).Named("flexible-body"),
+                            Components.Column([], Style.Empty.Height(38)).Named("footer"),
+                        ],
+                        flexible
+                    ),
+                ],
+                new CommandBindings([])
+            )
+        );
+        composition.Flush();
+        var body = composition.Elements().Single(element => element.Name == "flexible-body");
+        var footer = composition.Elements().Single(element => element.Name == "footer");
+        foreach (var height in new[] { 520f, 800f })
+        {
+            using var scene = SceneLayout.Project(
+                composition,
+                new(480, height, 1),
+                new EmptyShaper()
+            );
+            Assert.AreEqual(
+                new LayoutRect(0, 0, 480, height),
+                scene.Boxes.Single(box => box.Identity.ElementId == scope.Id).Bounds
+            );
+            Assert.AreEqual(
+                new LayoutRect(0, 354, 480, height - 392),
+                scene.Boxes.Single(box => box.Identity.ElementId == body.Id).Bounds
+            );
+            Assert.AreEqual(
+                new LayoutRect(0, height - 38, 480, 38),
+                scene.Boxes.Single(box => box.Identity.ElementId == footer.Id).Bounds
+            );
+        }
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public void CommandButtonsObserveAvailabilityGuardStaleInvocationsAndBorrowLifetime(bool icon)

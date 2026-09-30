@@ -21,6 +21,7 @@ public static partial class Components
                     author: Style
                         .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
                         .Set(LayoutProperties.MainGrow, 1f)
+                        .Set(LayoutProperties.MainShrink, 1f)
                 );
                 root.AttachBehaviors(new CommandScopeBehavior(bindings));
                 context.Mount(root, content);
