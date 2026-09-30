@@ -69,6 +69,8 @@ if ($LASTEXITCODE) { throw 'MakeAppx failed to build the unsigned MSIX fixture.'
     guestOutputDirectory = $GuestOutputDirectory
     manifestSha256 = (Get-FileHash -LiteralPath (Join-Path $stage 'AppxManifest.xml') -Algorithm SHA256).Hash
     packageSha256 = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash
+    buildScriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
+    packageSourceCommit = $manifest.sourceCommit
     signed = $false
     installed = $false
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $build 'msix-evidence.json')

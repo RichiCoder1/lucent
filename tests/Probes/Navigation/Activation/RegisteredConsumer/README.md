@@ -55,3 +55,24 @@ The manifest follows [Microsoft's manual desktop MSIX guide](https://learn.micro
 and [protocol extension reference](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions).
 The signed guest step must follow the [MSIX signing guide](https://learn.microsoft.com/en-us/windows/msix/package/sign-msix-package-guide);
 Microsoft documents the elevated all-users behavior of [unsigned executable packages](https://learn.microsoft.com/en-us/windows/msix/package/unsigned-package).
+
+For a disposable packaged test, build the MSIX with guest output exactly
+`C:\Users\WDAGUtilityAccount\AppData\Local\Temp\LucentActivation\<scheme>`
+where `<scheme>` is the prepared manifest's random scheme. Then call
+`Prepare-MsixSandbox.ps1 -MsixBuild <msix-build-directory>`; the default only
+creates a reviewed input bundle, a fresh writable evidence directory, and a
+`.wsb` config. The config maps input read-only, maps only that fresh evidence
+directory writable, disables networking and device/clipboard redirection, and
+runs `Invoke-MsixGuest.ps1` after guest logon. The guest checks its Sandbox user
+and nonce marker before any certificate trust or install; it signs with a new
+guest-only certificate, installs the exact identity, checks actual packaged URI
+deliveries, and removes the package and certificate in `finally`.
+
+The optional `-RunSandbox` path is held until the desktop/session owner reviews
+and authorizes that concrete run. It starts one named Sandbox session, waits at
+most two minutes for guest evidence, then stops only that session ID. Failure to
+stop is reported separately and requires owner inspection. Never run the guest
+script on the host, map the source checkout writable, or use an existing signing
+identity. See [Microsoft's Sandbox configuration](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file)
+and [CLI](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli)
+for the mapped-folder, logon command and per-session lifecycle contract.
