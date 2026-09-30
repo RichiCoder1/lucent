@@ -233,3 +233,16 @@ for mutable path construction and `Detach` ownership. Lucent retains its pinned
 SkiaSharp 4.151.1 dependency; Core records its own bounded immutable commands and
 the existing Skia adapter performs replay. No upstream implementation is copied,
 and no renderer dependency enters Core.
+
+## Optional Windows activation feasibility probe
+
+The console-only #222 probe uses Microsoft.WindowsAppSDK.Foundation 2.3.12
+(Windows App SDK `license.txt` terms) and Microsoft.Windows.CsWinRT 2.3.1 (MIT).
+Its locked dependency closure stays within `tests/Probes/Navigation/Activation`;
+no shipped Lucent package acquires these dependencies from the probe.
+Microsoft's [AppInstance implementation](https://github.com/microsoft/WindowsAppSDK/blob/main/dev/AppLifecycle/AppInstance.cpp)
+documents the native mutex held while an instance key is owned; registration and
+release must stay on the same native thread. C#/WinRT's
+[URI projection](https://github.com/microsoft/CsWinRT/blob/master/src/WinRT.Runtime/Projections/Uri.cs)
+maps raw WinRT URI text to `System.Uri.OriginalString`. The probe independently
+checks both boundaries. No upstream implementation source is copied.

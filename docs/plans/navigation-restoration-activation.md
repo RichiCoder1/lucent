@@ -183,6 +183,8 @@ are installer inputs, not framework defaults. Test with isolated fixture identit
    initialize the selected activation runtime, capture cold arguments, attach the
    redirected-activation receiver, and claim the configured AppInstance key. Cover
    the receiver-subscription/claim race with a bounded startup inbox.
+   Register and release that key on the same native owner thread: AppInstance retains
+   an owned native mutex. Do not let asynchronous startup move cleanup to a pool thread.
 2. A secondary process redirects and awaits delivery with a five-second bound. On
    success it exits before initializing the Lucent application; delivery acknowledgement
    means received, not that route guards accepted navigation. On timeout/failure it
@@ -233,3 +235,23 @@ Record exact source/package identities and unexecuted delivery modes in the exis
 issues. Update public authoring documentation and package/architecture inventories
 when implementation lands. No new issue, production scheme, registration mutation or
 multi-window policy is required to begin the scoped framework work.
+
+## Dependency probe result
+
+The September 29 console-only probe in
+`tests/Probes/Navigation/Activation` pins Foundation 2.3.12 and C#/WinRT 2.3.1.
+Its locked self-contained NativeAOT closure initializes, preserves four synthetic
+URI inputs across the native projection, and redirects launch arguments between
+two hidden processes. Both processes exit zero when registration and cleanup stay
+on the same thread. The initial asynchronous-main attempt delivered the request
+but failed shutdown with `0xC0000409`; its evidence remains under
+`artifacts/activation-probe`. The corrected durable fixture passed under
+`artifacts/windows-activation-probe/5e12c3d20c8b4865acfc0e63f744242b` with executable
+SHA-256 `C1DF9FB85ABD2A573DAF0FE8881294B083E01EF5C15637EA40356B4E1E771207`.
+
+The .NET raw URI boundary is `IProtocolActivatedEventArgs.Uri.OriginalString`,
+which C#/WinRT builds from WinRT's RawUri. The adapter must still validate it before
+using any normalized Uri properties. The probe does not establish registered OS
+protocol delivery, MSIX deployment, foreground behavior, or application integration;
+those remain explicit #222 work. No protocol association or runtime installation
+was performed.
