@@ -13,6 +13,11 @@ and clean process exits. A versioned application adapter is not implemented by
 this fixture. OS-registered protocol delivery, Windows foreground policy and
 MSIX delivery remain separate proof targets.
 
+The entry point explicitly requires STA, matching Lucent's Windows applications.
+The original MTA console result alone did not establish that threading boundary.
+The STA NativeAOT run also passes redirection and same-thread key cleanup without
+a window; keep that assertion when changing startup or waiting behavior.
+
 Keep instance-key ownership on one native thread. An initial asynchronous-main
 experiment delivered its request, then exited with `0xC0000409` when key release
 ran on another thread. Microsoft's implementation retains an owned native mutex.

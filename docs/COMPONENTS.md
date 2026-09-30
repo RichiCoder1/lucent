@@ -92,12 +92,23 @@ field context without reflected property paths:
 ```
 
 The visual required marker is absent from `FieldContext.AccessibleName`.
-`Components.TextField(FieldContext, ...)` designates the primary editor,
+`Components.TextField(FieldContext, ...)` and `Components.TextArea(FieldContext, ...)`
+designate the primary editor,
 shares the field's `FocusTarget`, and adds label, help, error, invalid, and
 read-only metadata to the editor's existing semantic declaration. A custom
 editor can use `FieldContext.Relationships` and `FocusTarget` in its own single
 semantic owner. A second primary `TextField` using the same context fails the
-mount transaction.
+mount transaction. The multiline overload accepts an existing `EditorSession`;
+the field borrows its document state and adds its own label and validation
+relationships. Keep the session above a responsive branch when it must survive
+that branch being unmounted.
+
+Use `Field.labelStyle`, `helpStyle`, and `errorStyle` to style the corresponding
+visible elements; `style` belongs to the outer layout and the editor factory owns
+the editor's style. These hooks preserve the field's semantic relationships.
+`PlaceholderTextColor` controls an empty editor's hint independently of entered
+`TextColor`, including in retained rendering. A placeholder is not a replacement
+for a persistent label.
 
 Changing a mounted field's help reader refreshes the primary editor's semantic
 help without replacing its identity. Returning validation to valid removes its

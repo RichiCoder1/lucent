@@ -4,6 +4,32 @@ Lucent applications start with a stock surface and readable foreground. Built-in
 
 Stock focus rings and disabled text keep contrast against their resolved control state, including pressed and high-contrast states. The Windows host updates `ThemeContext.Appearance` when system settings change; applications that map appearance to a theme therefore update mounted controls without remounting them.
 
+## Action emphasis and selection
+
+`ButtonProperties.Role` selects `Primary` (the default), `Secondary`, `Quiet`, or
+`Destructive` stock paint without changing invocation or accessibility semantics.
+The same property applies to text, icon and composed buttons:
+
+```lui
+style SupportingAction {
+    ButtonProperties.Role: ButtonRole.Secondary;
+}
+
+<Button command={saveCommand} style={SupportingAction}>Save now</Button>
+```
+
+The `command` overload borrows an `ApplicationCommand`, observes its availability,
+and checks admission again when invoked. It does not dispose the command. Author
+styles may further disable the button, but cannot enable a disabled command.
+`leadingIcon={LucideIcons.Save}` accepts the same live-expression lifting as other
+reader attributes, including when the label is body content.
+
+Use selection controls for a persistent choice. Selected fill takes precedence
+over hover; pressed feedback takes precedence over selected fill. Keyboard focus
+remains independently visible. `RadioGroup.optionsStyle` styles the actual options
+region, so a horizontal group can set row layout, gaps and `TextWrap.NoWrap` without
+changing the surrounding label or selection semantics.
+
 ## Focus continuity
 
 `composition.Input.FocusRecovery = FocusRecoveryPolicy.NearestAvailable` opts an application into recovery when responsive participation or virtualization removes the focused owner. The next fresh scene prefers the surviving owner, then its nearest eligible focusable ancestor (such as a scroll viewport), then the next tab stop near the old document order, falling back to the previous last stop. If no eligible target survives, focus stays cleared. `Clear` is the default for applications that manage their own focus handoff.

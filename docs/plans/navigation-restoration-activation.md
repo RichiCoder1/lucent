@@ -255,3 +255,15 @@ using any normalized Uri properties. The probe does not establish registered OS
 protocol delivery, MSIX deployment, foreground behavior, or application integration;
 those remain explicit #222 work. No protocol association or runtime installation
 was performed.
+
+The probe now explicitly uses an `[STAThread]` entry point, matching Lucent apps.
+Its September 29 NativeAOT run at
+`artifacts/windows-activation-probe/03e57c25528c491a9ba0d620e707a3eb` confirms both
+processes report STA, redirection succeeds, and registration/cleanup remain on
+thread 1. Both exit zero; executable SHA-256 is
+`E2D0568B6E95E19FB2B79A6F14ECF93D93EFEA4587603F844C1E774AF5D9FB83`.
+This closes the apartment gap in the earlier MTA-only probe without claiming OS
+registration or window behavior. Microsoft's
+[single-instance guidance](https://learn.microsoft.com/en-us/windows/apps/develop/launch/multi-instance-apps)
+remains the reference for activation ordering; changes to the waiting strategy
+require the same console proof rather than assuming cross-apartment behavior.
