@@ -565,7 +565,7 @@ try {
     foreach ($case in $metadataCases) {
         $expected = $case.Expected
         $expectedPath = $case.Name + '/' + $expected.Path
-        Assert-InventoryAsset $metadataInventory $expectedPath $expected.Format $expected.Width $expected.Height $expected.Density $expected.RelativeWidth $expected.RelativeHeight | Out-Null
+        Assert-InventoryAsset $metadataInventory $expectedPath $expected.Format $expected.Width $expected.Height $expected.Density $expected['RelativeWidth'] $expected['RelativeHeight'] | Out-Null
     }
     $invalidMetadata = @(
         @{ Name='jpeg-malformed-exif-offset'; Bytes=(New-JpegWithExif $asymmetricJpeg $true $true); File='bad.jpg'; Path='bad.jpg'; Density='2' },
@@ -684,7 +684,7 @@ try {
     )
     foreach ($case in $negativeCases) {
         $caseRoot = Join-Path $negativeRoot $case.Name
-        $caseProject = New-CaseProject $caseRoot $case.Name $case.Items $case.Files ([bool]$case.Application)
+        $caseProject = New-CaseProject $caseRoot $case.Name $case.Items $case.Files ([bool]$case['Application'])
         Build-ProbeExpectedFailure $caseRoot $caseProject $case.Name $case.Code | Out-Null
         Assert-That (!(Get-ChildItem -LiteralPath $caseRoot -Recurse -Filter 'Lucent.Assets.g.cs' -File -ErrorAction SilentlyContinue)) "Failed catalog '$($case.Name)' emitted generated source."
     }
