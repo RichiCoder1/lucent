@@ -93,7 +93,8 @@ function Check-ServerMutation([string] $Name, [hashtable] $Changes, [bool] $Inve
 }
 function Package-Bytes([string] $Id, [string] $PackageVersion = $version, [string] $Commit = $source, [string] $DependencyVersion = $version) {
     $xml = "<package><metadata><id>$Id</id><version>$PackageVersion</version><repository type=`"git`" commit=`"$Commit`"/><dependencies><dependency id=`"Lucent.Core`" version=`"$DependencyVersion`"/></dependencies></metadata></package>"
-    return ,([Text.Encoding]::UTF8.GetBytes($xml))
+    # NuGet emits a UTF-8 preamble; use actual producer encoding in these fixtures.
+    return ,([Text.Encoding]::UTF8.GetPreamble() + [Text.Encoding]::UTF8.GetBytes($xml))
 }
 
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot "../artifacts/release-set-fixtures/$([Guid]::NewGuid().ToString('N'))" }

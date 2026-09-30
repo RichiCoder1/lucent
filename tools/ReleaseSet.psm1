@@ -102,18 +102,18 @@ function Read-LuiArchiveJson($Archive, [string] $Name) {
 }
 
 function Read-LuiArchiveXml($Archive, [string] $Name) {
-    $text = [IO.StringReader]::new([Text.Encoding]::UTF8.GetString((Read-LuiArchiveBytes $Archive $Name)))
+    $stream = [IO.MemoryStream]::new((Read-LuiArchiveBytes $Archive $Name), $false)
     $settings = [Xml.XmlReaderSettings]::new()
     $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
     $settings.XmlResolver = $null
-    $reader = [Xml.XmlReader]::Create($text, $settings)
+    $reader = [Xml.XmlReader]::Create($stream, $settings)
     try {
         $document = [Xml.XmlDocument]::new()
         $document.XmlResolver = $null
         $document.Load($reader)
         return $document
     }
-    finally { $reader.Dispose(); $text.Dispose() }
+    finally { $reader.Dispose(); $stream.Dispose() }
 }
 
 function Assert-LuiSame($Actual, $Expected, [string] $Context) {
