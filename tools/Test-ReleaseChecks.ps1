@@ -8,6 +8,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'ReleaseSet.psm1') -Force
 $root = Split-Path $PSScriptRoot -Parent
+if ($env:NUGET_PACKAGES -and -not [IO.Path]::IsPathFullyQualified($env:NUGET_PACKAGES)) {
+    $env:NUGET_PACKAGES = [IO.Path]::GetFullPath((Join-Path $root $env:NUGET_PACKAGES))
+}
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_REPOSITORY -cne 'RichiCoder1/lucent') {
     throw 'Release check records are produced by the repository CI. Use Test-Repository locally.'
 }

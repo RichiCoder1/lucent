@@ -52,6 +52,7 @@ public sealed class ProjectRequirementsContracts
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
                 <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+                <NuGetAudit>false</NuGetAudit>
                 <NuGetLockFilePath>../Shared/custom.lock.json</NuGetLockFilePath>
               </PropertyGroup>
               <ItemGroup>
@@ -73,7 +74,6 @@ public sealed class ProjectRequirementsContracts
             fixture,
             "restore",
             project,
-            "-p:NuGetAudit=false",
             "--ignore-failed-sources"
         );
         Assert.AreEqual(0, restore.ExitCode, restore.Error);

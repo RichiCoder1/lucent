@@ -12,6 +12,9 @@ if ($Suite -ne 'Managed' -and ($Project.Count -ne 0 -or -not [string]::IsNullOrW
     throw '-Project and -Filter apply only to the Managed suite.'
 }
 $root = Split-Path $PSScriptRoot -Parent
+if ($env:NUGET_PACKAGES -and -not [IO.Path]::IsPathFullyQualified($env:NUGET_PACKAGES)) {
+    $env:NUGET_PACKAGES = [IO.Path]::GetFullPath((Join-Path $root $env:NUGET_PACKAGES))
+}
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'
 if (-not (Test-Path $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $configuration = 'Release'
