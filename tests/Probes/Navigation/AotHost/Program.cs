@@ -71,6 +71,8 @@ Console.WriteLine("generated-navigation-native-aot=pass");
 VerifyRestoration(descriptors, reference, projectId);
 VerifyMountedRestoration(descriptors, projectId);
 Console.WriteLine("generated-navigation-restoration=pass");
+VerifyJournalRestoration(descriptors, projectId);
+Console.WriteLine("generated-navigation-journal=pass");
 
 static ComponentRequirementSource Source(string member) =>
     new(member, "generated-route-context", "Program.cs", 1, 1);
@@ -281,6 +283,143 @@ static void VerifyMountedRestoration(RouteDescriptorSet descriptors, Guid projec
         throw new InvalidOperationException(
             "Mounted restoration did not finish the application lifecycle cleanly."
         );
+}
+
+static void VerifyJournalRestoration(RouteDescriptorSet descriptors, Guid projectId)
+{
+    // Fixed wire input exercises the shipped static codec under trimming/AOT. The
+    // behavior matrix and native focus/scroll transport remain in their owner suites.
+    const string snapshot =
+        """{"schema":"lucent.navigation","version":1,"scope":"package-journal-v1","mode":"journal","activeKey":7,"entries":[{"key":7,"definition":"project","location":"/projects/11111111-1111-1111-1111-111111111111?view=Activity"},{"key":42,"definition":"issue","location":"/projects/11111111-1111-1111-1111-111111111111/issues/42?view=Activity","state":{"codec":"lucent.interaction","version":1,"focus":"issue-heading","viewports":[{"target":"issue-body","x":0,"y":42}]}}]}""";
+    var restoration = new NavigationRestoration(
+        descriptors.Table,
+        "package-journal-v1",
+        AppRoutes.Project(projectId),
+        static _ => true,
+        options: new(
+            NavigationRestorationMode.Journal,
+            stateCodecs: NavigationRestorationStateCodecs.Interaction
+        )
+    );
+    NavigationSession? navigation = null;
+    NavigationInteraction? interaction = null;
+    using var outlet = new RouteOutletHandle();
+    var mountedCalls = 0;
+    var bundle = RouteBundle.Create(
+        descriptors,
+        level => new RouteDestination(
+            typeof(AppRoutes),
+            level.Id.Value == "project"
+                ? Components.RouterOutlet()
+                : ComponentRecipe.Defer(
+                    "journal-issue",
+                    ComponentRequirements.Context<RouteContext<IssueRoute>>(Source("journal")),
+                    (_, context) =>
+                    {
+                        if (
+                            context.Parameters.IssueId != 42
+                            || context.Parameters.ProjectId != projectId
+                        )
+                            throw new InvalidOperationException(
+                                "Journal lost generated route parameters."
+                            );
+                        return ComponentRecipe.Create("journal-leaf", static (_, _) => { });
+                    }
+                ),
+            level.Id
+        )
+    );
+    var application = LucentApplication
+        .CreateBuilder()
+        .UseHost(new ConsoleLifecycleHost())
+        .ConfigureRoot(
+            (session, _) =>
+            {
+                navigation = new NavigationSession(session.Scope, descriptors.Table);
+                interaction = new NavigationInteraction(session.Scope, navigation);
+                return Components.NavigationBoundary(
+                    [
+                        Components.Router(
+                            [
+                                Components.RouterOutlet(
+                                    new RouteOutletOptions(interaction: interaction),
+                                    outlet
+                                ),
+                            ],
+                            bundle,
+                            session: navigation
+                        ),
+                    ],
+                    interaction
+                );
+            }
+        )
+        .OnMounted(_ =>
+        {
+            mountedCalls++;
+            if (navigation is null || interaction is null || navigation.Current is not null)
+                throw new InvalidOperationException("Journal startup was not empty.");
+            var plan = restoration.Decode(Encoding.UTF8.GetBytes(snapshot));
+            if (
+                plan.Status != NavigationRestorationStatus.Ready
+                || plan.DroppedEntries != 0
+                || plan.DroppedStates != 0
+            )
+                throw new InvalidOperationException(
+                    $"Packaged journal/state codec rejected fixed input: {plan.Status}, dropped entries={plan.DroppedEntries}, states={plan.DroppedStates}."
+                );
+            RequireCommitted(navigation.Restore(plan));
+            var journal = navigation.Journal;
+            if (journal.Entries.Count != 2 || journal.CurrentIndex != 0 || !navigation.CanGoForward)
+                throw new InvalidOperationException(
+                    "Journal did not restore the active cursor and forward history."
+                );
+            var dormantId = journal.Entries[1].EntryId;
+            if (
+                dormantId == 42
+                || !interaction.TryGetEntryState(dormantId, out var state)
+                || state is null
+                || state.FocusTargetId != "issue-heading"
+                || state.Viewports.Count != 1
+                || state.Viewports[0].TargetId != "issue-body"
+                || state.Viewports[0].Offset != new ScrollOffset(0, 42)
+            )
+                throw new InvalidOperationException(
+                    "Journal did not map decoded state to a fresh runtime entry."
+                );
+            var rootId = outlet.Snapshot.Levels[0].ElementId;
+            RequireCommitted(navigation.Forward());
+            if (
+                navigation.Current?.EntryId != dormantId
+                || outlet.Snapshot.Levels.Count != 2
+                || outlet.Snapshot.Levels[0].ElementId != rootId
+            )
+                throw new InvalidOperationException(
+                    "Forward did not mount the imported typed suffix on the retained root."
+                );
+            RequireCommitted(navigation.Back());
+            if (navigation.Journal.CurrentIndex != 0 || outlet.Snapshot.Levels.Count != 1)
+                throw new InvalidOperationException("Back did not restore the imported cursor.");
+            if (restoration.Capture(navigation).Status != NavigationRestorationStatus.Ready)
+                throw new InvalidOperationException(
+                    "The imported journal could not be captured again."
+                );
+            return ValueTask.CompletedTask;
+        })
+        .Build(ComponentRecipe.Create("journal-placeholder", static (_, _) => { }));
+    if (application.Run() != 0 || mountedCalls != 1 || navigation is not { IsDisposed: true })
+        throw new InvalidOperationException(
+            "Journal lifecycle did not complete and dispose its owner."
+        );
+
+    static void RequireCommitted(NavigationOperation operation)
+    {
+        if (
+            !operation.Completion.IsCompletedSuccessfully
+            || !operation.Completion.Result.IsCommitted
+        )
+            throw new InvalidOperationException("Packaged journal navigation did not commit.");
+    }
 }
 
 internal sealed class ConsoleLifecycleHost : IApplicationHost

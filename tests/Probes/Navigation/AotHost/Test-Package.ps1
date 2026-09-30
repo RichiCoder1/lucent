@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 function Assert-ProofOutput([string[]] $Output, [string] $Mode) {
     $Output | Write-Output
-    foreach ($marker in @('generated-navigation-native-aot=pass', 'generated-navigation-restoration=pass')) {
+    foreach ($marker in @('generated-navigation-native-aot=pass', 'generated-navigation-restoration=pass', 'generated-navigation-journal=pass')) {
         if ($Output -notcontains $marker) { throw "$Mode navigation proof omitted $marker" }
     }
 }
@@ -17,6 +17,7 @@ if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repo 'artifacts\context-navigation-aot'
 }
+$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $run = Join-Path $OutputRoot ('generated-navigation-' + [Guid]::NewGuid().ToString('N'))
 $fixture = Join-Path $run 'fixture'
 $managed = Join-Path $run 'managed'
@@ -95,7 +96,8 @@ try {
         fixture = @($fixtureEvidence)
         managed = 'pass'
         nativeAot = 'pass'
-        interaction = 'not exercised; console composition without NavigationInteraction or input dispatch'
+        journal = 'pass; fixed wire input, fresh runtime IDs, dormant interaction codec state and mounted Back/Forward'
+        interaction = 'public NavigationInteraction state exercised; native input, focus and scroll transport not exercised'
         executableSha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $run 'proof.json')
     Write-Output ("package-proof-root=" + $run)
