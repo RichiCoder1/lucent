@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lucent.Platform.Windows.Activation.Tests" />
+    <ProjectReference Include="../Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" />
+    <PackageReference Include="Microsoft.Windows.CsWinRT" />
+    <None Include="$(NuGetPackageRoot)/microsoft.windowsappsdk.foundation/2.3.12/license.txt" Link="notices/WindowsAppSDK-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/WindowsAppSDK-LICENSE.txt" />
+    <None Include="notices/CsWinRT-LICENSE.txt" Link="notices/CsWinRT-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/CsWinRT-LICENSE.txt" />
+    <None Include="$(NuGetPackageRoot)/microsoft.windows.cswinrt/2.3.1/NOTICE.txt" Link="notices/CsWinRT-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/CsWinRT-NOTICE.txt" />
+    <None Include="buildTransitive/Lucent.Platform.Windows.Activation.targets" Pack="true" PackagePath="buildTransitive/Lucent.Platform.Windows.Activation.targets" />
+  </ItemGroup>
+</Project>

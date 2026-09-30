@@ -3,6 +3,7 @@
   "Lucent.Icons.Lucide",
   "Lucent.Renderer.Skia",
   "Lucent.Platform.Windows",
+  "Lucent.Platform.Windows.Activation",
   "Lucent.Hosting",
   "Lucent.Lui.Sdk",
   "Lucent.Reactive.R3",

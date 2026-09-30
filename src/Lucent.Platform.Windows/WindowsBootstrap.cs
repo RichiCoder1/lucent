@@ -89,6 +89,7 @@ public static class WindowsBootstrap
         WindowsPopupChain? popup = null;
         WindowsSurfaceManager? surfaces = null;
         WindowsWindowIcon? windowIcon = null;
+        WindowsWindowAttention? windowAttention = null;
         var popupInputGate = new WindowsPopupInputGate();
         ContextMenuRequest? pendingPopup = null;
         InputRouter? contextMenuRouter = null;
@@ -125,6 +126,7 @@ public static class WindowsBootstrap
             );
             if (hwnd == 0)
                 throw new InvalidOperationException("SDL window did not expose an HWND.");
+            windowAttention = new WindowsWindowAttention(hwnd);
 
             if (configuredIcon is not null)
             {
@@ -258,6 +260,8 @@ public static class WindowsBootstrap
             }
             if (configuredIcon is not null && !SDL.ShowWindow(window))
                 throw new InvalidOperationException($"SDL_ShowWindow: {SDL.GetError()}");
+            if (windowAttention is not null)
+                windowOptions?.AttentionReady?.Invoke(windowAttention);
             var recordedPerformanceBaseline = false;
             session?.Start();
             bool ObserveHostEvent(SDL.Event @event)
@@ -658,6 +662,7 @@ public static class WindowsBootstrap
         }
         finally
         {
+            Capture(errors, () => windowAttention?.Invalidate());
             Capture(errors, () => filePickers?.Dispose());
             WindowsFilePicker.Detach(composition);
             if (!composition.IsDisposed)

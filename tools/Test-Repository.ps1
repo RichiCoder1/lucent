@@ -22,6 +22,7 @@ $managedProjects = @(
     'tests/Lucent.Hosting.Tests/Lucent.Hosting.Tests.csproj',
     'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj',
     'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj',
+    'tests/Lucent.Platform.Windows.Activation.Tests/Lucent.Platform.Windows.Activation.Tests.csproj',
     'tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj',
     'tests/Lucent.ComponentBrowser.Tests/Lucent.ComponentBrowser.Tests.csproj',
     'tests/Lucent.Performance.Tests/Lucent.Performance.Tests.csproj',

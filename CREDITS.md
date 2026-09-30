@@ -234,12 +234,13 @@ SkiaSharp 4.151.1 dependency; Core records its own bounded immutable commands an
 the existing Skia adapter performs replay. No upstream implementation is copied,
 and no renderer dependency enters Core.
 
-## Optional Windows activation feasibility probe
+## Optional Windows activation adapter and feasibility probe
 
-The console-only #222 probe uses Microsoft.WindowsAppSDK.Foundation 2.3.12
-(Windows App SDK `license.txt` terms) and Microsoft.Windows.CsWinRT 2.3.1 (MIT).
-Its locked dependency closure stays within `tests/Probes/Navigation/Activation`;
-no shipped Lucent package acquires these dependencies from the probe.
+The opt-in `Lucent.Platform.Windows.Activation` adapter and console-only #222 probe use Microsoft.WindowsAppSDK.Foundation 2.3.12
+and InteractiveExperiences 2.1.9 (Windows App SDK `license.txt` terms), plus Microsoft.Windows.CsWinRT 2.3.1 (MIT).
+The adapter is a separate package; Core, Hosting and the base Windows host do not
+acquire these dependencies. The probe keeps its own locked dependency closure under
+`tests/Probes/Navigation/Activation`.
 Microsoft's [AppInstance implementation](https://github.com/microsoft/WindowsAppSDK/blob/main/dev/AppLifecycle/AppInstance.cpp)
 documents the native mutex held while an instance key is owned; registration and
 release must stay on the same native thread. C#/WinRT's

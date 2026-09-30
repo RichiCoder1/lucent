@@ -6,6 +6,18 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsWindowOptionsContracts
 {
     [TestMethod]
+    public void WindowAttentionRejectsWrongThreadAndExpiredHostLifetime()
+    {
+        var attention = new WindowsWindowAttention((nint)1);
+        var wrongThread = Task.Run(() =>
+            Assert.ThrowsExactly<InvalidOperationException>(attention.Invalidate)
+        );
+        wrongThread.GetAwaiter().GetResult();
+        attention.Invalidate();
+        Assert.ThrowsExactly<ObjectDisposedException>(() => attention.Request());
+    }
+
+    [TestMethod]
     public void WindowConfigurationRejectsImpossibleBoundsBeforeStartingHost()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>

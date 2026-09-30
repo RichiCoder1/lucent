@@ -37,6 +37,10 @@ public sealed record WindowsWindowOptions
     /// </summary>
     public ImageSource? Icon { get; init; }
 
+    /// <summary>Receives an owner-thread attention capability before the session starts.
+    /// Retain it only until the host returns; requests after teardown are rejected.</summary>
+    public Action<WindowsWindowAttention>? AttentionReady { get; init; }
+
     internal void Validate()
     {
         if (

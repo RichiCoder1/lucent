@@ -86,7 +86,7 @@ try {
     & dotnet publish Consumer.csproj -c Release --no-restore -o publish -warnaserror
     if ($LASTEXITCODE) { throw 'Package-only NativeAOT publish failed.' }
     $published = Join-Path $proof 'publish'
-    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json)) {
+    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json | Where-Object { $_.package -ne 'Lucent.Platform.Windows.Activation' })) {
         if ($notice.output -and -not (Test-Path -LiteralPath (Join-Path $published $notice.output) -PathType Leaf)) {
             throw "Missing published dependency notice: $($notice.output)"
         }
@@ -100,6 +100,7 @@ try {
     if ($null -eq $associatedIcon) { throw 'Published NativeAOT executable omitted its generated ICO resource.' }
     $associatedIcon.Dispose()
     Remove-Item -LiteralPath $artwork -Recurse -Force
+    & (Join-Path $root 'tests/Probes/Navigation/Activation/PackageConsumer/Test-Package.ps1') -Feed $feedPath -Version $Version
     if ($SkipDesktopSmoke) {
         Write-Output "Package-only restore/NativeAOT/assets/notices: PASS ($Version); desktop startup/close was not run."
         return

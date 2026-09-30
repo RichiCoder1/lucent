@@ -54,6 +54,17 @@ foreach ($name in $names) {
             if ($runtimeTooling -or $packedTooling) { throw 'Core package included build-time compiler, generator or Roslyn tooling.' }
         }
         if ($name -eq 'Lucent.Platform.Windows' -and (-not $zip.GetEntry('runtimes/win-x64/native/vcruntime140.dll') -or -not $zip.GetEntry('buildTransitive/notices/SDL3-CS/LICENSE'))) { throw 'Windows package omitted native runtime or notices.' }
+        if ($name -in @('Lucent.Core', 'Lucent.Hosting', 'Lucent.Platform.Windows')) {
+            $activationDeps = @($spec.SelectNodes('//*[local-name()="dependencies"]//*[local-name()="dependency"]') | Where-Object { $_.id -match '^Microsoft\.Windows(AppSDK|\.CsWinRT)' -or $_.id -eq 'Lucent.Platform.Windows.Activation' })
+            if ($activationDeps.Count -ne 0) { throw "Base package acquired optional activation dependency: $name" }
+        }
+        if ($name -eq 'Lucent.Platform.Windows.Activation') {
+            if (-not $zip.GetEntry('buildTransitive/Lucent.Platform.Windows.Activation.targets')) { throw 'Activation package omitted its consumer notice target.' }
+            $dependencyIds = @($spec.SelectNodes('//*[local-name()="dependencies"]//*[local-name()="dependency"]') | ForEach-Object { $_.id })
+            foreach ($required in @('Lucent.Platform.Windows', 'Microsoft.WindowsAppSDK.Foundation', 'Microsoft.WindowsAppSDK.InteractiveExperiences', 'Microsoft.Windows.CsWinRT')) {
+                if ($dependencyIds -notcontains $required) { throw "Activation package omitted dependency: $required" }
+            }
+        }
         if ($name -eq 'Lucent.Lui.Sdk') {
             foreach ($required in @('Sdk/Sdk.props', 'Sdk/Sdk.targets', 'Sdk/LuiConfiguration.targets', 'analyzers/dotnet/cs/Lucent.Lui.Generator.dll', 'analyzers/dotnet/cs/Lucent.Lui.Compiler.dll', 'tools/net10.0/Lucent.Lui.Tooling.dll', 'tools/net10.0/Lucent.Lui.Tooling.runtimeconfig.json')) {
                 if (-not $zip.GetEntry($required)) { throw "SDK package omitted build-time asset/compiler tooling: $required" }
