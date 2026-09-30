@@ -57,7 +57,8 @@ project matching, immutable cache/import and explicit approved-release downloads
 ./tools/Pack-LuiServer.ps1 -ServerDirectory <published-server-directory> -OutputPath <server.zip>
 ./tools/Pack-LuiExtension.ps1 -ServerArchivePath <server.zip> `
   -ServerDirectory <published-server-directory> `
-  -CacheHelperDirectory <published-cache-helper-directory> -OutputPath <extension.vsix>
+  -CacheHelperDirectory <published-cache-helper-directory> `
+  -DoctorDirectory <published-doctor-directory> -OutputPath <extension.vsix>
 ./tools/New-ReleaseSet.ps1 -ArtifactDirectory <directory> -Version <exact-version> `
   -SourceCommit <commit> -ServerArchive server.zip -Vsix extension.vsix `
   -OutputPath <candidate.json>
@@ -73,6 +74,11 @@ The cache helper is published from `src/Lucent.Tooling.Cache` in Release with
 runtime files are inventoried and hashed inside the VSIX before execution. The
 helper validates server archives and immutable cache generations; it does not
 authenticate a caller-supplied descriptor or contact GitHub.
+The environment doctor is published from `src/Lucent.Tools` with the same settings
+and source commit. Its exact three-file runtime inventory is verified before use.
+The coordinated `Lucent.Tools` package also exposes it as a standard local .NET
+tool; the extension uses its own verified copy. See the
+[environment doctor design](plans/environment-doctor.md) for diagnostic scope.
 The extension package verifies the server inventory and source identity against
 the standalone server archive. At startup, it checks the bundled bytes again
 before running the project-free `--identity` command and opening a project.

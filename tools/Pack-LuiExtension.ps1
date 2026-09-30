@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][string] $ServerArchivePath,
     [Parameter(Mandatory)][string] $ServerDirectory,
     [Parameter(Mandatory)][string] $CacheHelperDirectory,
+    [Parameter(Mandatory)][string] $DoctorDirectory,
     [string] $OutputPath
 )
 
@@ -31,6 +32,21 @@ $helperEntries = foreach ($name in $helperFiles) {
 }
 $helperVersion = Get-LuiAssemblyVersion ([IO.File]::ReadAllBytes((Join-Path $helperDirectory 'Lucent.Tooling.Cache.dll')))
 if ($helperVersion -notmatch ('\+' + [regex]::Escape($sourceCommit) + '(\.|$)')) { throw 'Extension and cache helper source commits differ.' }
+$doctorDirectory = (Resolve-Path -LiteralPath $DoctorDirectory).Path
+if ((Get-Item -LiteralPath $doctorDirectory).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Doctor directory must not be a link.' }
+$doctorFiles = @('Lucent.Tools.dll', 'Lucent.Tools.deps.json', 'Lucent.Tools.runtimeconfig.json')
+$actualDoctorFiles = @(Get-ChildItem -LiteralPath $doctorDirectory -File -Force | Where-Object Name -ne 'Lucent.Tools.pdb' | ForEach-Object Name)
+if ((ConvertTo-LuiCanonicalJson @($actualDoctorFiles | Sort-Object -CaseSensitive)) -cne (ConvertTo-LuiCanonicalJson @($doctorFiles | Sort-Object -CaseSensitive))) {
+    throw 'Doctor publication must contain exactly its three managed payload files.'
+}
+$doctorEntries = foreach ($name in $doctorFiles) {
+    $doctorPath = Join-Path $doctorDirectory $name
+    $doctorFile = Get-Item -LiteralPath $doctorPath
+    if ($doctorFile.PSIsContainer -or ($doctorFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $doctorFile.Length -le 0) { throw "Invalid doctor file: $name" }
+    @{ fileName = $name; bytes = $doctorFile.Length; sha256 = (Get-FileHash -LiteralPath $doctorPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+$doctorVersion = Get-LuiAssemblyVersion ([IO.File]::ReadAllBytes((Join-Path $doctorDirectory 'Lucent.Tools.dll')))
+if ($doctorVersion -notmatch ('\+' + [regex]::Escape($sourceCommit) + '(\.|$)')) { throw 'Extension and doctor source commits differ.' }
 $archive = Open-LuiArchive $serverArchive
 try {
     $inventory = Read-LuiArchiveJson $archive 'lucent-server-files.json'
@@ -70,6 +86,10 @@ try {
         'project-requirements.js',
         'server-cache.js',
         'server-acquisition.js',
+        'managed-tool.js',
+        'doctor-client.js',
+        'onboarding-ui.js',
+        'environment-ui.js',
         'release-catalog.json',
         'language-configuration.json',
         'README.md'
@@ -82,6 +102,7 @@ try {
     $stagedManifest.lucentRelease.sourceCommit = $sourceCommit
     $stagedManifest.lucentRelease.bundledServer = $bundle
     $stagedManifest.lucentCacheHelper = @{ schemaVersion = 1; sourceCommit = $sourceCommit; entryPoint = 'Lucent.Tooling.Cache.dll'; files = @($helperEntries) }
+    $stagedManifest.lucentDoctor = @{ schemaVersion = 1; sourceCommit = $sourceCommit; entryPoint = 'Lucent.Tools.dll'; files = @($doctorEntries) }
     $stagedManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $stageRoot 'package.json') -Encoding utf8
     $serverStage = Join-Path $stageRoot 'server'
     [IO.Directory]::CreateDirectory($serverStage) | Out-Null
@@ -97,6 +118,10 @@ try {
     $helperStage = Join-Path $stageRoot 'tooling-cache'
     [IO.Directory]::CreateDirectory($helperStage) | Out-Null
     foreach ($entry in $helperEntries) { Copy-Item -LiteralPath (Join-Path $helperDirectory $entry.fileName) -Destination (Join-Path $helperStage $entry.fileName) }
+    $doctorStage = Join-Path $stageRoot 'doctor'
+    [IO.Directory]::CreateDirectory($doctorStage) | Out-Null
+    foreach ($entry in $doctorEntries) { Copy-Item -LiteralPath (Join-Path $doctorDirectory $entry.fileName) -Destination (Join-Path $doctorStage $entry.fileName) }
+    Copy-Item (Join-Path $extensionRoot 'onboarding') (Join-Path $stageRoot 'onboarding') -Recurse
     Copy-Item (Join-Path $extensionRoot 'syntaxes') (Join-Path $stageRoot 'syntaxes') -Recurse
     Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stageRoot 'LICENSE')
 

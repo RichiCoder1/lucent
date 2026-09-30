@@ -283,6 +283,26 @@ if ($manifest['lucentCacheHelper']) {
     Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
     Expect-Rejected 'vsix-no-helper-manifest' { Get-LuiVsix $path } 'no bundled helper'
 }
+if ($manifest['lucentDoctor']) {
+    foreach ($case in @(
+        @{ name = 'vsix-missing-doctor'; entry = 'extension/doctor/Lucent.Tools.dll'; bytes = $null; pattern = 'doctor payload' },
+        @{ name = 'vsix-tampered-doctor'; entry = 'extension/doctor/Lucent.Tools.dll'; bytes = [byte[]]@(1); pattern = 'Doctor bytes' },
+        @{ name = 'vsix-extra-doctor-file'; entry = 'extension/doctor/extra.dll'; bytes = [byte[]]@(1); pattern = 'doctor payload' },
+        @{ name = 'vsix-missing-doctor-client'; entry = 'extension/doctor-client.js'; bytes = $null; pattern = 'Missing declared VSIX entry' },
+        @{ name = 'vsix-missing-doctor-setup'; entry = 'extension/onboarding/setup.md'; bytes = $null; pattern = 'Missing declared VSIX entry' }
+    )) {
+        $path = Join-Path $rejections ($case.name + '.vsix')
+        Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+        Replace-Entries $path @{ $case.entry = $case.bytes }
+        Expect-Rejected $case.name { Get-LuiVsix $path } $case.pattern
+    }
+    $changed = Copy-Json $manifest
+    $changed.Remove('lucentDoctor')
+    $path = Join-Path $rejections 'vsix-no-doctor-manifest.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
+    Expect-Rejected 'vsix-no-doctor-manifest' { Get-LuiVsix $path } 'no bundled doctor'
+}
 
 # These five receipts are deliberately synthetic: they prove validator boundaries,
 # never that managed/native/product checks actually ran or GitHub authenticated them.
@@ -397,7 +417,16 @@ try {
     $results.Add(@{ name = 'synthetic-ci-finalizer'; outcome = 'passed' })
     Expect-Rejected 'finalizer-immutable-complete' { & $finalizer @finalArguments } 'Immutable complete descriptor'
 }
-finally { foreach ($name in $ciNames) { [Environment]::SetEnvironmentVariable($name, $oldCi[$name]) } }
+finally {
+    foreach ($name in $ciNames) {
+        if ($null -eq $oldCi[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+        else {
+            [Environment]::SetEnvironmentVariable($name, $oldCi[$name])
+        }
+    }
+}
 Assert-LuiReleaseSet $candidate $fixture
 foreach ($file in $before) {
     Assert-True ((Get-FileHash -LiteralPath $file.Path).Hash -ceq $file.Hash) "Project selection input changed: $($file.Path)"

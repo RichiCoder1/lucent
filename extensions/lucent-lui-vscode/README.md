@@ -7,6 +7,22 @@ dependencies. It does not include the .NET SDK.
 
 ## Setup
 
+Run **Lucent: Open Getting Started** for the built-in walkthrough. **Lucent: Check
+Environment** inspects installed .NET tooling and configuration without restoring,
+evaluating a project, contacting feeds or changing settings. It is available in
+Restricted Mode. The report distinguishes editor, managed build, restore and native
+capabilities; unperformed checks remain **notChecked**. **Lucent: Review and Copy
+Environment Report** previews the report before explicitly copying it for sharing.
+Opening setup or environment commands alone does not start project evaluation.
+Language services start when a `.lui` document is opened, or through an explicit
+project selection or language-service restart.
+
+The **Lucent** status item shows the current setup state and applicable actions.
+**Lucent: Select Project** chooses an owning folder and `.csproj`, writes only that
+folder's project setting and restarts language services. Removing the owner folder
+stops its server and cancels pending results. The extension does not automatically
+switch to another project.
+
 Install a VSIX from a compatible Lucent release set. The extension verifies its
 bundled server files and exact project-free `--identity` response before it sends
 `initialize`. Advanced users may set `lucentLui.serverPath` to an absolute path
@@ -17,8 +33,10 @@ semantic features. Without a project setting, document/range formatting remains
 available. In a multi-root workspace, the extension asks which workspace folder
 to serve, then reads that folder's settings. One project is active at a time;
 documents from other workspace folders are not sent to that server. An absolute
-project path must be inside the selected workspace folder. Use **Lucent: Restart
-Language Services** after changing either setting or switching projects.
+project path must be inside the selected workspace folder. Changing either tooling
+setting cancels stale work and restarts services in a trusted workspace. Use
+**Lucent: Restart Language Services** after repairing a stopped server or restoring
+changed project inputs.
 
 Before semantic services start, the verified bootstrap server evaluates the
 selected project's tooling requirements and compares the current NuGet graph
@@ -88,7 +106,7 @@ applications are pinned to different Lucent versions.
 Document/range formatting follows the shared `.editorconfig` policy, including
 embedded C#. Format-on-save follows your VS Code setting. Semantic quick fixes
 identify their lint rule and resolve against the current document/project before
-providing edits. See [formatting and linting](../../docs/LUI-FORMATTING.md) for
+providing edits. See [formatting and linting](https://github.com/RichiCoder1/lucent/blob/main/docs/LUI-FORMATTING.md) for
 supported configuration, safe content conversions and scoped exceptions.
 Open `.editorconfig` buffers are synchronized with the language server, so unsaved
 policy changes apply to editor diagnostics and actions.
@@ -97,7 +115,7 @@ Named-component projects also support ordinary declarations and support-only `.l
 files. Models and component companions participate in hover, completion, signature help,
 definition, references, and cross-language rename against current unsaved text. Enable
 `LucentLuiNamedComponents` through the matching SDK; see
-[application authoring](../../docs/APPLICATION-AUTHORING.md). No generated C# source files
+[application authoring](https://github.com/RichiCoder1/lucent/blob/main/docs/APPLICATION-AUTHORING.md). No generated C# source files
 need to be checked in for these editor features.
 
 ## Development
@@ -105,7 +123,7 @@ need to be checked in for these editor features.
 Run the extension tests from the repository root:
 
 ```powershell
-node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs
+node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs extensions/lucent-lui-vscode/managed-tool.test.cjs extensions/lucent-lui-vscode/doctor-client.test.cjs extensions/lucent-lui-vscode/onboarding-ui.test.cjs extensions/lucent-lui-vscode/environment-ui.test.cjs
 ```
 
 Create a local VSIX with the maintained packaging script:
@@ -113,7 +131,8 @@ Create a local VSIX with the maintained packaging script:
 ```powershell
 ./tools/Pack-LuiExtension.ps1 -ServerArchivePath <server.zip> `
   -ServerDirectory <published-server-directory> `
-  -CacheHelperDirectory <published-cache-helper-directory>
+  -CacheHelperDirectory <published-cache-helper-directory> `
+  -DoctorDirectory <published-doctor-directory>
 ```
 
 The package is written under `artifacts/`; the script stages the repository

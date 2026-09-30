@@ -100,6 +100,7 @@ test("raw attribute strings stay inside tags and do not promise C# escapes", () 
 test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
     assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);
+    assert.equal(manifest.contributes.configuration.properties["lucentLui.projectPath"].scope, "resource");
     assert.deepEqual(manifest.extensionKind, ["workspace"]);
     assert.equal(manifest.capabilities.untrustedWorkspaces.supported, "limited");
     assert.deepEqual(manifest.capabilities.untrustedWorkspaces.restrictedConfigurations,
@@ -107,6 +108,40 @@ test("activates only Lucent workspaces and registers C# cross-language selectors
     assert.deepEqual(JSON.parse(JSON.stringify(loaded.exports.crossLanguageSelector)), [
         { language: "lui" }, { language: "csharp", scheme: "file" }
     ]);
+});
+
+test("Check Environment cold activation stays static until a Lucent editor opens", async () => {
+    let environmentChecks = 0;
+    let requirementReads = 0;
+    const server = new MockProcess();
+    const harness = failureHarness(server, { openLui: false, dependencies: {
+        readRequirements: async (...args) => {
+            requirementReads++;
+            return { compiler: { sha256: "3".repeat(64), sourceCommit: null }, projectPath: args[1], inputs: [] };
+        },
+        environmentUi: { createEnvironmentCommands(vscode, context) {
+            context.subscriptions.push(vscode.commands.registerCommand("lucentLui.checkEnvironment", async () => {
+                environmentChecks++;
+            }));
+            return { cancel() {} };
+        } }
+    } });
+
+    await harness.activate();
+    await harness.command("lucentLui.checkEnvironment");
+    assert.equal(environmentChecks, 1);
+    assert.equal(requirementReads, 0);
+    assert.equal(harness.identityChecks, 0);
+    assert.equal(harness.spawnCount, 0);
+    assert.equal(server.lastRequest, undefined);
+
+    harness.open({ uri: { toString: () => "file:///workspace/Main.lui" }, languageId: "lui", version: 1, getText: () => "" });
+    await harness.started;
+    assert.equal(requirementReads, 1);
+    assert.equal(harness.spawnCount, 1);
+    assert.equal(server.lastRequest.method, "initialize");
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    server.emit("exit", 0, null);
 });
 
 test("activation preserves current diagnostics and clears closed documents", async () => {
@@ -402,6 +437,14 @@ function loadExtension(vscode, process, spawned, identityOutput = {
     language: { id: "lui", version: "preview", featureLevel: "preview-1" },
     protocol: { id: "lucent-lui", major: 1, minor: 0 }
 }, identified, dependencies = {}) {
+    vscode.StatusBarAlignment ??= { Right: 2 };
+    vscode.DiagnosticSeverity ??= { Error: 0 };
+    vscode.Diagnostic ??= class { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } };
+    vscode.window.createStatusBarItem ??= () => ({ show() {}, dispose() {} });
+    if (vscode.languages) {
+        const createDiagnostics = vscode.languages.createDiagnosticCollection;
+        vscode.languages.createDiagnosticCollection = (...args) => Object.assign({ clear() {}, set() {} }, createDiagnostics(...args));
+    }
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "extension.js"), "utf8"), {
         AbortController,
@@ -416,6 +459,8 @@ function loadExtension(vscode, process, spawned, identityOutput = {
             : name === "./release-catalog.json" && dependencies.releaseCatalog ? dependencies.releaseCatalog
             : name === "./server-cache" && dependencies.cache ? { ...require("./server-cache"), ...dependencies.cache }
             : name === "./server-acquisition" && dependencies.acquisition ? { ...require("./server-acquisition"), ...dependencies.acquisition }
+            : name === "./doctor-client" ? { preflightDotnet: dependencies.preflight ?? (async () => ({ status: "available", dotnetPath: path.resolve("host/dotnet.exe") })) }
+            : name === "./environment-ui" && dependencies.environmentUi ? dependencies.environmentUi
             : name === "./project-requirements" ? {
                 ...require("./project-requirements"),
                 readProjectRequirements: dependencies.readRequirements ?? (async (_server, projectPath) => ({
@@ -479,31 +524,47 @@ class MockProcess extends EventEmitter {
     }
 }
 
-function failureHarness(process, { trusted = true, identity, processes = [process], folders, selectedFolder = 0, serverPath = path.resolve("server.dll"), dependencies = {} } = {}) {
+function failureHarness(process, { trusted = true, identity, processes = [process], folders, selectedFolder = 0,
+    openLui = true, serverPath = path.resolve("server.dll"), dependencies = {} } = {}) {
     let completionProvider;
     let codeActionsProvider;
     let symbolProvider;
     const logs = [];
     const resources = [];
+    const setupResources = [];
     const messages = [];
     const watchers = [];
+    const statusItem = { show() {}, dispose() {} };
     let generated;
     let onGrantTrust;
-    let onOpen;
+    let onFoldersChanged;
+    let onConfigurationChanged;
     let spawnCount = 0;
     let identityChecks = 0;
     const commands = new Map();
-    const own = () => {
+    const workspaceFolders = folders ?? [{ uri: { scheme: "file", fsPath: path.resolve("workspace") } }];
+    const initialFolder = workspaceFolders[selectedFolder] ?? workspaceFolders[0];
+    const openListeners = [];
+    const textDocuments = openLui && initialFolder ? [{
+        uri: { scheme: "file", fsPath: path.join(initialFolder.uri.fsPath, "Initial.lui"),
+            toString() { return `file:///${this.fsPath.replaceAll("\\", "/")}`; } },
+        version: 1,
+        languageId: "lui",
+        getText: () => ""
+    }] : [];
+    const own = scope => {
         const resource = { disposed: 0, dispose() { this.disposed++; } };
-        resources.push(resource);
+        (scope === "setup" ? setupResources : resources).push(resource);
         return resource;
     };
     const workspace = {
         isTrusted: trusted,
         onDidGrantWorkspaceTrust: callback => { onGrantTrust = callback; return own(); },
-        workspaceFolders: folders ?? [{ uri: { fsPath: path.resolve("workspace") } }],
+        onDidChangeWorkspaceFolders: callback => { onFoldersChanged = callback; return { dispose() {} }; },
+        onDidChangeConfiguration: callback => { onConfigurationChanged = callback; return { dispose() {} }; },
+        workspaceFolders,
             getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : serverPath }),
-        textDocuments: [],
+        textDocuments,
         createFileSystemWatcher: pattern => {
             const watcher = Object.assign(own(), { pattern,
                 onDidCreate(callback) { this.create = callback; return own(); },
@@ -513,7 +574,15 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
             watchers.push(watcher);
             return watcher;
         },
-        onDidOpenTextDocument: callback => { onOpen = callback; return own(); },
+        onDidOpenTextDocument: callback => {
+            openListeners.push(callback);
+            const resource = own(openListeners.length === 1 ? "setup" : undefined);
+            return { dispose() {
+                resource.dispose();
+                const index = openListeners.indexOf(callback);
+                if (index >= 0) openListeners.splice(index, 1);
+            } };
+        },
         onDidChangeTextDocument: own,
         onDidCloseTextDocument: own,
         registerTextDocumentContentProvider: (_scheme, provider) => { generated = provider; return own(); }
@@ -521,7 +590,7 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
     const vscode = {
         workspace,
         authentication: dependencies.authentication,
-        window: { createOutputChannel: () => {
+        window: { createStatusBarItem: () => statusItem, createOutputChannel: () => {
             const channel = own();
             const write = text => {
                 if (channel.disposed) throw new Error("A disposed output channel was used.");
@@ -530,6 +599,7 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
             return Object.assign(channel, { info: write, warn: write, error: write });
         }, showErrorMessage: message => messages.push(message), showQuickPick: async items => items[selectedFolder], ...dependencies.window },
         ProgressLocation: { Notification: 15 },
+        ConfigurationTarget: { WorkspaceFolder: 3 },
         Uri: { file: value => ({ toString: () => value }), parse: value => ({ scheme: value.startsWith("file:") ? "file" : undefined, toString: () => value }) },
         Range: class { constructor(...values) { this.values = values; } },
         WorkspaceEdit: class { constructor() { this.changes = []; } replace(uri, range, text) { this.changes.push({ uri, range, text }); } },
@@ -542,7 +612,7 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
         CompletionItemKind: { Field: "field" },
         MarkdownString: class { appendText(text) { this.value = text; } },
         languages: new Proxy({}, { get: (_target, key) => key === "createDiagnosticCollection"
-            ? () => Object.assign(own(), { delete() {} }) : key === "registerCompletionItemProvider"
+            ? name => Object.assign(own(name === "lucent-setup" ? "setup" : undefined), { delete() {}, clear() {}, set() {} }) : key === "registerCompletionItemProvider"
                 ? (_selector, provider) => { completionProvider = provider; return own(); } : key === "registerCodeActionsProvider"
                     ? (_selector, provider) => { codeActionsProvider = provider; return own(); } : key === "registerDocumentSymbolProvider"
                         ? (_selector, provider) => { symbolProvider = provider; return own(); } : own })
@@ -552,8 +622,16 @@ function failureHarness(process, { trusted = true, identity, processes = [proces
     const startedPromise = new Promise(resolve => { started = resolve; });
     let nextProcess = 0;
     const extension = loadExtension(vscode, () => processes[Math.min(nextProcess++, processes.length - 1)], () => { spawnCount++; started(); }, identity, () => { identityChecks++; }, dependencies);
-    return { context, messages, resources, logs, watchers, workspace, started: startedPromise, get spawnCount() { return spawnCount; }, get identityChecks() { return identityChecks; }, grantTrust: () => { workspace.isTrusted = true; onGrantTrust(); }, restart: () => commands.get("lucentLui.restartLanguageServices")(), importArchive: () => commands.get("lucentLui.importServerArchive")(), open: document => onOpen(document), codeActions: () => codeActionsProvider, completion: () => completionProvider, symbols: () => symbolProvider, activate: () => extension.activate(context),
+    return { context, messages, resources, logs, watchers, workspace, started: startedPromise, get spawnCount() { return spawnCount; }, get identityChecks() { return identityChecks; }, grantTrust: () => { workspace.isTrusted = true; onGrantTrust(); }, restart: () => commands.get("lucentLui.restartLanguageServices")(), importArchive: () => commands.get("lucentLui.importServerArchive")(), open: document => {
+        if (!workspace.textDocuments.some(openDocument => openDocument.uri.toString() === document.uri.toString()))
+            workspace.textDocuments.push(document);
+        for (const listener of openListeners) listener(document);
+    }, codeActions: () => codeActionsProvider, completion: () => completionProvider, symbols: () => symbolProvider, activate: () => extension.activate(context),
         installMatching: () => commands.get("lucentLui.installMatchingServer")(),
+        command: name => commands.get(name)(),
+        foldersChanged: event => onFoldersChanged(event),
+        configurationChanged: name => onConfigurationChanged({ affectsConfiguration: setting => setting === name }),
+        status: () => statusItem,
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
 
@@ -563,7 +641,7 @@ test("Restricted Mode leaves project evaluation and server process untouched unt
     await harness.activate();
     assert.equal(harness.spawnCount, 0);
     assert.equal(server.lastRequest, undefined);
-    assert.equal(harness.resources.length, 1);
+    assert.equal(harness.resources.length, 1); // Trust listener only; setup UI has its own lifetime.
     await harness.restart();
     assert.equal(harness.spawnCount, 0);
     assert.match(harness.messages[0], /Trust this workspace/);
@@ -655,6 +733,9 @@ test("evaluated tooling input changes stop services while unrelated sibling file
     assert.equal(server.lastRequest.method, "shutdown");
     watcher.change({ fsPath: input });
     assert.equal(harness.messages.length, 1);
+    harness.open({ uri: { toString: () => "file:///workspace/AfterStop.lui" }, languageId: "lui", version: 1, getText: () => "" });
+    assert.equal(harness.spawnCount, 1);
+    assert.equal(server.lastRequest.method, "shutdown");
     server.emit("exit", 0, null);
     harness.context.subscriptions.forEach(resource => resource.dispose());
 });
@@ -682,7 +763,7 @@ test("bundled server verifies workspace-host bytes and exact identity before ini
     await harness.activate();
     assert.equal(harness.spawnCount, 1, JSON.stringify({ messages: harness.messages, roots }));
     assert.deepEqual(roots, [path.resolve("extension-host/server"), path.resolve("extension-host/server")]);
-    assert.equal(server.lastRequest.method, "initialized");
+    assert.ok(server.notifications.some(notification => notification.method === "initialized"));
     harness.context.subscriptions.forEach(resource => resource.dispose());
 
     let evaluatedMismatch = false;
@@ -1194,5 +1275,98 @@ test("completion defers documentation and preserves insertion fields on resolve"
     assert.equal(resolved.insertText, "DividerRight");
     assert.equal(process.lastRequest.params.kind, 5);
     assert.deepEqual(process.lastRequest.params.data, item.data);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("missing runtime blocks before identity or evaluation and repeated checks notify once", async () => {
+    const harness = failureHarness(new MockProcess(), { dependencies: {
+        preflight: async () => ({ status: "unavailable", reason: "dotnet-runtime-missing" }),
+        readRequirements: () => assert.fail("must not evaluate without the runtime")
+    } });
+    await harness.activate();
+    await harness.restart();
+    assert.equal(harness.identityChecks, 0);
+    assert.equal(harness.spawnCount, 0);
+    assert.equal(harness.messages.length, 1);
+    assert.match(harness.messages[0], /\.NET 10 runtime/);
+    assert.match(harness.status().text, /Setup needed/);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("removing the owner stops services without selecting a different root", async () => {
+    const first = { name: "First", uri: { scheme: "file", fsPath: path.resolve("first") } };
+    const second = { name: "Second", uri: { scheme: "file", fsPath: path.resolve("second") } };
+    const server = new MockProcess();
+    const harness = failureHarness(server, { folders: [first, second] });
+    await harness.activate();
+    harness.foldersChanged({ added: [], removed: [second] });
+    assert.ok(server.notifications.some(notification => notification.method === "initialized"));
+    harness.workspace.workspaceFolders = [second];
+    harness.foldersChanged({ added: [], removed: [first] });
+    assert.equal(server.lastRequest.method, "shutdown");
+    assert.equal(harness.spawnCount, 1);
+    assert.match(harness.status().text, /Select project/);
+    server.emit("exit", 0, null);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("workspace removal cancels preflight and a late result cannot start tools", async () => {
+    let complete, signal;
+    const harness = failureHarness(new MockProcess(), { dependencies: {
+        preflight: options => { signal = options.signal; return new Promise(resolve => { complete = resolve; }); }
+    } });
+    const activating = harness.activate();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(typeof complete, "function");
+    const removed = harness.workspace.workspaceFolders;
+    harness.workspace.workspaceFolders = [];
+    harness.foldersChanged({ added: [], removed });
+    assert.equal(signal.aborted, true);
+    complete({ status: "available", dotnetPath: path.resolve("host/dotnet.exe") });
+    await activating;
+    assert.equal(harness.identityChecks, 0);
+    assert.equal(harness.spawnCount, 0);
+    assert.match(harness.status().text, /Select project/);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+test("project selection writes only a relative project inside its owning folder", async () => {
+    for (const inside of [true, false]) {
+        const updates = [];
+        const harness = failureHarness(new MockProcess(), { dependencies: { window: {
+            showOpenDialog: async () => [{ scheme: "file", fsPath: path.resolve(inside ? "workspace/app/App.csproj" : "outside/App.csproj") }]
+        } } });
+        harness.workspace.getConfiguration = (_section, uri) => ({ get: key => key === "projectPath" ? "host/Host.csproj" : path.resolve("server.dll"),
+            update: async (...args) => updates.push({ uri, args }) });
+        await harness.activate();
+        await harness.command("lucentLui.selectProject");
+        assert.equal(updates.length, inside ? 1 : 0);
+        if (inside) {
+            assert.equal(updates[0].uri, harness.workspace.workspaceFolders[0].uri);
+            assert.deepEqual(updates[0].args, ["projectPath", "app/App.csproj", 3]);
+        } else assert.match(harness.messages[0], /inside the chosen workspace folder/);
+        harness.context.subscriptions.forEach(resource => resource.dispose());
+    }
+});
+
+test("changing tooling settings cancels old evaluation and only starts the current selection", async () => {
+    let finishFirst, firstSignal, calls = 0;
+    const harness = failureHarness(new MockProcess(), { dependencies: {
+        preflight: options => {
+            if (++calls === 1) { firstSignal = options.signal; return new Promise(resolve => { finishFirst = resolve; }); }
+            return Promise.resolve({ status: "available", dotnetPath: path.resolve("host/dotnet.exe") });
+        }
+    } });
+    const activating = harness.activate();
+    await new Promise(resolve => setImmediate(resolve));
+    harness.configurationChanged("editor.fontSize");
+    assert.equal(calls, 1);
+    harness.configurationChanged("lucentLui.projectPath");
+    await harness.started;
+    assert.equal(firstSignal.aborted, true);
+    finishFirst({ status: "available", dotnetPath: path.resolve("host/dotnet.exe") });
+    await activating;
+    assert.equal(harness.spawnCount, 1);
+    assert.equal(harness.identityChecks, 1);
     harness.context.subscriptions.forEach(resource => resource.dispose());
 });

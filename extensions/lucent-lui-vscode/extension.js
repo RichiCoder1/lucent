@@ -2,12 +2,16 @@
 
 const childProcess = require("child_process");
 const path = require("path");
+const os = require("node:os");
 const { isDeepStrictEqual } = require("node:util");
 const vscode = require("vscode");
 const { verifyBundledServer } = require("./server-bundle");
 const { readProjectRequirements, assertCompatibleCompiler, verifyRequirementInputs } = require("./project-requirements");
 const { selectApprovedEntry, resolveCachedServer, importApprovedArchive, importDownloadedRelease } = require("./server-cache");
 const { acquireApprovedRelease } = require("./server-acquisition");
+const { preflightDotnet } = require("./doctor-client");
+const { createOnboardingUi } = require("./onboarding-ui");
+const { createEnvironmentCommands } = require("./environment-ui");
 const manifest = require("./package.json");
 const clientRelease = manifest.lucentRelease;
 const releaseCatalog = require("./release-catalog.json");
@@ -213,9 +217,9 @@ class Rpc {
     }
 }
 
-function identifyServer(server, signal) {
+function identifyServer(server, signal, dotnetPath = "dotnet") {
     return new Promise((resolve, reject) => {
-        childProcess.execFile("dotnet", [server, "--identity"], {
+        childProcess.execFile(dotnetPath, [server, "--identity"], {
             timeout: 10000,
             maxBuffer: 64 * 1024,
             windowsHide: true,
@@ -273,7 +277,7 @@ async function selectProject() {
     return { folder, projectPath };
 }
 
-async function bootstrapServer(context, folder, signal) {
+async function bootstrapServer(context, folder, signal, dotnetPath) {
     const configured = vscode.workspace.getConfiguration("lucentLui", folder?.uri).get("serverPath");
     if (configured && !path.isAbsolute(configured)) {
         throw new Error("lucentLui.serverPath must be an absolute path on the workspace host.");
@@ -287,7 +291,7 @@ async function bootstrapServer(context, folder, signal) {
         bundled = verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
         server = bundled.serverPath;
     }
-    const identity = await identifyServer(server, signal);
+    const identity = await identifyServer(server, signal, dotnetPath);
     if (bundled && !isDeepStrictEqual(identity, bundled.identity)) {
         throw new Error("The bundled server reported a different identity.");
     }
@@ -341,6 +345,7 @@ async function finishToolingInstall(requirement, result, current, controller) {
     if (!current()) return;
     const choice = await vscode.window.showInformationMessage("Verified Lucent tooling is ready. Restart language services to use it.", "Restart Language Services");
     if (choice === "Restart Language Services" && current()) await vscode.commands.executeCommand("lucentLui.restartLanguageServices");
+    return true;
 }
 
 async function importServerArchive(context, current, controller) {
@@ -364,7 +369,7 @@ async function importServerArchive(context, current, controller) {
             return await importApprovedArchive({ ...options, archivePath: selected[0].fsPath });
         } finally { subscription.dispose(); }
     });
-    await finishToolingInstall(requirement, result, current, controller);
+    return finishToolingInstall(requirement, result, current, controller);
 }
 
 async function installMatchingServer(context, current, controller) {
@@ -374,8 +379,7 @@ async function installMatchingServer(context, current, controller) {
     const cached = await resolveCachedServer(options);
     if (!current() || cached.status === "cancelled") return;
     if (cached.status === "selected") {
-        await finishToolingInstall(requirement, cached, current, controller);
-        return;
+        return finishToolingInstall(requirement, cached, current, controller);
     }
     let authentication;
     try { authentication = await vscode.authentication.getSession("github", ["repo"], { createIfNone: true }); }
@@ -416,19 +420,22 @@ async function installMatchingServer(context, current, controller) {
             }
         }
     });
-    await finishToolingInstall(requirement, result, current, controller);
+    return finishToolingInstall(requirement, result, current, controller);
 }
 
-async function activateTrusted(context, isActive, onStarted) {
+async function activateTrusted(context, isActive, onStarted, onState, onSelected) {
     if (!vscode.workspace.isTrusted || !isActive()) return;
     let selection;
     try { selection = await selectProject(); }
     catch (error) {
+        if (isActive()) onState({ kind: "no-project", message: error.message });
         vscode.window.showErrorMessage(error.message);
         return;
     }
-    if (!selection || !isActive()) return;
+    if (!isActive()) return;
+    if (!selection) { onState({ kind: "no-project" }); return; }
     const { folder, projectPath } = selection;
+    onSelected(folder);
     const controller = new AbortController();
     const subscriptions = [];
     let activeStop = { dispose: () => {
@@ -437,13 +444,27 @@ async function activateTrusted(context, isActive, onStarted) {
     } };
     onStarted(activeStop);
     const current = () => isActive() && !controller.signal.aborted && vscode.workspace.isTrusted;
+    const report = (kind, message) => { if (isActive()) onState({ kind, projectPath, message }, { notify: true }); };
     let bundled, server, identity, configured;
     let cached;
-    try { ({ bundled, server, identity, configured } = await bootstrapServer(context, folder, controller.signal)); }
+    let dotnetPath;
+    try {
+        const preflight = await preflightDotnet({ workspacePath: folder?.uri.fsPath ?? os.tmpdir(), requireSdk: !!projectPath, signal: controller.signal });
+        if (!current()) return;
+        if (preflight.status !== "available") {
+            report("missing-tools", preflight.reason === "dotnet-sdk-missing"
+                ? "Lucent project services require a .NET SDK on the workspace host. Run Lucent: Check Environment for setup details."
+                : "Lucent requires an available .NET host and .NET 10 runtime. Run Lucent: Check Environment for setup details.");
+            activeStop.dispose();
+            return;
+        }
+        dotnetPath = preflight.dotnetPath;
+        ({ bundled, server, identity, configured } = await bootstrapServer(context, folder, controller.signal, dotnetPath));
+    }
     catch (error) {
-        const report = current();
+        const shouldReport = current();
         activeStop.dispose();
-        if (report) vscode.window.showErrorMessage(error.message);
+        if (shouldReport) report("mismatch", error.message);
         return;
     }
     if (!current()) return;
@@ -458,7 +479,7 @@ async function activateTrusted(context, isActive, onStarted) {
                 if (cached.status === "selected") {
                     server = cached.serverPath;
                     bundled = undefined;
-                    identity = await identifyServer(server, controller.signal);
+                    identity = await identifyServer(server, controller.signal, dotnetPath);
                     if (!current()) return;
                     if (!isDeepStrictEqual(identity, cached.identity)) throw new Error("The cached server reported a different identity.");
                 }
@@ -474,7 +495,7 @@ async function activateTrusted(context, isActive, onStarted) {
             const changed = inputs => uri => {
                 if (!current() || !uri.fsPath || !inputs.has(path.resolve(uri.fsPath).toLowerCase())) return;
                 activeStop.dispose();
-                vscode.window.showErrorMessage("Lucent project tooling inputs changed. Restore if needed, then run Lucent: Restart Language Services. Syntax highlighting remains available.");
+                report("stopped", "Lucent project tooling inputs changed. Restore if needed, then run Lucent: Restart Language Services. Syntax highlighting remains available.");
             };
             for (const [directory, inputs] of watchedInputs) {
                 const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(directory, "*"));
@@ -484,9 +505,9 @@ async function activateTrusted(context, isActive, onStarted) {
             await verifyRequirementInputs(requirements, controller.signal);
             if (!current()) return;
         } catch (error) {
-            const report = current();
+            const shouldReport = current();
             activeStop.dispose();
-            if (report) vscode.window.showErrorMessage(error.message);
+            if (shouldReport) report("mismatch", error.message);
             return;
         }
     }
@@ -496,7 +517,7 @@ async function activateTrusted(context, isActive, onStarted) {
             verifyBundledServer(context.asAbsolutePath("server"), clientRelease.bundledServer, clientRelease.sourceCommit);
         } catch (error) {
             activeStop.dispose();
-            vscode.window.showErrorMessage(`Bundled Lucent language server rejected: ${error.message}`);
+            report("mismatch", `Bundled Lucent language server rejected: ${error.message}`);
             return;
         }
     }
@@ -506,7 +527,7 @@ async function activateTrusted(context, isActive, onStarted) {
     log.info(`Starting ${delivery} language server: ${server}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
     log.info(`${delivery} server source ${identity.sourceCommit}, protocol ${identity.protocol.major}.${identity.protocol.minor}.`);
     if (requirements) log.info(`Evaluated ${requirements.state} project requirements match compiler ${requirements.compiler.sha256}.`);
-    const process = childProcess.spawn("dotnet", [server], {
+    const process = childProcess.spawn(dotnetPath, [server], {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true
     });
@@ -593,7 +614,7 @@ async function activateTrusted(context, isActive, onStarted) {
     onStarted(stop);
     const reportFailure = error => {
         log.error(error.message);
-        return vscode.window.showErrorMessage(
+        return report("stopped",
             `Lucent language server stopped. Check that dotnet and the selected server are available. ${error.message} See Output > Lucent LUI.`
         );
     };
@@ -649,6 +670,8 @@ async function activateTrusted(context, isActive, onStarted) {
     }
     if (stopped || !isActive()) { stop.dispose(); return; }
     rpc.notify("initialized", {});
+    onState({ kind: projectPath ? "ready" : "no-project", projectPath,
+        message: projectPath ? `Language services are active. ${delivery} server source ${identity.sourceCommit.slice(0, 8)}; protocol ${identity.protocol.major}.${identity.protocol.minor}.` : undefined });
     const completionData = new WeakMap();
     const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
     const isSynchronizedDocument = document => acceptsUri(document.uri.toString()) && (isLucentDocument(document)
@@ -856,60 +879,126 @@ async function activateTrusted(context, isActive, onStarted) {
 }
 
 async function activate(context) {
+    const ui = createOnboardingUi(vscode, context);
+    const environment = createEnvironmentCommands(vscode, context, manifest);
     let currentStop;
     let importController;
+    let selectedFolder;
+    let state = { kind: "checking" };
     let disposed = false;
     let generation = 0;
+    let semanticRequested = false;
+    const update = (next, options) => { state = next; ui.update(next, options); };
     const restart = () => {
+        semanticRequested = true;
         const ticket = ++generation;
+        environment.cancel();
         importController?.abort();
         currentStop?.dispose();
         currentStop = undefined;
+        selectedFolder = undefined;
         if (disposed) return Promise.resolve();
         if (!vscode.workspace.isTrusted) {
+            update({ kind: "untrusted" });
             vscode.window.showErrorMessage("Trust this workspace to start Lucent language services.");
             return Promise.resolve();
         }
+        update({ kind: "checking" });
         const isCurrent = () => !disposed && ticket === generation;
         return activateTrusted(context, isCurrent, stop => {
             if (isCurrent()) currentStop = stop;
             else stop.dispose();
-        }).then(stop => {
+        }, (next, options) => { if (isCurrent()) update(next, options); }, folder => { if (isCurrent()) selectedFolder = folder; }).then(stop => {
             if (isCurrent()) currentStop = stop;
             else stop?.dispose();
         }, error => {
             if (isCurrent()) throw error;
         });
     };
-    context.subscriptions.push({ dispose: () => { disposed = true; generation++; importController?.abort(); currentStop?.dispose(); } });
+    context.subscriptions.push({ dispose: () => { disposed = true; generation++; environment.cancel(); importController?.abort(); currentStop?.dispose(); } });
     context.subscriptions.push(vscode.commands.registerCommand("lucentLui.restartLanguageServices", restart));
-    context.subscriptions.push(vscode.commands.registerCommand("lucentLui.importServerArchive", async () => {
-        if (disposed) return;
-        if (!vscode.workspace.isTrusted) { vscode.window.showErrorMessage("Trust this workspace before importing Lucent tooling."); return; }
-        importController?.abort();
-        const controller = importController = new AbortController();
-        const current = () => !disposed && !controller.signal.aborted && vscode.workspace.isTrusted;
-        try { await importServerArchive(context, current, controller); }
-        catch (error) { if (current()) vscode.window.showErrorMessage(error.message); }
-        finally { if (importController === controller) importController = undefined; }
+    if (vscode.workspace.onDidOpenTextDocument) context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(document => {
+        if (document?.languageId !== "lui" || semanticRequested || disposed) return;
+        semanticRequested = true;
+        if (!vscode.workspace.isTrusted) {
+            update({ kind: "untrusted" });
+            return;
+        }
+        void restart().catch(error => vscode.window.showErrorMessage(error.message));
     }));
-    context.subscriptions.push(vscode.commands.registerCommand("lucentLui.installMatchingServer", async () => {
+    const install = (action, verb) => async () => {
         if (disposed) return;
-        if (!vscode.workspace.isTrusted) { vscode.window.showErrorMessage("Trust this workspace before installing Lucent tooling."); return; }
+        if (!vscode.workspace.isTrusted) { vscode.window.showErrorMessage(`Trust this workspace before ${verb} Lucent tooling.`); return; }
         importController?.abort();
         const controller = importController = new AbortController();
-        const current = () => !disposed && !controller.signal.aborted && vscode.workspace.isTrusted;
-        try { await installMatchingServer(context, current, controller); }
-        catch (error) { if (current()) vscode.window.showErrorMessage(error.message); }
-        finally { if (importController === controller) importController = undefined; }
+        const ticket = generation;
+        const current = () => !disposed && ticket === generation && !controller.signal.aborted && vscode.workspace.isTrusted;
+        ui.update({ kind: "installing" });
+        try {
+            const installed = await action(context, current, controller);
+            if (current() && installed) update({ kind: "tools-ready", projectPath: state.projectPath });
+        } catch (error) {
+            if (current()) update({ kind: "offline", projectPath: state.projectPath, message: error.message }, { notify: true });
+        } finally {
+            if (importController === controller) {
+                importController = undefined;
+                if (!disposed && ticket === generation) ui.update(state);
+            }
+        }
+    };
+    context.subscriptions.push(
+        vscode.commands.registerCommand("lucentLui.importServerArchive", install(importServerArchive, "importing")),
+        vscode.commands.registerCommand("lucentLui.installMatchingServer", install(installMatchingServer, "installing")),
+        vscode.commands.registerCommand("lucentLui.showToolingStatus", ui.showActions),
+        vscode.commands.registerCommand("lucentLui.openGettingStarted", () => vscode.commands.executeCommand("workbench.action.openWalkthrough", "lucent.lucent-lui#gettingStarted", false)),
+        vscode.commands.registerCommand("lucentLui.selectProject", async () => {
+            if (disposed || !vscode.workspace.isTrusted) return;
+            const ticket = generation;
+            const folders = (vscode.workspace.workspaceFolders ?? []).filter(folder => folder.uri.scheme === "file");
+            const choice = folders.length === 1 ? { folder: folders[0] } : await vscode.window.showQuickPick(
+                folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })),
+                { placeHolder: "Choose the workspace folder that will own language services" });
+            if (!choice || disposed || ticket !== generation || !vscode.workspace.isTrusted) return;
+            const selected = await vscode.window.showOpenDialog({ title: "Select Lucent project", defaultUri: choice.folder.uri,
+                canSelectMany: false, canSelectFiles: true, canSelectFolders: false, filters: { "C# project": ["csproj"] } });
+            if (!selected?.length || disposed || ticket !== generation || !vscode.workspace.isTrusted) return;
+            const relative = path.relative(choice.folder.uri.fsPath, selected[0].fsPath);
+            if (selected[0].scheme !== "file" || path.extname(relative).toLowerCase() !== ".csproj" || relative === ".."
+                || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+                await vscode.window.showErrorMessage("Select a .csproj inside the chosen workspace folder.");
+                return;
+            }
+            await vscode.workspace.getConfiguration("lucentLui", choice.folder.uri).update("projectPath", relative.replaceAll("\\", "/"), vscode.ConfigurationTarget.WorkspaceFolder);
+            if (!disposed && ticket === generation) await restart();
+        })
+    );
+    if (vscode.workspace.onDidChangeWorkspaceFolders) context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(event => {
+        environment.cancel();
+        if (!event.removed?.length || disposed) return;
+        importController?.abort();
+        if (selectedFolder && !event.removed.some(folder => folder.uri.fsPath === selectedFolder.uri.fsPath)) return;
+        generation++;
+        currentStop?.dispose();
+        currentStop = undefined;
+        selectedFolder = undefined;
+        update({ kind: vscode.workspace.isTrusted ? "no-project" : "untrusted" });
+    }));
+    if (vscode.workspace.onDidChangeConfiguration) context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+        if (disposed || !event.affectsConfiguration("lucentLui.projectPath", selectedFolder?.uri)
+            && !event.affectsConfiguration("lucentLui.serverPath", selectedFolder?.uri)) return;
+        environment.cancel();
+        if (semanticRequested && vscode.workspace.isTrusted) void restart().catch(() => {}); // Startup reports its own failure once.
     }));
     if (!vscode.workspace.isTrusted) {
+        semanticRequested = (vscode.workspace.textDocuments ?? []).some(document => document.languageId === "lui");
+        update({ kind: "untrusted" });
         context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => {
-            void restart().catch(error => vscode.window.showErrorMessage(error.message));
+            if (semanticRequested) void restart().catch(error => vscode.window.showErrorMessage(error.message));
         }));
         return;
     }
-    return restart();
+    if ((vscode.workspace.textDocuments ?? []).some(document => document.languageId === "lui")) return restart();
+    update({ kind: "no-project" });
 }
 
 exports.activate = activate;

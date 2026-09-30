@@ -328,4 +328,11 @@ try {
     $fixture = Invoke-FixtureProof
     [ordered]@{ app = $app; fixture = $fixture } | ConvertTo-Json -Compress
 }
-finally { [Environment]::SetEnvironmentVariable('LUCENT_UIA_DIAGNOSTICS', $prior) }
+finally {
+    if ($null -eq $prior) {
+        Remove-Item Env:LUCENT_UIA_DIAGNOSTICS -ErrorAction SilentlyContinue
+    }
+    else {
+        [Environment]::SetEnvironmentVariable('LUCENT_UIA_DIAGNOSTICS', $prior)
+    }
+}

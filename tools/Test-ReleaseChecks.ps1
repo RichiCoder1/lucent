@@ -78,7 +78,13 @@ try {
     if ($LASTEXITCODE) { throw 'Cache helper restore failed.' }
     dotnet publish src/Lucent.Tooling.Cache/Lucent.Tooling.Cache.csproj -c Release --no-restore -p:UseAppHost=false -o $helperStage
     if ($LASTEXITCODE) { throw 'Cache helper publication failed.' }
-    ./tools/Pack-LuiExtension.ps1 -ServerArchivePath (Join-Path $directory 'server.zip') -ServerDirectory $serverStage -CacheHelperDirectory $helperStage -OutputPath (Join-Path $directory 'extension.vsix')
+    $doctorStage = Join-Path $root "artifacts/release-doctor-$Version"
+    if (Test-Path -LiteralPath $doctorStage) { throw 'Doctor staging directory already exists.' }
+    dotnet restore src/Lucent.Tools/Lucent.Tools.csproj --locked-mode
+    if ($LASTEXITCODE) { throw 'Doctor restore failed.' }
+    dotnet publish src/Lucent.Tools/Lucent.Tools.csproj -c Release --no-restore -p:UseAppHost=false -o $doctorStage
+    if ($LASTEXITCODE) { throw 'Doctor publication failed.' }
+    ./tools/Pack-LuiExtension.ps1 -ServerArchivePath (Join-Path $directory 'server.zip') -ServerDirectory $serverStage -CacheHelperDirectory $helperStage -DoctorDirectory $doctorStage -OutputPath (Join-Path $directory 'extension.vsix')
     $candidatePath = Join-Path $directory 'candidate.json'
     $candidate = New-LuiReleaseSet -Directory $directory -Version $Version -SourceCommit $commit -SourceState clean -ServerArchive server.zip -Vsix extension.vsix -OutputPath $candidatePath
 
@@ -105,7 +111,7 @@ try {
         finally { $env:LUCENT_LSP_SERVER_DLL = $previousServer }
     }
     Invoke-RecordedCheck extension packaged-extension {
-        node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs
+        node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs extensions/lucent-lui-vscode/managed-tool.test.cjs extensions/lucent-lui-vscode/doctor-client.test.cjs extensions/lucent-lui-vscode/onboarding-ui.test.cjs extensions/lucent-lui-vscode/environment-ui.test.cjs
         if ($LASTEXITCODE) { throw 'Extension tests failed.' }
         ./tools/Test-LuiReleaseCatalog.ps1
         ./tools/Test-ReleaseSet.ps1 -RunFixtures -ServerArchivePath (Join-Path $directory 'server.zip') -VsixPath (Join-Path $directory 'extension.vsix')

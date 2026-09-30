@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <LucentIsDistributionPackage
-      Condition="'$(MSBuildProjectName)' == 'Lucent.Core' Or '$(MSBuildProjectName)' == 'Lucent.Icons.Lucide' Or '$(MSBuildProjectName)' == 'Lucent.Renderer.Skia' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows.Activation' Or '$(MSBuildProjectName)' == 'Lucent.Hosting' Or '$(MSBuildProjectName)' == 'Lucent.Lui.Sdk' Or '$(MSBuildProjectName)' == 'Lucent.Reactive.R3' Or '$(MSBuildProjectName)' == 'Lucent.Testing' Or '$(MSBuildProjectName)' == 'Lucent.Testing.Skia'"
+      Condition="'$(MSBuildProjectName)' == 'Lucent.Core' Or '$(MSBuildProjectName)' == 'Lucent.Icons.Lucide' Or '$(MSBuildProjectName)' == 'Lucent.Renderer.Skia' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows.Activation' Or '$(MSBuildProjectName)' == 'Lucent.Hosting' Or '$(MSBuildProjectName)' == 'Lucent.Lui.Sdk' Or '$(MSBuildProjectName)' == 'Lucent.Reactive.R3' Or '$(MSBuildProjectName)' == 'Lucent.Testing' Or '$(MSBuildProjectName)' == 'Lucent.Testing.Skia' Or '$(MSBuildProjectName)' == 'Lucent.Tools'"
       >true</LucentIsDistributionPackage>
   </PropertyGroup>
   <PropertyGroup Condition="'$(LucentIsDistributionPackage)' == 'true'">
@@ -15,7 +15,7 @@
     <Description>Lucent Windows-first NativeAOT desktop UI framework. Experimental prerelease APIs.</Description>
   </PropertyGroup>
   <ItemGroup Condition="'$(LucentIsDistributionPackage)' == 'true'">
-    <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="README.md" Condition="'$(MSBuildProjectName)' != 'Lucent.Tools'" />
     <None Include="$(MSBuildThisFileDirectory)../LICENSE" Pack="true" PackagePath="" />
   </ItemGroup>
 </Project>

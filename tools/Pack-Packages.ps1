@@ -78,6 +78,11 @@ foreach ($name in $names) {
                 throw 'SDK package introduced runtime package dependencies; build-time tooling must remain private.'
             }
         }
+        if ($name -eq 'Lucent.Tools') {
+            foreach ($required in @('tools/net10.0/any/Lucent.Tools.dll', 'tools/net10.0/any/Lucent.Tools.deps.json', 'tools/net10.0/any/Lucent.Tools.runtimeconfig.json', 'tools/net10.0/any/DotnetToolSettings.xml')) {
+                if (-not $zip.GetEntry($required)) { throw "Lucent.Tools package omitted tool payload: $required" }
+            }
+        }
     } finally { $zip.Dispose() }
 }
 Write-Output "Lucent package set: PASS ($Version, $commit)"

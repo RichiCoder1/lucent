@@ -37,8 +37,14 @@
     "project-requirements.js",
     "server-cache.js",
     "server-acquisition.js",
+    "managed-tool.js",
+    "doctor-client.js",
+    "onboarding-ui.js",
+    "environment-ui.js",
     "release-catalog.json",
     "tooling-cache/**",
+    "doctor/**",
+    "onboarding/**",
     "server/**",
     "language-configuration.json",
     "syntaxes/**",
@@ -70,6 +76,45 @@
     }, {
       "command": "lucentLui.installMatchingServer",
       "title": "Lucent: Install Matching Language Tools"
+    }, {
+      "command": "lucentLui.checkEnvironment",
+      "title": "Lucent: Check Environment"
+    }, {
+      "command": "lucentLui.copyEnvironmentReport",
+      "title": "Lucent: Review and Copy Environment Report"
+    }, {
+      "command": "lucentLui.selectProject",
+      "title": "Lucent: Select Project"
+    }, {
+      "command": "lucentLui.showToolingStatus",
+      "title": "Lucent: Show Tooling Status"
+    }, {
+      "command": "lucentLui.openGettingStarted",
+      "title": "Lucent: Open Getting Started"
+    }],
+    "walkthroughs": [{
+      "id": "gettingStarted",
+      "title": "Get started with Lucent",
+      "description": "Check your workspace host, choose a project, and start authoring .lui components.",
+      "steps": [{
+        "id": "environment",
+        "title": "Check the environment",
+        "description": "Inspect installed tooling and configuration without restoring or running your project.\n[Check environment](command:lucentLui.checkEnvironment)",
+        "media": { "markdown": "onboarding/environment.md" },
+        "completionEvents": ["onCommand:lucentLui.checkEnvironment"]
+      }, {
+        "id": "project",
+        "title": "Choose your project",
+        "description": "Open a Lucent workspace, review Workspace Trust, and select the project for language services.\n[Select project](command:lucentLui.selectProject)",
+        "media": { "markdown": "onboarding/setup.md" },
+        "completionEvents": ["onCommand:lucentLui.selectProject"]
+      }, {
+        "id": "tools",
+        "title": "Check language tools",
+        "description": "Open a .lui file. The Lucent status item explains which tools are active and offers applicable setup actions.\n[Show tooling status](command:lucentLui.showToolingStatus)",
+        "media": { "markdown": "onboarding/setup.md" },
+        "completionEvents": ["onCommand:lucentLui.showToolingStatus"]
+      }]
     }],
     "configuration": {
       "title": "Lucent .lui",
@@ -78,8 +123,13 @@
           "type": "string",
           "default": "",
           "description": "Advanced override: path to a trusted Lucent.Lui.LanguageServer.dll on the workspace host. The server identity is checked before project evaluation."
+        },
+        "lucentLui.projectPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Evaluated .csproj, absolute or relative to the selected workspace folder."
         }
-        ,"lucentLui.projectPath": { "type": "string", "default": "", "description": "Evaluated .csproj, absolute or relative to the selected workspace folder." }
       }
     }
   }

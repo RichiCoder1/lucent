@@ -349,7 +349,10 @@ sources. An isolated development-package NativeAOT proof passed primary/secondar
 transport and oversized-request rejection; evidence is recorded in
 `artifacts/issue245/ci100-package-diagnosis.md` and its linked proof manifest.
 CI 100 publication was skipped; no complete release or published 100.1 package is
-claimed. The corrected CI run and publication remain pending.
+claimed. CI 101 subsequently passed all three jobs and published `0.3.0-dev.101.1`.
+The complete artifact and descriptor were independently authenticated; #245 is
+closed. The retained catalog evidence is under
+`artifacts/issue247-cache-acquisition-design/ci101-catalog`.
 
 CI 99 passed managed tests, the complete native asset proof and headless package
 consumers, then failed after the package-only Issue Browser publish on SDK-only
@@ -361,8 +364,10 @@ NativeAOT build claim. The retained failed log is
 `9FC3B8DD34A260E034610D4B4C801A1A8433AF574376CC93CE794DCF8F51FB5C`.
 Publication was skipped.
 
-Templates #246 pass four generation variants and await actual consumer proof against
-a coherent bundle. They are not yet added to the release inventory. Editor #247's
+### Templates and editor acquisition — #246/#247
+
+The first template checkpoint passed four generation variants before coherent
+consumer proof and release-inventory integration. Editor #247's
 trust, selected-project isolation, identity and restart work passed independent
 review after correcting hung-startup cancellation, late-notification disposal and
 an excluded-root document-symbol path. Commit `76bd62e9` passes 25 Node contracts;
@@ -377,14 +382,65 @@ fixtures. Evidence under `artifacts/issue247-producer-03116311` is explicitly a 
 development snapshot, not CI release evidence. The VSIX is 14,968,359 bytes with 184
 server files. One local verification took about 66 ms; this is characterization,
 not a performance budget or general startup claim. Evaluated project matching,
-cache/import and authenticated acquisition remain separate planned work.
+cache/import and authenticated acquisition were implemented in the later checkpoint
+below.
 
 Template source is committed as `053b5357` after independent review. The review
 found and corrected the default assembly name for library names containing spaces:
 the template now uses the sanitized namespace for its assembly name. A real
 package diagnostic reproduces the invalid asset domain before the change and
 builds `Équipe_Cards.dll` without warnings afterward, against immutable 93.1 inputs.
-That diagnostic does not replace the pending coherent-bundle consumer proof.
+That diagnostic is distinct from the later coherent-bundle consumer proof.
+
+Commit `ddeeadac` contains the final reviewed template and editor acquisition
+batch. Templates join the 11-package release inventory. The local descriptor-bound
+consumer proof under `artifacts/templates-proof/ci101-release-final` installs the
+exact template package and passes five warning-clean builds, semantic/capture tests,
+library interaction/artwork, and NativeAOT publication without launching a window.
+Its candidate combines authenticated 101.1 inputs with the new development template
+package; it is not official template publication.
+
+The editor's evaluated requirements, immutable cache, offline import and explicit
+authenticated download pass the final V6 producer proof under
+`artifacts/issue247-producer-6270d757-v6`. That proof links the actual V5 GitHub
+download/helper-install/cache run. The final checkpoint passes 60 Node, 13 helper,
+72 release and 26 catalog contracts; integrated review has no remaining blocker.
+
+CI 102 failed on a requirements fixture's restore-only audit property and relative
+NuGet cache resolution. Commit `6bc288ea` corrects both, with targeted regressions
+passing. CI 103 failed before publication; its formatting correction is prepared.
+The package failure repeated because template cleanup changed absent environment
+variables into empty strings, causing .NET to select a relative cache. The corrected
+cleanup preserves absence and existing values; a real template failure path and
+15 observations across the four affected script cleanup blocks pass. The full
+nested published-server replay is deferred to CI after local restore exhausted D:
+space. Logs and the reproduction are under `artifacts/ci103-package-failure`.
+`101.1` remains the latest confirmed release, so #246/#247 remain open pending
+official publication.
+
+### Environment doctor — #248
+
+The first slice supplies a BCL-only local tool and a source-bound VSIX payload,
+plus static environment reporting, standard editor onboarding, explicit project
+selection and cancellation. Default checks perform no project evaluation, restore,
+network request or configuration update. Capability results preserve `notChecked`
+for work that did not run.
+
+Six CLI contracts and 89 extension tests pass. Real local-tool installation and an
+invocation extracted from the VSIX pass as well. Review corrected owned-process
+cleanup, commented/BOM global.json parsing, failed-probe classification, static
+command activation and folder-level project configuration. No review blocker
+remains for this slice. The final VSIX validates against its source/payload hashes;
+its final README-only repack reuses the passing functional proof and 78 unchanged
+release-fixture body checks. The later script environment cleanup has its separate
+15-observation proof. Exact locations and hashes are in
+`artifacts/issue248-activation/final-producer-location.json`.
+
+These are development checks, not publication or a completed #248/#249 journey.
+The [doctor plan](environment-doctor.md) records the remaining trusted-project,
+optional feed and native-toolchain diagnostics.
+
+### Browser follow-up evidence
 
 The browser walkthrough's keyboard diagnostic found that Computer Use's Down and
 Right commands arrived as SDL keypad 2/6 events, while Tab mapped and moved focus.

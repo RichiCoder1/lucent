@@ -50,7 +50,19 @@ Reviewed custom lock-file and cancellation corrections are complete. The 101.1
 catalog is authenticated. Explicit online acquisition passes the real packaged
 GitHub download/install/cache proof and integrated review under the
 [editor lifecycle plan](plans/editor-tooling-lifecycle.md).
-Read-only environment doctor #248 is next; its initial implementation is underway.
+Commit `ddeeadac` pushed #246/#247, but CI 102 failed before publication. The
+requirements fixture's restore policy mismatch and relative NuGet cache handling
+are corrected in pushed `6bc288ea`, with focused checks passing. CI 103 failed
+formatting and repeated the published-server cache failure. The template harness
+restored absent environment variables as empty strings, changing .NET's cache to a
+relative path; lossless cleanup now passes a focused reproduction and 15 checks.
+The formatting fix is prepared. `101.1` remains the latest confirmed release.
+Read-only environment doctor #248's static CLI, verified tool delivery and standard
+VS Code onboarding surfaces pass review and local package proof. Its 89 extension
+tests include static-only command activation and scoped project selection. Default
+checks preserve explicit unverified capabilities; the accepted issue is not yet
+complete. The [doctor plan](plans/environment-doctor.md)
+orders its remaining trusted-project, optional feed and native-prerequisite checks.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

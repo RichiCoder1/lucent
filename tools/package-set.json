@@ -9,5 +9,6 @@
   "Lucent.Reactive.R3",
   "Lucent.Testing",
   "Lucent.Testing.Skia",
-  "Lucent.Templates"
+  "Lucent.Templates",
+  "Lucent.Tools"
 ]

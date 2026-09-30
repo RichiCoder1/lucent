@@ -71,7 +71,7 @@ Map entries support one-to-many and many-to-one spans, distinguish symbol/expres
 
 The first complete editor target is VS Code. A separate .NET 10 LSP process consumes `Lucent.Lui.Compiler` and the shared project model. The extension remains a thin protocol/client layer.
 
-The initial host loads one configured evaluated `.csproj` through `MSBuildWorkspace`; it does not parse project files or resolve references itself. Its bounded proof supports source-to-generated and generated-to-source definition navigation for `.lui` maps. Project/document replacements and disposal increment the same freshness epoch carried by compiler results, so obsolete work is dropped before publication. The VS Code host starts the separately installed server named by `lucentLui.serverPath`; neither host nor server is a runtime package asset.
+The initial host loads one configured evaluated `.csproj` through `MSBuildWorkspace`; it does not parse project files or resolve references itself. Its bounded proof supports source-to-generated and generated-to-source definition navigation for `.lui` maps. Project/document replacements and disposal increment the same freshness epoch carried by compiler results, so obsolete work is dropped before publication. The VS Code host selects a verified compatible bundled or cached server; `lucentLui.serverPath` is an advanced absolute-path override. Neither host nor server is an application runtime package asset.
 
 In VS Code, open **View > Output** and select **Lucent LUI** for server startup paths, request timings, slow-request notices, and server errors. Request logs omit document text and request payloads. Reload the window after changing the installed server or extension. The server applies editor changes in order and batches push diagnostics during typing; completion uses the latest overlay without waiting for diagnostics on every intermediate keystroke. Explicit diagnostic requests flush pending diagnostics. Outline symbols are syntax-only. The editor reuses Roslyn host services and compilation results within the current project epoch, with the existing identity/freshness checks before publication. It excludes Lucent's build-time generator from the editor compilation because it produces its own projection; other generators remain enabled. Completion documentation is resolved when a suggestion is selected, and resolution from an obsolete epoch is ignored. Hover retains its most recent tooltip across structural whitespace edits only when the canonical `.lui` document is unchanged. It translates the hover position by non-whitespace character offset; compiler results and source maps still invalidate. String contents, expression text, other document edits, closes, and project reloads do not use this shortcut.
 
@@ -109,7 +109,7 @@ The VS Code host accepts an absolute `lucentLui.projectPath` inside the selected
 
 ## Local editor packaging
 
-Publish the language server and tooling cache helper with the repository's pinned
+Publish the language server, tooling cache helper and environment doctor with the repository's pinned
 SDK, then bundle them with `./tools/Pack-LuiExtension.ps1`. The script restores the
 official VSCE tool from the committed lock file with lifecycle scripts disabled,
 includes the license, and checks source identity and runtime inventories. The
@@ -120,9 +120,11 @@ after replacing the installed extension.
 ```powershell
 dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release -o artifacts/lui-server
 dotnet publish src/Lucent.Tooling.Cache/Lucent.Tooling.Cache.csproj -c Release -p:UseAppHost=false -o artifacts/lui-cache-helper
+dotnet publish src/Lucent.Tools/Lucent.Tools.csproj -c Release -p:UseAppHost=false -o artifacts/lui-doctor
 ./tools/Pack-LuiServer.ps1 -ServerDirectory artifacts/lui-server -OutputPath artifacts/lui-server.zip
 ./tools/Pack-LuiExtension.ps1 -ServerArchivePath artifacts/lui-server.zip `
   -ServerDirectory artifacts/lui-server -CacheHelperDirectory artifacts/lui-cache-helper `
+  -DoctorDirectory artifacts/lui-doctor `
   -OutputPath artifacts/lucent-lui.vsix
 code --install-extension artifacts/lucent-lui.vsix --force
 ```

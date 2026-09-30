@@ -265,3 +265,12 @@ No external archive library or copied implementation is introduced.
 The extension uses VS Code's built-in GitHub authentication provider and the
 GitHub Actions REST API for explicit approved-release downloads. Credentials
 remain in the provider/session boundary; Lucent adds no credential store.
+
+## Environment diagnostics
+
+The #248 doctor follows the capability-specific, explicit-check approach discussed
+in [Uno's environment-check documentation](https://platform.uno/docs/articles/external/uno.check/doc/using-uno-check.html).
+Lucent's default check remains static, offline and read-only; no Uno code or
+dependency is included. Editor onboarding uses VS Code's standard
+[walkthrough contribution](https://code.visualstudio.com/api/references/contribution-points#contributes.walkthroughs)
+and status/Quick Pick/Problems APIs rather than introducing a separate UI toolkit.

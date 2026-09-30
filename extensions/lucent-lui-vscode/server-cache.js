@@ -1,7 +1,7 @@
 "use strict";
 
 const childProcess = require("node:child_process");
-const crypto = require("node:crypto");
+const { verifyManagedToolFiles, hashFile } = require("./managed-tool");
 const fs = require("node:fs");
 const path = require("node:path");
 const { isDeepStrictEqual } = require("node:util");
@@ -9,7 +9,6 @@ const { isDeepStrictEqual } = require("node:util");
 const HASH = /^[0-9a-f]{64}$/;
 const ACTIONS_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
-const MAX_HELPER_BYTES = 128 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 const MAX_HELPER_OUTPUT = 128 * 1024;
 
@@ -19,82 +18,9 @@ function samePath(left, right) {
     return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-function regularFile(root, name) {
-    if (typeof name !== "string" || !name || name.includes("\\") || name.includes(":") || name.startsWith("/")
-        || name.split("/").some(part => !part || part === "." || part === ".." || /[. ]$/.test(part))) {
-        throw new Error("Unsafe cache helper file name.");
-    }
-    let current = root;
-    if (!fs.lstatSync(root).isDirectory()) throw new Error("Cache helper directory is not regular.");
-    for (const [index, part] of name.split("/").entries()) {
-        current = path.join(current, part);
-        const stat = fs.lstatSync(current);
-        if (stat.isSymbolicLink() || (index === name.split("/").length - 1 ? !stat.isFile() : !stat.isDirectory())) {
-            throw new Error("Cache helper contains a link or non-file entry.");
-        }
-    }
-    return current;
+function verifyHelperFiles(helperDirectory, manifest, sourceCommit, signal) {
+    return verifyManagedToolFiles(helperDirectory, manifest, sourceCommit, "Lucent.Tooling.Cache", signal);
 }
-
-function allFiles(root) {
-    const found = [];
-    function visit(directory, prefix) {
-        for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
-            const name = prefix ? `${prefix}/${item.name}` : item.name;
-            if (item.isSymbolicLink()) throw new Error("Cache helper contains a link.");
-            if (item.isDirectory()) visit(path.join(directory, item.name), name);
-            else if (item.isFile()) found.push(name);
-            else throw new Error("Cache helper contains an unsupported entry.");
-        }
-    }
-    visit(root, "");
-    return found.sort();
-}
-
-function hashFile(file, maxBytes, signal) {
-    return new Promise((resolve, reject) => {
-        const hash = crypto.createHash("sha256");
-        let total = 0;
-        const stream = fs.createReadStream(file);
-        const abort = () => stream.destroy(Object.assign(new Error("Canceled"), { name: "AbortError" }));
-        signal?.addEventListener("abort", abort, { once: true });
-        if (signal?.aborted) abort();
-        stream.on("data", chunk => {
-            total += chunk.length;
-            if (total > maxBytes) stream.destroy(new Error("File exceeds the approved size limit."));
-            else hash.update(chunk);
-        });
-        stream.once("error", error => { signal?.removeEventListener("abort", abort); reject(error); });
-        stream.once("end", () => { signal?.removeEventListener("abort", abort); resolve({ bytes: total, sha256: hash.digest("hex") }); });
-    });
-}
-
-async function verifyHelperFiles(helperDirectory, manifest, sourceCommit, signal) {
-    if (!path.isAbsolute(helperDirectory) || manifest?.schemaVersion !== 1
-        || manifest.entryPoint !== "Lucent.Tooling.Cache.dll" || manifest.sourceCommit !== sourceCommit
-        || !COMMIT.test(sourceCommit) || !Array.isArray(manifest.files)
-        || manifest.files.length !== 3) throw new Error("Cache helper manifest is unsupported.");
-    const required = ["Lucent.Tooling.Cache.deps.json", "Lucent.Tooling.Cache.dll", "Lucent.Tooling.Cache.runtimeconfig.json"];
-    const listed = manifest.files.map(file => file?.fileName);
-    if (!isDeepStrictEqual([...listed].sort(), required)) throw new Error("Cache helper manifest omits required files.");
-    if (!isDeepStrictEqual(allFiles(helperDirectory), required)) throw new Error("Cache helper has missing or undeclared files.");
-    let total = 0;
-    for (const entry of manifest.files) {
-        if (!Number.isSafeInteger(entry.bytes) || entry.bytes <= 0 || !HASH.test(entry.sha256)) {
-            throw new Error("Invalid cache helper inventory entry.");
-        }
-        total += entry.bytes;
-        if (total > MAX_HELPER_BYTES) throw new Error("Cache helper exceeds its size limit.");
-        const file = regularFile(helperDirectory, entry.fileName);
-        if (fs.statSync(file).size !== entry.bytes) throw new Error("Cache helper file size differs from inventory.");
-        const actual = await hashFile(file, entry.bytes, signal);
-        if (actual.bytes !== entry.bytes || actual.sha256 !== entry.sha256) {
-            throw new Error("Cache helper file hash differs from inventory.");
-        }
-    }
-    return path.join(helperDirectory, manifest.entryPoint);
-}
-
 function exactRequirement(requirement) {
     if (requirement?.schemaVersion !== 1 || requirement.kind !== "project-requirements"
         || requirement.state !== "package" || requirement.semanticReady !== false

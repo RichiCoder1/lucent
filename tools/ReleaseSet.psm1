@@ -248,10 +248,34 @@ function Get-LuiVsix([string] $Path) {
             Assert-LuiDependencyFiles $archive ($prefix + 'Lucent.Tooling.Cache.deps.json')
         }
         elseif (@($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/tooling-cache/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Extension contains an undeclared cache helper.' }
+        if ($manifest['files'] -contains 'managed-tool.js' -and !$manifest['lucentDoctor']) { throw 'Extension managed tool module has no bundled doctor.' }
+        if ($manifest['lucentDoctor']) {
+            $doctor = $manifest['lucentDoctor']
+            if ($doctor['schemaVersion'] -ne 1 -or $doctor['entryPoint'] -cne 'Lucent.Tools.dll' -or $doctor['sourceCommit'] -cne $compatibility['sourceCommit']) { throw 'Unsupported or mismatched doctor identity.' }
+            $doctorNames = @('Lucent.Tools.dll', 'Lucent.Tools.deps.json', 'Lucent.Tools.runtimeconfig.json')
+            Assert-LuiSame @($doctor['files'] | ForEach-Object { $_['fileName'] } | Sort-Object -CaseSensitive) @($doctorNames | Sort-Object -CaseSensitive) 'doctor inventory'
+            $doctorPrefix = 'extension/doctor/'
+            Assert-LuiSame @($archive.Entries.Keys | Where-Object { $_.StartsWith($doctorPrefix, [StringComparison]::OrdinalIgnoreCase) } | Sort-Object -CaseSensitive) @($doctorNames | ForEach-Object { $doctorPrefix + $_ } | Sort-Object -CaseSensitive) 'doctor payload'
+            foreach ($file in $doctor['files']) {
+                $bytes = Read-LuiArchiveBytes $archive ($doctorPrefix + $file['fileName'])
+                if ($bytes.Length -ne $file['bytes'] -or (Get-LuiBytesHash $bytes) -cne $file['sha256']) { throw 'Doctor bytes differ from the packaged inventory.' }
+            }
+            $doctorVersion = Get-LuiAssemblyVersion (Read-LuiArchiveBytes $archive ($doctorPrefix + 'Lucent.Tools.dll'))
+            if ($doctorVersion -notmatch ('\+' + [regex]::Escape($doctor['sourceCommit']) + '(\.|$)')) { throw 'Doctor assembly source identity mismatch.' }
+            $doctorRuntime = Read-LuiArchiveJson $archive ($doctorPrefix + 'Lucent.Tools.runtimeconfig.json')
+            if ($doctorRuntime['runtimeOptions']['tfm'] -cne 'net10.0' -or $doctorRuntime['runtimeOptions']['framework']['name'] -cne 'Microsoft.NETCore.App') { throw 'Unsupported doctor runtime.' }
+            Assert-LuiDependencyFiles $archive ($doctorPrefix + 'Lucent.Tools.deps.json')
+        }
+        elseif (@($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/doctor/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Extension contains an undeclared doctor.' }
         $declared = @(@{ path = $manifest['main']; json = $false })
         if ($null -ne $bundle) { $declared += @{ path = './server-bundle.js'; json = $false } }
-        foreach ($file in @('project-requirements.js', 'server-cache.js', 'server-acquisition.js', 'release-catalog.json')) {
+        foreach ($file in @('project-requirements.js', 'server-cache.js', 'server-acquisition.js', 'managed-tool.js', 'doctor-client.js', 'onboarding-ui.js', 'environment-ui.js', 'release-catalog.json')) {
             if ($manifest['files'] -contains $file) { $declared += @{ path = $file; json = $file.EndsWith('.json') } }
+        }
+        if ($manifest['lucentDoctor']) {
+            foreach ($file in @('managed-tool.js', 'doctor-client.js', 'onboarding-ui.js', 'environment-ui.js', 'onboarding/setup.md', 'onboarding/environment.md')) {
+                $declared += @{ path = $file; json = $false }
+            }
         }
         foreach ($language in $manifest['contributes']['languages']) {
             $declared += @{ path = $language['configuration']; json = $true }

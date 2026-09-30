@@ -7,10 +7,11 @@ records and issues.
 
 ## Current constraints
 
-The owner reauthorized Computer Use on September 30, but the first app-list call
-immediately reported another physical Escape interruption. A question to reset and
-retry is pending; do not issue desktop input until the owner answers. The earlier
-Node session was reset and the untouched Issue Browser fixture was stopped.
+The owner reauthorized Computer Use again on September 30, but its first app-list
+call immediately reported another physical Escape interruption before any window
+inspection or input. A fresh question to reset and retry is pending; wait for the
+owner's answer before further desktop input. The prior connection was reset and
+the untouched Issue Browser fixture was stopped; this attempt launched no app.
 Earlier representative Component Browser and Issue Browser
 presentation checks ran, as did a real Issue Browser journal restart.
 Computer Use's Down and Right commands arrived at SDL as keypad 2 and keypad 6,
@@ -85,6 +86,24 @@ editor catalog and retained acquisition evidence are under
 consumers are now exercising that bundle.
 The failed CI 95–100 evidence above remains historical and must be preserved.
 
+Commit `ddeeadac` pushed #246/#247. CI 102 failed before publication: the managed
+requirements fixture supplied a restore-only audit property, and the package job
+resolved a relative NuGet cache differently during restore and build. Failed logs
+and diagnosis are under `artifacts/ci102-managed-failure`. The fixture now authors
+its audit policy so both operations agree; its focused regression passes. Cache
+path normalization passes a targeted relative-cache restore/build check. Both
+corrections are pushed as `6bc288ea`. CI 103 failed formatting in the small fixture
+correction, now fixed locally; its package job passed template consumers, then
+repeated the relative-cache import failure in the published-server test build.
+The template harness restored absent environment variables as empty strings;
+that makes .NET choose a relative cache. Lossless cleanup now preserves absent,
+empty and populated values in all four affected verifier scripts. The actual
+template failure path restores an absolute default cache, and 15 focused cleanup
+observations pass. Evidence and failed logs are in `artifacts/ci103-package-failure`.
+The full nested published-server replay remains for CI because local D: capacity
+blocked the isolated cache restore; do not claim a completed local pipeline.
+`101.1` remains the latest confirmed publication; #246/#247 await official delivery.
+
 | Work | Current boundary | Next action |
 | --- | --- | --- |
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
@@ -96,8 +115,9 @@ The failed CI 95–100 evidence above remains historical and must be preserved.
 | Restoration #221 | Reviewed app persistence and pending-state capture committed as `57245db1`; native restart reopens issue #9915; official 101.1 package-only NativeAOT replay app prepared | Execute final package-only replay when Computer Use resumes |
 | Activation #222 | Optional adapter has 22 passing model contracts; reviewed fixture corrections published; official 101.1 NativeAOT fixture and unsigned MSIX/Sandbox input prepared | Isolated native registration/foreground coverage remains |
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
-| Templates #246 | Exact descriptor-bound local template package passes generated builds, semantic/Skia tests, package-only library and NativeAOT publication; 11-package inventory and CI wiring implemented | Commit/publish and confirm official template publication |
-| Editor lifecycle #247 | Reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Commit/publish; visual VS Code sign-in remains part of the later onboarding journey |
+| Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
+| Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
+| Environment doctor #248 | Static CLI and VS Code onboarding pass review, 89 extension tests, six CLI contracts, local tool install and extracted VSIX invocation | Publish the first slice; finish trusted-project, optional feed and native-prerequisite diagnostics before closing |
 | Windows keypad #326 | Published in 101.1 and closed; three focused contracts pass in both managed and NativeAOT runs | No remaining issue work; no physical main-arrow claim |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
@@ -193,11 +213,27 @@ proof. The integrated review found no remaining blocker. These are development
 proofs, not published releases. See
 [the lifecycle plan](../plans/editor-tooling-lifecycle.md) for supported scope.
 
-Environment doctor #248 is the next implementation slice. Its worker owns only
-`src/Lucent.Tools` and `tests/Lucent.Tools.Tests`; these are in-progress sources,
-not part of the #246/#247 publication checkpoint. Keep default checks static,
-offline and read-only; explicit project checks must reuse verified requirements
-evaluation rather than becoming a second MSBuild evaluator.
+Environment doctor #248 now includes the static CLI, verified VSIX payload and
+standard editor setup/reporting surfaces. Local package installation and the actual
+doctor extracted from the VSIX pass. The pre-correction producer evidence is under
+`artifacts/issue248-producer-6bc288ea`; its 78 release fixtures and 88 extension tests
+pass. Both editor review corrections are accepted: static-command activation no
+longer starts project evaluation, and project selection has a resource-scoped
+configuration declaration. The final extension suite passes 89/89 under
+`artifacts/issue248-activation`. The final v3 VSIX passes payload/source validation;
+the extracted v2 doctor passed real invocation, and v3 changes only its README links
+and semantically equivalent package JSON serialization. Its C: evidence location
+and hashes are recorded in `artifacts/issue248-activation/final-producer-location.json`.
+Preserve those temporary directories and the original evidence. The [doctor plan](../plans/environment-doctor.md)
+owns the remaining trusted-project, feed and native-prerequisite work. #248 remains
+open; these local checks do not establish publication or a completed #249 journey.
+
+The local CI 103 reproduction exhausted its restore space with D: at about 145 MB
+free. Its failed log and partial repository-local `.nuget/packages` cache remain;
+automatic approval review rejected deleting that cache. Do not retry its removal
+without authorization. Use the existing absolute dependency cache, place substantial
+new evidence on C:, and serialize builds with packaging. The corrected VSIX uses
+C: temporary output; its small D: staging directory was cleaned by the packer.
 
 After these corrections, continue navigation #205, onboarding #242, native
 preview #224, diagnostics #243 and transfer #244 according to their technical

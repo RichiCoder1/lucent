@@ -69,13 +69,7 @@ public sealed class ProjectRequirementsContracts
             """
         );
 
-        var restore = await Run(
-            root,
-            fixture,
-            "restore",
-            project,
-            "--ignore-failed-sources"
-        );
+        var restore = await Run(root, fixture, "restore", project, "--ignore-failed-sources");
         Assert.AreEqual(0, restore.ExitCode, restore.Error);
         Assert.IsTrue(
             File.Exists(customLock),

@@ -224,4 +224,11 @@ try {
     $results = @(1..$Runs | ForEach-Object { Invoke-Once $_ })
     $results | ConvertTo-Json -Compress
 }
-finally { [Environment]::SetEnvironmentVariable('LUCENT_UIA_DIAGNOSTICS', $priorDiagnostics) }
+finally {
+    if ($null -eq $priorDiagnostics) {
+        Remove-Item Env:LUCENT_UIA_DIAGNOSTICS -ErrorAction SilentlyContinue
+    }
+    else {
+        [Environment]::SetEnvironmentVariable('LUCENT_UIA_DIAGNOSTICS', $priorDiagnostics)
+    }
+}

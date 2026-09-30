@@ -198,5 +198,13 @@ try {
     Write-Output "Template proof: $proof"
 }
 finally {
-    foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name]) }
+    foreach ($name in $savedEnvironment.Keys) {
+        # PowerShell binds null to an empty string for this .NET setter; absent must stay absent.
+        if ($null -eq $savedEnvironment[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        }
+        else {
+            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name])
+        }
+    }
 }
