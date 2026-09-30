@@ -1,0 +1,13 @@
+namespace TemplateNamespace;
+
+public component Counter() {
+    int count = 0;
+    void Increment() {
+        count += 1;
+    }
+
+    <Column>
+        <Button onInvoke={Increment}>Increment</Button>
+        <Text>{"Count: " + count}</Text>
+    </Column>
+}

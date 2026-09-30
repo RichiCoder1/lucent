@@ -1,0 +1,26 @@
+namespace TemplateNamespace;
+
+style CounterCardStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: CardTheme.Spacing;
+    Padding: Insets.Uniform(16);
+    MinWidth: 0;
+}
+
+public component CounterCard(string title = "Counter") {
+    int count = 0;
+    void Increment() {
+        count += 1;
+    }
+
+    <Layout style={CounterCardStyle}>
+        <Image
+            source={Assets.Mark}
+            alternativeText="Counter card mark"
+            style={Style.Empty.Width(24).Height(24)}
+        />
+        <Text style={PresentationStyles.Title}>{title}</Text>
+        <Button onInvoke={Increment}>Increment</Button>
+        <Text>{"Count: " + count}</Text>
+    </Layout>
+}

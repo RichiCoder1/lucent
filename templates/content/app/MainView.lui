@@ -1,0 +1,32 @@
+namespace TemplateNamespace;
+
+style MainViewStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Uniform(24);
+    Spacing: 16;
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+}
+
+public component MainView() {
+    int count = 0;
+    [Owned]
+    readonly EditorSession greeting = new(owner, "greeting", "Lucent");
+    void Increment() {
+        count += 1;
+    }
+
+    <Layout style={MainViewStyle}>
+        <Text style={PresentationStyles.Title}>Welcome to Lucent</Text>
+        <Field
+            label="Name"
+            editor={field => Lucent.Core.Components.TextField(field, session: greeting)}
+        />
+        <Text>{"Hello, " + greeting.Text + "!"}</Text>
+        <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.CircleCheck} onInvoke={Increment}>
+            Increment
+        </Button>
+        <Text>{"Count: " + count}</Text>
+    </Layout>
+}

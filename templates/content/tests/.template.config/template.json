@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Lucent contributors",
+  "classifications": ["Lucent", "Test"],
+  "identity": "Lucent.Tests.CSharp",
+  "name": "Lucent headless tests",
+  "shortName": "lucent-tests",
+  "tags": { "language": "C#", "type": "project" },
+  "sourceName": "LucentTests",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Namespace": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "safe_namespace",
+      "replaces": "TemplateNamespace"
+    },
+    "Skia": {
+      "type": "parameter",
+      "datatype": "bool",
+      "defaultValue": "false",
+      "description": "Include a real-renderer capture test using Lucent.Testing.Skia."
+    }
+  },
+  "sources": [{ "modifiers": [{ "condition": "(!Skia)", "exclude": ["CaptureTests.cs"] }] }],
+  "primaryOutputs": [{ "path": "LucentTests.csproj" }]
+}

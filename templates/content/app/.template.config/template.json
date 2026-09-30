@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Lucent contributors",
+  "classifications": ["Lucent", "Desktop", "Windows"],
+  "identity": "Lucent.App.CSharp",
+  "name": "Lucent Windows application",
+  "shortName": "lucent-app",
+  "tags": { "language": "C#", "type": "project" },
+  "sourceName": "LucentApp",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Namespace": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "safe_namespace",
+      "replaces": "TemplateNamespace"
+    }
+  },
+  "primaryOutputs": [{ "path": "LucentApp.csproj" }]
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Lucent contributors",
+  "classifications": ["Lucent", "Component"],
+  "identity": "Lucent.Component.CSharp",
+  "name": "Lucent component",
+  "shortName": "lucent-component",
+  "tags": { "language": "C#", "type": "item" },
+  "sourceName": "NewComponent",
+  "defaultName": "NewComponent",
+  "preferDefaultName": true,
+  "symbols": {
+    "DefaultNamespace": {
+      "type": "bind",
+      "binding": "msbuild:RootNamespace",
+      "replaces": "TemplateNamespace"
+    },
+    "ComponentName": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "safe_name",
+      "replaces": "TemplateComponentName"
+    }
+  },
+  "constraints": { "csharp-only": { "type": "project-capability", "args": "CSharp" } }
+}

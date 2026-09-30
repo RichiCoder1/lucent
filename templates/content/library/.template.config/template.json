@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Lucent contributors",
+  "classifications": ["Lucent", "Library"],
+  "identity": "Lucent.Library.CSharp",
+  "name": "Lucent portable component library",
+  "shortName": "lucent-library",
+  "tags": { "language": "C#", "type": "project" },
+  "sourceName": "LucentLibrary",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Namespace": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "safe_namespace",
+      "replaces": "TemplateNamespace"
+    }
+  },
+  "primaryOutputs": [{ "path": "LucentLibrary.csproj" }]
+}

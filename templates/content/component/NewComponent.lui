@@ -1,0 +1,5 @@
+namespace TemplateNamespace;
+
+public component TemplateComponentName(string title = "New component") {
+    <Text style={PresentationStyles.Title}>{title}</Text>
+}
