@@ -283,7 +283,7 @@ internal sealed class WindowsInputAdapter : IDisposable
     private bool Key(SDL.KeyboardEvent @event)
     {
         var modifiers = MapModifiers(@event.Mod);
-        var key = MapKey(@event.Key) ?? MapShortcut(@event.Key, modifiers);
+        var key = MapKey(@event) ?? MapShortcut(@event.Key, modifiers);
         if (key is null)
             return false;
         var command = new KeyCommand(
@@ -630,6 +630,29 @@ internal sealed class WindowsInputAdapter : IDisposable
             SDL.Keycode.Delete => Core.Key.Delete,
             _ => null,
         };
+
+    internal static Key? MapKey(SDL.KeyboardEvent @event)
+    {
+        var mapped = MapKey(@event.Key);
+        if (mapped is not null || (@event.Mod & SDL.Keymod.Num) != 0)
+            return mapped;
+
+        // SDL can preserve keypad keycodes when Num Lock is off; use the physical
+        // keypad scancode for navigation only in that lock state.
+        return @event.Scancode switch
+        {
+            SDL.Scancode.Kp1 => Core.Key.End,
+            SDL.Scancode.Kp2 => Core.Key.Down,
+            SDL.Scancode.Kp3 => Core.Key.PageDown,
+            SDL.Scancode.Kp4 => Core.Key.Left,
+            SDL.Scancode.Kp6 => Core.Key.Right,
+            SDL.Scancode.Kp7 => Core.Key.Home,
+            SDL.Scancode.Kp8 => Core.Key.Up,
+            SDL.Scancode.Kp9 => Core.Key.PageUp,
+            SDL.Scancode.KpPeriod => Core.Key.Delete,
+            _ => null,
+        };
+    }
 
     internal static Key? MapShortcut(SDL.Keycode key, KeyModifiers modifiers) =>
         (modifiers & KeyModifiers.Alt) != 0

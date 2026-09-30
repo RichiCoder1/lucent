@@ -552,6 +552,48 @@ public sealed class WindowsPopupChainContracts
     }
 
     [TestMethod]
+    public void NumLockOffKeypadRightPromotesFocusedPopupButNumLockOnDoesNot()
+    {
+        var keypadRight = new SDL.KeyboardEvent
+        {
+            Type = SDL.EventType.KeyDown,
+            Key = SDL.Keycode.Kp6,
+            Scancode = SDL.Scancode.Kp6,
+            Down = true,
+        };
+        var keypadRightWithNumLock = keypadRight;
+        keypadRightWithNumLock.Mod = SDL.Keymod.Num;
+
+        var promoteWithoutNumLock = WindowsPopupChain.ShouldPromoteKeyboardHostAfterKey(
+            keypadRight
+        );
+        var promoteWithNumLock = WindowsPopupChain.ShouldPromoteKeyboardHostAfterKey(
+            keypadRightWithNumLock
+        );
+        Assert.IsTrue(promoteWithoutNumLock, "Num Lock-off keypad Right was not recognized.");
+        Assert.IsFalse(promoteWithNumLock, "Num Lock-on keypad 6 promoted a popup.");
+        Assert.AreEqual(
+            1,
+            WindowsPopupKeyboardRouting.SelectOwnerIndex(
+                currentIndex: 0,
+                levelCount: 2,
+                deepestFocusedIndex: 1,
+                promoteFocusedChild: promoteWithoutNumLock
+            )
+        );
+        Assert.AreEqual(
+            0,
+            WindowsPopupKeyboardRouting.SelectOwnerIndex(
+                currentIndex: 0,
+                levelCount: 2,
+                deepestFocusedIndex: 1,
+                promoteFocusedChild: promoteWithNumLock
+            ),
+            "A numeric keypad event changed the keyboard owner."
+        );
+    }
+
+    [TestMethod]
     public void FocusGateKeepsInternalPopupFocusChangesAndDismissesExternalLoss()
     {
         var gate = new WindowsPopupFocusGate();

@@ -405,8 +405,7 @@ internal sealed partial class WindowsPopupChain : IDisposable
     {
         if ((SDL.EventType)@event.Type != SDL.EventType.KeyDown)
             return;
-        var key = WindowsInputAdapter.MapKey(@event.Key.Key);
-        if (key is not (Key.Right or Key.Enter or Key.Space))
+        if (!ShouldPromoteKeyboardHostAfterKey(@event.Key))
             return;
         var index = _levels.IndexOf(host);
         if (index < 0)
@@ -427,6 +426,9 @@ internal sealed partial class WindowsPopupChain : IDisposable
         if (target > index)
             _keyboardHost = _levels[target];
     }
+
+    internal static bool ShouldPromoteKeyboardHostAfterKey(SDL.KeyboardEvent @event) =>
+        WindowsInputAdapter.MapKey(@event) is Key.Right or Key.Enter or Key.Space;
 
     private PopupScreenPoint? LastPointer(WindowsPopupHost host) =>
         _lastPointers.TryGetValue(host.WindowId, out var pointer) ? pointer : null;
