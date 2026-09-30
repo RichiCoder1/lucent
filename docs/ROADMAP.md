@@ -8,14 +8,20 @@ tracks Notes data integrity, navigation lifecycle, authoring, SVG/UIA hardening,
 presentation, and measured repeated-work follow-ups before new roadmap features.
 The completed performance evidence below remains tied to its original source.
 
-Notes data-integrity #11, navigation lifecycle #320, SVG/UIA #322 and authoring
+Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320, SVG/UIA #322 and authoring
 #321/#325 are delivered. Lucent `0.3.0-dev.93.1` passed managed/package CI and
 publication; Light Notes is integrating its presentation APIs. Measured
-repeated-work follow-ups remain in progress. Navigation #205 now has an
+repeated-work decisions are complete; the final projection allocation correction
+awaits publication. Navigation #205 now has an
 [implementation plan](plans/navigation-restoration-activation.md): portable
 restoration first, then an optional Windows activation adapter. Its dependency
 probe is proven without a window; registered protocol and focus behavior remain
-separate work. The owner has resumed UI/focus testing; coordinate desktop use.
+separate work. Journal/interaction restoration and reviewed ownership corrections
+pass 210 affected contracts; package-only managed/AOT journal proof passes.
+Application persistence and activation delivery proof remain. The owner has
+resumed UI/focus testing; coordinate desktop use. Onboarding #245 is starting with
+an explicit release descriptor and project-free server identity; automatic tooling
+acquisition and new publication channels are not enabled by that work.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

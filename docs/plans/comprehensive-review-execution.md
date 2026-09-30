@@ -154,6 +154,7 @@ InputRouter test additionally verifies selection/caret offsets and rejects an ol
 acknowledgement overwriting the newer draft. Exact timestamps and binary identity
 are in `artifacts/notes12-native/computer-use-proof.md`. The previously declined
 offscreen substitution is not part of the passing evidence.
+#12 is closed and marked Done; presentation adoption remains separate under #323.
 
 ### Stock presentation and consumers — #323
 
@@ -170,6 +171,9 @@ passes. One affected managed check still fails at minimum window height: the
 new Field group exposes a route-outlet sizing defect. Framework fix `9f3da89a`
 passes 41 outlet contracts, including two pre-fix failures; consumer verification
 waits for its published package. No app-specific height workaround is retained.
+Heading semantics and broader system high-contrast palette mapping remain deferred;
+this slice preserves the existing stock high-contrast theme and optional minimal
+presentation mode. It does not claim those additional capabilities.
 
 ### Measured repeated work — #324
 
@@ -246,8 +250,22 @@ before correction in `ba41f502`: imported positions wait for measured extents,
 and pending focus/scroll requests expire only for their owning generation. Newer
 application requests win; ordinary in-memory transfers keep their existing
 behavior. A disposed semantic callback is also guarded. The warning-clean build,
-architecture check and 207 affected contracts pass. Focused follow-up review,
-journal package proof and application persistence remain outstanding.
+architecture check and 207 affected contracts pass. Follow-up review found two
+further ownership cases: reconciliation replaced an application's newer select-all
+request, and old-route retirement canceled a shared viewport's new-route request.
+Three independent regressions reproduced those failures. `cd625961` yields to
+newer application focus (including outside the route) and retains the target owner
+alongside each pending viewport generation. All 210 affected contracts, build,
+formatting and architecture checks pass; root reviewed the correction delta.
+
+The package-only fixture now also proves fixed journal wire input, fresh runtime
+entry identities, dormant interaction state, generated root/nested routes and
+Back/Forward through `OnMounted`. Managed and NativeAOT runs pass against local
+candidate `0.3.0-dev.local.activation.2`; this candidate predates `cd625961`, so it
+establishes codec/distribution behavior rather than that final ownership correction.
+Evidence is under `artifacts/journal-package-review`; the normal package CI now
+runs the expanded fixture. Application persistence and native consumer checks
+remain outstanding for #221.
 #222's optional Foundation/C#/WinRT dependency probe has
 passed locked NativeAOT publication and hidden-process redirection without a
 window. It identified and now documents the requirement to register and release

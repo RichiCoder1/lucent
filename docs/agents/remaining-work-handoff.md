@@ -29,11 +29,11 @@ package verification and publication. `0.3.0-dev.93.1` is published.
 | Notes #11, Lucent #320 and #322 | Delivered and closed; Notes CI and Lucent CI 91 passed | Preserve exact-source evidence; no new work required |
 | Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
 | Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
-| Notes #12 | Published correction, CI, model/storage and NativeAOT maintenance checks pass; real delayed-write Ctrl+S/typing and reopen pass | Record native evidence and close tracking with the consumer update |
+| Notes #12 | Published correction and real delayed-write Ctrl+S/typing/reopen pass; closed and Project Done | Presentation adoption remains separate |
 | Presentation #323 | New controls adopted in Notes against 93.1; default-size native proof passes; Field grouping exposed a route-outlet minimum-height defect | Publish framework sizing fix `9f3da89a`, update consumer, rerun constrained-size proof and finish browser walkthrough |
 | Repeated work #324 | Parser, protocol and font improvements published; projection buffer-copy removal committed; broader caches and Notes filtering deferred by measurements | Publish projection improvement; defer UIA change because real clients remain listening, with no production experiment retained |
-| Restoration #221 | Journal/state implementation and package-only location startup proof complete; review reproduced extreme imported scroll and stale focus requests | Finish correction review/publication, then app persistence and interaction proof |
-| Activation #222 | Optional adapter and bounded lifecycle policy implemented locally; source/model checks in progress | Correct rejected-warm/startup ordering, package-only proof, then native registration/foreground coverage |
+| Restoration #221 | Journal/state implementation and package-only journal startup proof pass; review corrections committed through `cd625961`, 210 affected cases pass | Publish, then app persistence and interaction proof |
+| Activation #222 | Optional adapter and lifecycle policy implemented locally; 16 model cases pass; first package restore exposed a transitive version gap, now explicitly pinned | Final candidate package proof and independent review, then native registration/foreground coverage |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
 processes pass and registration/cleanup remain on the same thread. The initial
