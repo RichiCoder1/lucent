@@ -21,6 +21,7 @@ $configuration = 'Release'
 $managedProjects = @(
     'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj',
     'tests/Lucent.Testing.Tests/Lucent.Testing.Tests.csproj',
+    'tests/Lucent.Preview.Tests/Lucent.Preview.Tests.csproj',
     'tests/Lucent.Reactive.R3.Tests/Lucent.Reactive.R3.Tests.csproj',
     'tests/Lucent.Hosting.Tests/Lucent.Hosting.Tests.csproj',
     'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj',
@@ -60,6 +61,7 @@ function Resolve-ManagedProjects {
 function Invoke-Managed {
     $selected = @(Resolve-ManagedProjects)
     $runCoreArchitecture = $Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj'
+    $runPreviewArchitecture = $Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Preview.Tests/Lucent.Preview.Tests.csproj'
     if ($Project.Count -eq 0) {
         & (Join-Path $PSScriptRoot 'Test-PackageSet.ps1')
         Invoke-Dotnet @('restore', 'Lucent.slnx', '--locked-mode')
@@ -81,6 +83,11 @@ function Invoke-Managed {
         Write-Output 'Running Core architecture/public API preflight before managed tests.'
         & (Join-Path $PSScriptRoot 'Verify-CoreArchitecture.ps1') -Configuration $configuration
         if ($LASTEXITCODE) { throw 'Core architecture preflight failed.' }
+    }
+    if ($runPreviewArchitecture) {
+        Write-Output 'Running compiled preview fixture architecture preflight before managed tests.'
+        & (Join-Path $PSScriptRoot 'Verify-PreviewArchitecture.ps1') -Configuration $configuration
+        if ($LASTEXITCODE) { throw 'Preview architecture preflight failed.' }
     }
     foreach ($testProject in $selected) {
         $results = Reset-ArtifactDirectory ('artifacts/test/managed/' + [IO.Path]::GetFileNameWithoutExtension($testProject))

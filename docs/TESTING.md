@@ -98,6 +98,13 @@ For native scheduled pixels, publish the Windows TestHost, set `LUCENT_DESKTOP_H
 
 For reusable component/application tests without visible windows, use [the headless harness](HEADLESS-TESTING.md). `Lucent.Testing.Tests` is part of the default managed suite; `Lucent.Testing.Skia` adds optional real shaping and frame capture. Windows transport checks remain separate.
 
+`Lucent.Preview.Tests` owns the development catalog's inert registration, fresh
+fixture instances, cancellation fences, cleanup and service-borrowing order. Its
+separate compiled `.lui` fixture has no preview/testing dependency. Empty, loading,
+error and long-text cases preserve explicit authored data. Builder/culture behavior
+stays in `Lucent.Testing.Tests`; worker processes and editor preview transport are
+separate follow-on checks. See [preview scenarios](PREVIEW-SCENARIOS.md).
+
 Typed navigation and context/injection have package-only integration checks:
 `tests/Probes/Navigation/AotHost/Test-Package.ps1` exercises generated codecs and
 closed route providers; `tests/Probes/ContextNavigation/Hosted/Test-Package.ps1`

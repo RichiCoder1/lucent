@@ -1,0 +1,12 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Lucent.Preview/Lucent.Preview.csproj" />
+    <ProjectReference Include="../../src/Lucent.Testing.Skia/Lucent.Testing.Skia.csproj" />
+    <ProjectReference Include="../Lucent.Preview.Fixtures/Lucent.Preview.Fixtures.csproj" />
+  </ItemGroup>
+</Project>

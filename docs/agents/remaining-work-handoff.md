@@ -7,10 +7,12 @@ CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. Finish explicit, owned preview scenarios
-   [#229](https://github.com/RichiCoder1/lucent/issues/229). The catalog and general
-   headless builder/culture seams are being implemented with separate Sol 6.1
-   ownership; serialize shared checkout builds. The prior composition-scoped
+1. Implement trusted build and worker orchestration
+   [#230](https://github.com/RichiCoder1/lucent/issues/230). Explicit owned scenarios
+   #229 pass 18 preview and 51 headless tests, plus graph/output dependency checks.
+   The [implementation record](../plans/native-preview-scenarios.md) documents
+   the development-only catalog and builder/culture integration. Serialize shared
+   checkout builds and keep new outputs on C: while D: is constrained. The prior composition-scoped
    `Design.IsDesignMode` #228 passes runtime, compiler/editor and SDK/NativeAOT
    checks, with no remaining adversarial finding. Its
    [execution record](../plans/design-mode-execution.md) retains exact candidate

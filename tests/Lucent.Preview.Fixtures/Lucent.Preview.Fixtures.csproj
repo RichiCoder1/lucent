@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <LucentLuiLangVersion>preview</LucentLuiLangVersion>
+    <LucentLuiProjectIdentity>$(MSBuildProjectFullPath)</LucentLuiProjectIdentity>
+    <LucentLuiProjectEpoch>$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)|$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiProjectEpoch>
+    <LucentLuiCompilerOptions>$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiCompilerOptions>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="Lucent.Core" />
+    <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
+    <ProjectReference
+      Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+    <ProjectReference
+      Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+    <AdditionalFiles Include="*.lui" LucentLuiLogicalPath="%(Filename)%(Extension)" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="LucentLuiLogicalPath" />
+    <CompilerVisibleProperty Include="LucentLuiProjectIdentity" />
+    <CompilerVisibleProperty Include="LucentLuiProjectEpoch" />
+    <CompilerVisibleProperty Include="LucentLuiCompilerOptions" />
+    <CompilerVisibleProperty Include="LucentLuiLangVersion" />
+  </ItemGroup>
+  <Target Name="PrepareLucentLuiProjectContext" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <LucentLuiProjectEpoch>$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)|$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiProjectEpoch>
+      <LucentLuiCompilerOptions>$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiCompilerOptions>
+    </PropertyGroup>
+  </Target>
+</Project>

@@ -48,6 +48,37 @@ that selection. Each running application keeps its own immutable purpose.
 
 The work limit contains queued callback/effect loops and reports unsettled work. It cannot preempt a callback that blocks forever, or an endlessly repeating timer inside a single clock advance. Keep user callbacks short, use controlled dependencies, and retain a test-runner timeout for arbitrary code failures.
 
+## Configure owned startup
+
+Use the builder overload when setup needs application startup callbacks, context
+or service ownership. Configuration runs on the application owner thread, before
+startup. The harness then enforces the host, title, purpose and theme selected by
+its options.
+
+```csharp
+await using var app = await HeadlessApplication.StartAsync(
+    _ => Example.Components.Editor(),
+    builder => builder.OnStart(async startup =>
+    {
+        var store = new TestStore();
+        startup.OnDispose(() => store.DisposeAsync());
+        await store.InitializeAsync();
+        startup.ProvideRootContext(store);
+    }),
+    new HeadlessApplicationOptions { Title = "Editor lifecycle" });
+```
+
+The Skia harness supports the same overload. Register partial acquisitions before
+awaiting subsequent setup. Failed startup completes cleanup before reporting its
+error; successful startup returns an application that the caller disposes.
+
+`Culture` and `UICulture` options snapshot read-only copies at startup. Omit them
+to use the caller's current cultures. The selected cultures apply on the owner
+thread, including asynchronous startup and queued work; process-wide defaults
+are unchanged. Supply a `TimeProviderFactory` when setup and components need to
+share a particular controlled clock. [Preview scenarios](PREVIEW-SCENARIOS.md)
+show a development-only consumer of these general lifecycle capabilities.
+
 ## Run the maintained examples
 
 ```powershell

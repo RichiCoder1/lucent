@@ -1,0 +1,18 @@
+namespace PreviewFixtures;
+
+style ScenarioLayout {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    Padding: Insets.Uniform(16);
+}
+
+style ScenarioMessage {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+public component ScenarioCard(ScenarioContent content) {
+    <Layout style={ScenarioLayout}>
+        <Text name="preview-scenario.state">{content.State}</Text>
+        <Text style={ScenarioMessage} name="preview-scenario.message">{content.Message}</Text>
+    </Layout>
+}

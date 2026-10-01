@@ -10,8 +10,11 @@ Composition-scoped `Design.IsDesignMode`
 [#228](https://github.com/RichiCoder1/lucent/issues/228) is implemented and passes
 compiler/editor, runtime and SDK/NativeAOT verification; the
 [execution record](plans/design-mode-execution.md) retains review corrections and
-candidate evidence. The active work is explicit, owned preview scenarios
-[#229](https://github.com/RichiCoder1/lucent/issues/229), following the measured
+candidate evidence. Explicit, owned preview scenarios
+[#229](https://github.com/RichiCoder1/lucent/issues/229) pass the preview and
+headless suites; their [implementation record](plans/native-preview-scenarios.md)
+describes lifecycle ownership and dependency isolation. The next work is trusted
+build and worker orchestration [#230](https://github.com/RichiCoder1/lucent/issues/230), following the measured
 [native preview feasibility](../tests/Probes/Preview/NativeFeasibility/REPORT.md).
 Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
 distinguishes actual template/debug/native proof from final official 110.1

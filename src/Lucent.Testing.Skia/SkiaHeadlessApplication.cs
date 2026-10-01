@@ -19,6 +19,13 @@ public static class SkiaHeadlessApplication
         HeadlessApplicationOptions? options = null
     ) => HeadlessApplication.StartAsync(recipeFactory, WithSkia(options));
 
+    /// <summary>Configures startup and creates the root using a thread-owned production Skia renderer.</summary>
+    public static Task<HeadlessApplication> StartAsync(
+        Func<HeadlessContext, ComponentRecipe> recipeFactory,
+        Action<LucentApplicationBuilder> configureBuilder,
+        HeadlessApplicationOptions? options
+    ) => HeadlessApplication.StartAsync(recipeFactory, configureBuilder, WithSkia(options));
+
     /// <summary>Starts a production lifecycle using a thread-owned production Skia renderer.</summary>
     public static Task<HeadlessApplication> StartAsync(
         IApplicationLifecycle lifecycle,
@@ -40,6 +47,8 @@ public static class SkiaHeadlessApplication
         {
             Title = source?.Title ?? "Lucent headless test",
             Purpose = source?.Purpose ?? CompositionPurpose.Application,
+            Culture = source?.Culture,
+            UICulture = source?.UICulture,
             Viewport = source?.Viewport ?? new LayoutViewport(1024, 768, 1),
             Appearance = source?.Appearance ?? ThemeAppearance.Light,
             ThemeFactory =

@@ -1,12 +1,270 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using Lucent.Core;
 using Lucent.Testing.Skia;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Lucent.Testing.Tests;
 
 [TestClass]
 public sealed class HeadlessHarnessTests
 {
+    private static readonly string[] StartedBuilderCalls =
+    [
+        "configure",
+        "theme",
+        "start-before-await",
+        "start-after-await",
+        "root",
+        "mounted",
+    ];
+    private static readonly string[] CompletedBuilderCalls =
+    [
+        "configure",
+        "theme",
+        "start-before-await",
+        "start-after-await",
+        "root",
+        "mounted",
+        "stop",
+        "dispose",
+    ];
+
+    [TestMethod]
+    public async Task BuilderConfigurationComposesStartupOnOwnerAndEnforcesHarnessOptions()
+    {
+        var calls = new List<string>();
+        var callerThread = Environment.CurrentManagedThreadId;
+        var ownerThread = 0;
+        var replacement = new ReplacementHost();
+        var clock = new FakeTimeProvider(new DateTimeOffset(2030, 2, 3, 4, 5, 6, TimeSpan.Zero));
+        DateTimeOffset fixtureTime = default;
+        var application = await HeadlessApplication.StartAsync(
+            context =>
+            {
+                Assert.AreEqual(ownerThread, Environment.CurrentManagedThreadId);
+                Assert.AreEqual("harness-title", context.Session.Title);
+                Assert.IsTrue(context.Composition.Design.IsDesignMode);
+                Assert.AreEqual("harness-theme", context.Session.Theme.Theme.Name);
+                Assert.AreSame(clock, context.TimeProvider);
+                Assert.AreEqual(fixtureTime, context.TimeProvider.GetUtcNow());
+                calls.Add("root");
+                return EmptyRecipe();
+            },
+            builder =>
+            {
+                ownerThread = Environment.CurrentManagedThreadId;
+                Assert.AreNotEqual(callerThread, ownerThread);
+                calls.Add("configure");
+                builder
+                    .SetTitle("replaced")
+                    .SetPurpose(CompositionPurpose.Application)
+                    .SetTheme(_ => throw new InvalidOperationException("replacement-theme"))
+                    .UseHost(replacement)
+                    .OnStart(async _ =>
+                    {
+                        Assert.AreEqual(ownerThread, Environment.CurrentManagedThreadId);
+                        calls.Add("start-before-await");
+                        await Task.Yield();
+                        Assert.AreEqual(ownerThread, Environment.CurrentManagedThreadId);
+                        fixtureTime = clock.GetUtcNow();
+                        calls.Add("start-after-await");
+                    })
+                    .OnMounted(_ =>
+                    {
+                        calls.Add("mounted");
+                        return ValueTask.CompletedTask;
+                    })
+                    .OnStop(_ =>
+                    {
+                        calls.Add("stop");
+                        return ValueTask.CompletedTask;
+                    })
+                    .OnDispose(_ =>
+                    {
+                        calls.Add("dispose");
+                        return ValueTask.CompletedTask;
+                    });
+            },
+            new HeadlessApplicationOptions
+            {
+                Title = "harness-title",
+                Purpose = CompositionPurpose.Preview,
+                ThemeFactory = _ =>
+                {
+                    calls.Add("theme");
+                    return new Theme("harness-theme");
+                },
+                TimeProviderFactory = () => clock,
+            }
+        );
+        try
+        {
+            CollectionAssert.AreEqual(StartedBuilderCalls, calls);
+            using var advanced = await application.AdvanceAsync(TimeSpan.FromSeconds(10));
+            Assert.AreEqual(
+                fixtureTime.AddSeconds(10),
+                await application.InvokeAsync(context => context.TimeProvider.GetUtcNow())
+            );
+            Assert.AreEqual(0, replacement.Calls);
+        }
+        finally
+        {
+            await application.DisposeAsync();
+        }
+        CollectionAssert.AreEqual(CompletedBuilderCalls, calls);
+    }
+
+    [TestMethod]
+    public async Task OwnerCulturesAreReadonlySnapshotsAcrossAwaitAndQueuedSkiaWork()
+    {
+        var callerCulture = CultureInfo.CurrentCulture;
+        var callerUICulture = CultureInfo.CurrentUICulture;
+        var defaultCulture = CultureInfo.DefaultThreadCurrentCulture;
+        var defaultUICulture = CultureInfo.DefaultThreadCurrentUICulture;
+        var culture = new CultureInfo("fr-FR");
+        var uiCulture = new CultureInfo("ja-JP");
+        culture.NumberFormat.NumberDecimalSeparator = "~";
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = new List<string>();
+        void RecordCulture()
+        {
+            Assert.IsTrue(CultureInfo.CurrentCulture.IsReadOnly);
+            Assert.IsTrue(CultureInfo.CurrentUICulture.IsReadOnly);
+            observed.Add(
+                CultureInfo.CurrentCulture.Name
+                    + "/"
+                    + CultureInfo.CurrentUICulture.Name
+                    + "/"
+                    + 12.5.ToString(CultureInfo.CurrentCulture)
+            );
+        }
+        var options = new HeadlessApplicationOptions
+        {
+            Culture = culture,
+            UICulture = uiCulture,
+            ThemeFactory = _ =>
+            {
+                RecordCulture();
+                return new Theme("culture-theme");
+            },
+        };
+        var starting = SkiaHeadlessApplication.StartAsync(
+            _ =>
+            {
+                RecordCulture();
+                return EmptyRecipe();
+            },
+            builder =>
+            {
+                RecordCulture();
+                builder.OnStart(async _ =>
+                {
+                    RecordCulture();
+                    entered.TrySetResult();
+                    await release.Task;
+                    RecordCulture();
+                });
+            },
+            options
+        );
+        HeadlessApplication? application = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            culture.NumberFormat.NumberDecimalSeparator = "!";
+            options.Culture = CultureInfo.InvariantCulture;
+            options.UICulture = CultureInfo.InvariantCulture;
+            release.TrySetResult();
+            application = await starting;
+            await application.InvokeAsync(_ =>
+            {
+                RecordCulture();
+                SynchronizationContext.Current!.Post(_ => RecordCulture(), null);
+                return 0;
+            });
+            Assert.AreEqual(7, observed.Count);
+            Assert.IsTrue(observed.All(value => value == "fr-FR/ja-JP/12~5"));
+            Assert.AreSame(callerCulture, CultureInfo.CurrentCulture);
+            Assert.AreSame(callerUICulture, CultureInfo.CurrentUICulture);
+            Assert.AreSame(defaultCulture, CultureInfo.DefaultThreadCurrentCulture);
+            Assert.AreSame(defaultUICulture, CultureInfo.DefaultThreadCurrentUICulture);
+        }
+        finally
+        {
+            release.TrySetResult();
+            application ??= await starting;
+            await application.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task FailedConfiguredStartupAwaitsCleanupAndPreservesBothFailures()
+    {
+        var disposed = false;
+        var startupFailure = new InvalidOperationException("root-startup");
+        var shaper = new ThrowingDisposeShaper();
+        var failure = await Assert.ThrowsAsync<AggregateException>(() =>
+            HeadlessApplication.StartAsync(
+                _ => throw startupFailure,
+                builder =>
+                    builder.OnDispose(_ =>
+                    {
+                        disposed = true;
+                        return ValueTask.CompletedTask;
+                    }),
+                new HeadlessApplicationOptions { TextShaperFactory = () => shaper }
+            )
+        );
+        Assert.IsTrue(disposed);
+        var errors = failure.Flatten().InnerExceptions;
+        Assert.IsTrue(errors.Any(error => ReferenceEquals(error, startupFailure)));
+        Assert.IsTrue(errors.Any(error => ReferenceEquals(error, shaper.Failure)));
+    }
+
+    [TestMethod]
+    public async Task DefaultCulturesSnapshotCallerBeforeOwnerFactories()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        var originalUICulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("da-DK");
+            CultureInfo.CurrentUICulture = new CultureInfo("de-DE");
+            await using var application = await HeadlessApplication.StartAsync(
+                _ => EmptyRecipe(),
+                new HeadlessApplicationOptions
+                {
+                    TextShaperFactory = () =>
+                    {
+                        Assert.AreEqual("da-DK", CultureInfo.CurrentCulture.Name);
+                        Assert.AreEqual("de-DE", CultureInfo.CurrentUICulture.Name);
+                        Assert.IsTrue(CultureInfo.CurrentCulture.IsReadOnly);
+                        return new HeadlessTextShaper();
+                    },
+                    TimeProviderFactory = () =>
+                    {
+                        Assert.AreEqual("da-DK", CultureInfo.CurrentCulture.Name);
+                        Assert.AreEqual("de-DE", CultureInfo.CurrentUICulture.Name);
+                        return new FakeTimeProvider();
+                    },
+                }
+            );
+            Assert.AreEqual(
+                "da-DK/de-DE",
+                await application.InvokeAsync(_ =>
+                    CultureInfo.CurrentCulture.Name + "/" + CultureInfo.CurrentUICulture.Name
+                )
+            );
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+            CultureInfo.CurrentUICulture = originalUICulture;
+        }
+    }
+
     [TestMethod]
     public async Task HeadlessPurposeDefaultsToApplicationAndSkiaPreservesExplicitPreview()
     {
@@ -17,7 +275,8 @@ public sealed class HeadlessHarnessTests
                     context.Design.IsDesignMode ? "Preview purpose" : "Application purpose"
                 )
         );
-        await using var application = await HeadlessApplication.StartAsync(recipe);
+        await using var application = await HeadlessApplication.StartAsync(_ => recipe, null);
+        await using var defaultSkia = await SkiaHeadlessApplication.StartAsync(_ => recipe, null);
         var options = new HeadlessApplicationOptions { Purpose = CompositionPurpose.Preview };
         var startPreview = SkiaHeadlessApplication.StartAsync(recipe, options);
         options.Purpose = CompositionPurpose.Application;
@@ -28,6 +287,9 @@ public sealed class HeadlessHarnessTests
         design.Require(SemanticRole.Text, "Preview purpose");
         Assert.IsFalse(
             await application.InvokeAsync(context => context.Composition.Design.IsDesignMode)
+        );
+        Assert.IsFalse(
+            await defaultSkia.InvokeAsync(context => context.Composition.Design.IsDesignMode)
         );
         Assert.IsTrue(
             await preview.InvokeAsync(context => context.Composition.Design.IsDesignMode)
@@ -385,13 +647,25 @@ public sealed class HeadlessHarnessTests
             )
         );
 
+    private sealed class ReplacementHost : IApplicationHost
+    {
+        internal int Calls { get; private set; }
+
+        public int Run(ApplicationSession session)
+        {
+            Calls++;
+            throw new InvalidOperationException("replacement-host");
+        }
+    }
+
     private sealed class ThrowingDisposeShaper : ITextShaper, IDisposable
     {
         private readonly HeadlessTextShaper _inner = new();
+        internal InvalidOperationException Failure { get; } = new("shaper-cleanup");
 
         public ShapedText Shape(TextMeasureRequest request) => _inner.Shape(request);
 
-        public void Dispose() => throw new InvalidOperationException("shaper-cleanup");
+        public void Dispose() => throw Failure;
     }
 
     private sealed class UnusedImagePreparer : IImagePreparer

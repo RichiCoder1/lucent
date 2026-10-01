@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using Lucent.Core;
 using Microsoft.Extensions.Time.Testing;
 
@@ -11,6 +12,7 @@ public sealed class HeadlessApplication : IAsyncDisposable
     private readonly HeadlessApplicationOptions _options;
     private readonly Func<HeadlessContext, ComponentRecipe>? _recipeFactory;
     private readonly IApplicationLifecycle? _lifecycle;
+    private readonly Action<LucentApplicationBuilder>? _configureBuilder;
     private readonly ConcurrentQueue<IWorkItem> _work = new();
     private readonly AutoResetEvent _available = new(false);
     private readonly object _admissionGate = new();
@@ -29,12 +31,14 @@ public sealed class HeadlessApplication : IAsyncDisposable
     private HeadlessApplication(
         HeadlessApplicationOptions options,
         Func<HeadlessContext, ComponentRecipe>? recipeFactory,
-        IApplicationLifecycle? lifecycle
+        IApplicationLifecycle? lifecycle,
+        Action<LucentApplicationBuilder>? configureBuilder = null
     )
     {
         _options = options;
         _recipeFactory = recipeFactory;
         _lifecycle = lifecycle;
+        _configureBuilder = configureBuilder;
         _thread = new Thread(Run) { IsBackground = true, Name = "Lucent headless application" };
     }
 
@@ -60,9 +64,26 @@ public sealed class HeadlessApplication : IAsyncDisposable
             recipeFactory,
             null
         );
-        application._thread.Start();
-        await application._ready.Task.ConfigureAwait(false);
-        return application;
+        return await StartCoreAsync(application).ConfigureAwait(false);
+    }
+
+    /// <summary>Configures startup callbacks and creates the root on the dedicated owner thread.</summary>
+    /// <remarks>The harness enforces its snapshotted host, purpose, title and theme after configuration.</remarks>
+    public static async Task<HeadlessApplication> StartAsync(
+        Func<HeadlessContext, ComponentRecipe> recipeFactory,
+        Action<LucentApplicationBuilder> configureBuilder,
+        HeadlessApplicationOptions? options
+    )
+    {
+        ArgumentNullException.ThrowIfNull(recipeFactory);
+        ArgumentNullException.ThrowIfNull(configureBuilder);
+        var application = new HeadlessApplication(
+            (options ?? new HeadlessApplicationOptions()).Snapshot(),
+            recipeFactory,
+            null,
+            configureBuilder
+        );
+        return await StartCoreAsync(application).ConfigureAwait(false);
     }
 
     /// <summary>Starts an asynchronous production lifecycle on a dedicated owner thread.</summary>
@@ -77,9 +98,45 @@ public sealed class HeadlessApplication : IAsyncDisposable
             null,
             lifecycle
         );
-        application._thread.Start();
-        await application._ready.Task.ConfigureAwait(false);
-        return application;
+        return await StartCoreAsync(application).ConfigureAwait(false);
+    }
+
+    private static async Task<HeadlessApplication> StartCoreAsync(HeadlessApplication application)
+    {
+        var started = false;
+        try
+        {
+            application._thread.Start();
+            started = true;
+            await application._ready.Task.ConfigureAwait(false);
+            return application;
+        }
+        catch (Exception startError)
+        {
+            if (!started)
+            {
+                application._available.Dispose();
+                throw;
+            }
+            // Startup never handed the harness to its caller. Wait for owned
+            // cleanup and observe terminal failure before releasing its handles.
+            Exception? cleanupError = null;
+            try
+            {
+                await application.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception terminalError)
+            {
+                cleanupError = terminalError;
+            }
+            if (cleanupError is not null && !ReferenceEquals(startError, cleanupError))
+                throw new AggregateException(
+                    "Headless startup and cleanup failed.",
+                    startError,
+                    cleanupError
+                );
+            throw;
+        }
     }
 
     /// <summary>Runs owner-thread code and then settles and reprojects the production composition.</summary>
@@ -219,8 +276,12 @@ public sealed class HeadlessApplication : IAsyncDisposable
     private void Run()
     {
         Exception? failure = null;
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUICulture = CultureInfo.CurrentUICulture;
         try
         {
+            CultureInfo.CurrentCulture = _options.Culture!;
+            CultureInfo.CurrentUICulture = _options.UICulture!;
             _shaper =
                 _options.TextShaperFactory()
                 ?? throw new InvalidOperationException("The text-shaper factory returned null.");
@@ -229,8 +290,9 @@ public sealed class HeadlessApplication : IAsyncDisposable
                 ?? throw new InvalidOperationException("The time-provider factory returned null.");
             var lifecycle = _lifecycle ?? new FactoryLifecycle(this);
             var host = new HeadlessHost(this, clock);
-            _ = LucentApplication
-                .CreateBuilder()
+            var builder = LucentApplication.CreateBuilder();
+            _configureBuilder?.Invoke(builder);
+            _ = builder
                 .SetTitle(_options.Title)
                 .SetPurpose(_options.Purpose)
                 .SetTheme(appearance => RequireTheme(_options.ThemeFactory(appearance)))
@@ -258,6 +320,11 @@ public sealed class HeadlessApplication : IAsyncDisposable
                         failure,
                         cleanupError
                     );
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previousCulture;
+                CultureInfo.CurrentUICulture = previousUICulture;
             }
         }
         if (failure is null)

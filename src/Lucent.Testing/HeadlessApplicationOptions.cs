@@ -1,3 +1,4 @@
+using System.Globalization;
 using Lucent.Core;
 using Microsoft.Extensions.Time.Testing;
 
@@ -42,6 +43,12 @@ public sealed class HeadlessApplicationOptions
     /// <summary>Gets or sets the explicit purpose; headless execution defaults to Application.</summary>
     public CompositionPurpose Purpose { get; set; }
 
+    /// <summary>Gets or sets the owner culture; null snapshots the caller's current culture at startup.</summary>
+    public CultureInfo? Culture { get; set; }
+
+    /// <summary>Gets or sets the owner UI culture; null snapshots the caller's current UI culture at startup.</summary>
+    public CultureInfo? UICulture { get; set; }
+
     internal HeadlessApplicationOptions Snapshot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(Title);
@@ -59,6 +66,12 @@ public sealed class HeadlessApplicationOptions
         {
             Title = Title,
             Purpose = Purpose,
+            Culture = CultureInfo.ReadOnly(
+                (CultureInfo)(Culture ?? CultureInfo.CurrentCulture).Clone()
+            ),
+            UICulture = CultureInfo.ReadOnly(
+                (CultureInfo)(UICulture ?? CultureInfo.CurrentUICulture).Clone()
+            ),
             Viewport = Viewport,
             Appearance = Appearance,
             ThemeFactory = ThemeFactory,

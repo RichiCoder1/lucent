@@ -40,7 +40,8 @@ try {
             '^src/Lucent\.Tools\.NuGet/|^tests/Lucent\.Tools\.NuGet\.Tests/' { 'Lucent.Tools.NuGet.Tests'; break }
             '^tests/Lucent\.Platform\.Windows\.Activation\.Tests/' { 'Lucent.Platform.Windows.Activation.Tests'; break }
             '^src/Lucent\.Platform\.Windows\.Activation/' { 'Lucent.Platform.Windows.Activation.Tests'; break }
-            '^tests/Lucent\.Testing\.Tests/|^src/Lucent\.Testing(\.Skia)?/' { 'Lucent.Testing.Tests'; break }
+            '^tests/Lucent\.Testing\.Tests/|^src/Lucent\.Testing(\.Skia)?/' { 'Lucent.Testing.Tests'; 'Lucent.Preview.Tests'; break }
+            '^src/Lucent\.Preview/|^tests/Lucent\.Preview\.(Tests|Fixtures)/' { 'Lucent.Preview.Tests'; break }
             '^tests/(Lucent\.(Core|Reactive\.R3|Hosting|Renderer\.Skia|Platform\.Windows|IssueBrowser|Lui\.(Compiler|Generator|LanguageServer|Tooling))\.Tests)/' { $Matches[1]; break }
             '^src/Lucent\.Reactive\.R3/' { 'Lucent.Reactive.R3.Tests'; 'Lucent.Testing.Tests'; break }
             '^src/Lucent\.Hosting/' { 'Lucent.Hosting.Tests'; break }
