@@ -113,11 +113,17 @@ async function readBoundedFile(file, maximum) {
 async function requireOwnedFile(directory, name) {
     const root = path.resolve(directory);
     const file = path.join(root, name);
-    for (const candidate of [root, file]) {
+    // Canonical spelling can expand a legitimate Windows 8.3 alias. Reject
+    // actual links along the path, then compare canonical file containment.
+    for (let candidate = file; ; candidate = path.dirname(candidate)) {
         if ((await fs.lstat(candidate)).isSymbolicLink()) throw new Error("Preview output contains a reparse link.");
-        if ((await fs.realpath(candidate)).toLowerCase() !== candidate.toLowerCase())
-            throw new Error("Preview output escaped its owned path.");
+        if (candidate === path.dirname(candidate)) break;
     }
+    const canonicalRoot = await fs.realpath(root);
+    const canonicalFile = await fs.realpath(file);
+    const samePath = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    if (!samePath(canonicalFile, path.join(canonicalRoot, name)))
+        throw new Error("Preview output escaped its owned path.");
     return file;
 }
 

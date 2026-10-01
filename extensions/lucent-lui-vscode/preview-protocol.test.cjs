@@ -69,3 +69,30 @@ test("frame admission rejects linked output directories", async t => {
     try { await assert.rejects(readVerifiedFrame(link, f.expected), /reparse|owned path/); }
     finally { await fs.unlink(link); }
 });
+
+test("frame admission accepts canonical aliases without treating them as escaped output", async t => {
+    const f = await frameFixture(t);
+    const realpath = fs.realpath.bind(fs);
+    const canonicalRoot = await realpath(f.directory);
+    // Model an 8.3 alias expanding to the same canonical directory. Reads still
+    // use the real owned fixture; only its canonical spelling differs.
+    t.mock.method(fs, "realpath", async candidate => {
+        const actual = await realpath(candidate);
+        return actual.startsWith(canonicalRoot)
+            ? path.join(path.dirname(canonicalRoot), "expanded-profile-name", path.relative(canonicalRoot, actual)) : actual;
+    });
+    const frame = await readVerifiedFrame(f.directory, f.expected);
+    assert.deepEqual(frame.png, pixel);
+});
+
+test("frame admission rejects a link above the otherwise ordinary output directory", async t => {
+    const f = await frameFixture(t);
+    const output = path.join(f.directory, "output");
+    await fs.mkdir(output);
+    await fs.copyFile(path.join(f.directory, "frame.png"), path.join(output, "frame.png"));
+    await fs.copyFile(path.join(f.directory, "result.json"), path.join(output, "result.json"));
+    const link = path.join(f.directory, "linked-parent");
+    await fs.symlink(f.directory, link, process.platform === "win32" ? "junction" : "dir");
+    try { await assert.rejects(readVerifiedFrame(path.join(link, "output"), f.expected), /reparse|owned path/); }
+    finally { await fs.unlink(link); }
+});
