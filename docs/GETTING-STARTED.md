@@ -1,17 +1,17 @@
 # Start a Lucent Windows application
 
 This guide covers local Windows x64 and Microsoft Visual Studio Code. The reference
-package release is `0.3.0-dev.107.1`, published from
-`8e8c0788e5bd675546852a4e7b5c96ccfcf7fe36` by
-[CI107](https://github.com/RichiCoder1/lucent/actions/runs/36784978383).
+package release is `0.3.0-dev.110.1`, published from
+`3205cbbd521f8171ffe751b924166d4826076b0d` by
+[CI110](https://github.com/RichiCoder1/lucent/actions/runs/36801821082).
 Use one complete, successfully published release set and keep its exact package,
 SDK and language-tool identities together. No Lucent checkout is required.
 
-The fresh installed-editor journey, including the managed debugger instructions
-below, is awaiting its actual walkthrough in
-[#249](https://github.com/RichiCoder1/lucent/issues/249). Template consumers, tests
-and NativeAOT publication already have separate package evidence. Those checks do
-not establish an editor breakpoint hit or this starter's window startup/close.
+The fresh installed-editor journey is recorded in
+[#249](https://github.com/RichiCoder1/lucent/issues/249). Its isolated-profile check
+has exercised the generated app, headless test, mapped managed breakpoint,
+NativeAOT executable, completion, hover and unsaved diagnostic recovery. See the
+[execution record](plans/onboarding-execution.md) for exact artifact boundaries.
 
 ## Obtain a verified release
 
@@ -35,14 +35,14 @@ in user configuration or the supported credential environment variable; never
 commit them. Install the selected template version explicitly:
 
 ```powershell
-dotnet new install Lucent.Templates@0.3.0-dev.107.1
+dotnet new install Lucent.Templates@0.3.0-dev.110.1
 ```
 
 Alternatively, place the authenticated bundle's `.nupkg` files in a local feed,
 configure that feed for `Lucent.*`, and install the exact template artifact:
 
 ```powershell
-dotnet new install C:\LucentFeed\Lucent.Templates.0.3.0-dev.107.1.nupkg
+dotnet new install C:\LucentFeed\Lucent.Templates.0.3.0-dev.110.1.nupkg
 ```
 
 Replace `C:\LucentFeed` with your chosen directory. Local template installation
@@ -95,10 +95,11 @@ Microsoft's [debugger setup](https://github.com/dotnet/vscode-csharp/blob/main/d
 and [debugger licensing restrictions](https://github.com/dotnet/vscode-csharp/blob/main/docs/debugger/Microsoft-.NET-Core-Debugger-licensing-and-Microsoft-Visual-Studio-Code.md).
 The debugger is proprietary and is not licensed for arbitrary VS Code forks.
 
-The mapped breakpoint route is awaiting the actual fresh-editor walkthrough.
-Lucent extension 0.3.7 adds the `.lui` breakpoint contribution; the official CI107
-VSIX predates that correction. Do not treat installation of that older VSIX as
-proof of the corrected breakpoint experience.
+Lucent extension 0.3.7 adds the `.lui` breakpoint contribution and is included in
+the verified CI110 set. The client correction passed an actual authored
+breakpoint, step, state inspection and normal close in an isolated editor profile.
+The execution record distinguishes that development-client debugging observation
+from the final official CI110 completion, hover and diagnostic walkthrough.
 
 Build Debug with the command above. If you choose to debug, create your own
 `.vscode/launch.json` in `HelloLucent` with this configuration. Templates do not

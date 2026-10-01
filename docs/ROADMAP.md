@@ -2,144 +2,49 @@
 
 ## Current direction
 
-The owner resumed the remaining review corrections and then the broader roadmap
-on September 29. [The execution record](plans/comprehensive-review-execution.md)
-tracks Notes data integrity, navigation lifecycle, authoring, SVG/UIA hardening,
-presentation, and measured repeated-work follow-ups before new roadmap features.
-The completed performance evidence below remains tied to its original source.
+The owner authorized the remaining review corrections followed by the broader
+roadmap. The [handoff](agents/remaining-work-handoff.md) holds the current resume
+point and environment constraints. GitHub issue acceptance remains authoritative.
 
-Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320, SVG/UIA #322 and authoring
-#321/#325 are delivered. Lucent `0.3.0-dev.101.1` passed managed/package CI and
-publication; Light Notes now consumes that official package at `8d5cdaa`, with
-green CI and a native minimum-window save/persistence check. Measured
-repeated-work #324 is closed, with the final projection correction published.
-Presentation #323's CommandScope correction and app shrink fix pass the official
-consumer checks, including the unchanged 520-pixel regression. Browser header
-checks pass in dark/light themes. The additional Select scrollbar-gutter correction
-passes four real-Skia scale cases and a managed Windows browser walkthrough;
-the correction is published in `0.3.0-dev.107.1`, closing #323. UI testing is
-authorized, and completed Computer Use sessions are closed after each walkthrough.
-Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
-is not claimed. Standard Num Lock-off keypad navigation is delivered in 101.1; #326 is closed.
-Navigation #205's [implementation plan](plans/navigation-restoration-activation.md)
-is delivered: portable restoration and an optional Windows activation adapter.
-Journal/interaction restoration and reviewed ownership corrections
-pass 210 affected contracts; package-only managed/AOT journal proof passes.
-Issue Browser opt-in persistence is reviewed, passes 44 application contracts, and
-restores a saved route in a fresh NativeAOT process; #221 is closed. The activation
-adapter passes 22 model contracts and official-package MSIX and unpackaged
-cold/warm/hostile URI delivery in disposable Sandboxes, including handler cleanup.
-The official-package visible host also passes warm navigation, guard veto with
-continued typing, launch attention without history changes, minimized restoration,
-close veto and fresh-primary recovery. Foreground denial is recorded separately
-from the taskbar-attention request. This completes #222 and parent #205; registered
-OS transport and visible host behavior have separate maintained proof owners.
-Onboarding #245 implements the [release descriptor and project-free identity](RELEASE-SETS.md).
-CI 98 passed the corrected native thread and package journal checks, then failed an
-asset fixture's optional-field access under strict PowerShell. The correction passes
-the full asset suite against existing immutable packages. CI 99 passed that suite
-and managed tests, then failed optional notice metadata access; the focused
-correction is committed. CI 100 passed managed verification, then exposed an
-activation fixture cache directory accidentally included in C# compilation.
-Both fixture cache paths are corrected, and the isolated NativeAOT package-consumer
-proof passes. CI 101 passed all three jobs and published 101.1. Its complete artifact
-has been independently authenticated, closing #245. Templates #246 pass the official
-101.1 generated-app/library/test consumer checks and NativeAOT publication. The
-template-inclusive inventory and CI wiring are implemented, and the exact
-descriptor-bound template package passes the final local consumer proof;
-official publication is verified in 107.1, closing #246. Editor #247's bundled
-server and CI test wiring have passed
-source review and actual producer proof. Evaluated project matching and immutable
-cache/import now pass focused development checks and actual V4 packaged proof.
-Reviewed custom lock-file and cancellation corrections are complete. The 101.1
-catalog is authenticated. Explicit online acquisition passes the real packaged
-GitHub download/install/cache proof and integrated review under the
-[editor lifecycle plan](plans/editor-tooling-lifecycle.md).
-Commit `ddeeadac` pushed #246/#247, but CI 102 failed before publication. The
-requirements fixture's restore policy mismatch and relative NuGet cache handling
-are corrected in pushed `6bc288ea`, with focused checks passing. CI 103 failed
-formatting and repeated the published-server cache failure. The template harness
-restored absent environment variables as empty strings, changing .NET's cache to a
-relative path; lossless cleanup now passes a focused reproduction and 15 checks.
-The formatting and environment cleanup fixes are pushed. CI 104 passed the
-published-server check, then exposed an unreferenced Node timeout; `f2064144`
-corrects it. CI 105 passes the editor suites but exposed a shared generated
-editorconfig write during parallel application preparation. A focused isolation
-prototype exposed additional shared assembly-info/cache writes, so the correction
-now coordinates Lucent preparation processes through one per-user lease. Packaged
-contention/cancellation checks and the actual parallel sample build pass locally.
-CI 105's package verification/upload passed but cache
-cleanup exhausted the job budget; that budget now includes cleanup time.
-CI 106 passes package verification and cleanup, but its managed job exposed a
-test-helper Debug/Release mismatch. The helper's solution configuration and payload
-copy are corrected with a fresh isolated solution proof. The managed job now also
-has time for final verification and cache cleanup. Publication was skipped.
-CI 107 passes managed verification, package/native consumers and publication.
-`0.3.0-dev.107.1` is the latest confirmed release; its complete artifact and
-descriptor are independently authenticated. This closes #246/#247 and the
-remaining #323 publication follow-up. The fresh installed-editor journey remains
-#249. A local catalog download exposed premature consumption of incomplete
-ValueTask I/O; the correction passes an independent deferred-stream regression
-and the actual authenticated artifact transfer.
-Read-only environment doctor #248's static CLI, verified tool delivery and standard
-VS Code onboarding surfaces pass review and local package proof. Explicit editor
-project inspection now adds evaluated target/tool identity and fresh evidence
-reuse. The real-project contract, 14 cache tests and 99 extension tests pass,
-including two corrected review races. Default checks preserve explicit unverified
-capabilities. The
-[doctor plan](plans/environment-doctor.md) records its optional diagnostics.
-Windows native-prerequisite inspection passes focused contracts, a real installed
-toolchain observation and independent review; it leaves actual publication unverified.
-Feed configuration and anonymous metadata checks are integrated with the CLI and
-editor. Review corrected shared scratch storage, transitive adapter files leaking
-into static output, and stale output inclusion. SDK-declared payloads and required
-notices now pass real tool installation, the complete VSIX producer and 83 release
-contracts. Fifty Tools contracts, the focused adapter checks and 110 editor tests
-pass; final independent review has no findings. All CI108 jobs pass, and the
-independently authenticated `0.3.0-dev.108.1` release delivers these additions,
-closing #248. It is the latest confirmed release. The fresh installed-editor
-journey continues in #249, using the explicitly supported CI-bundle/VSIX channel.
-Standalone trusted-project CLI parity passes 32 Tools
-contracts and a real coherent development-server invocation; it remains separate
-from default static checks and does not claim release authentication or build readiness.
+The active work is composition-scoped `Design.IsDesignMode`
+[#228](https://github.com/RichiCoder1/lucent/issues/228), following the measured
+[native preview feasibility](../tests/Probes/Preview/NativeFeasibility/REPORT.md).
+Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
+distinguishes actual template/debug/native proof from final official 110.1
+installed-editor completion, hover and unsaved diagnostic recovery. Commit
+`3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
-Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
-are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
-passed managed, package/NativeAOT and publication checks. Light Notes `82c349a`
-consumes the official package, with [its CI](https://github.com/RichiCoder1/light-notes/actions/runs/35831222420)
-and focused desktop checks passing. The [correction record](plans/authoring-review-corrections.md)
-keeps the source and package evidence boundaries explicit.
+The latest confirmed release is `0.3.0-dev.110.1`, from `3205cbbd` after
+[CI110](https://github.com/RichiCoder1/lucent/actions/runs/36801821082) passed managed,
+package/native and publication jobs. Its complete artifact is independently
+authenticated. Supported distribution uses authenticated GitHub Packages and
+verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is
+not claimed.
 
-The [test-quality implementation #311](plans/test-quality-execution.md) is delivered
-in `0951b92`: stronger behavioral assertions, retained coverage ownership and less repeated
-setup. Exact editor checks exposed and corrected state Go to Definition [#312](https://github.com/RichiCoder1/lucent/issues/312).
-[CI 87](https://github.com/RichiCoder1/lucent/actions/runs/35835516837) passed managed,
-package/NativeAOT and publication checks, delivering `0.3.0-dev.87.1`; #311/#312 are
-closed. [Performance #313](https://github.com/RichiCoder1/lucent/issues/313) now has
-durable failure reports, a versioned fixed native fixture and a separate Issue
-Browser characterization driver. The old app gate's failed result and explicit
-resource-contract migration remain in the [execution record](plans/performance-execution.md).
-The [projection experiments](../advisor-plans/007-performance-opportunity-experiments.md)
-retain #316's exact-height arrangement reuse for about 4–7% lower app projection
-allocations; #317 is a measured defer. Neither claims a consistent latency win.
-These changes are published as `0.3.0-dev.88.1` after
-[CI 88](https://github.com/RichiCoder1/lucent/actions/runs/35974075357) passed.
-The native follow-ups correct duplicate resize presentation and
-[#319](https://github.com/RichiCoder1/lucent/issues/319)'s focus continuity and
-clipped-row accessibility. Both candidate fixed-workload runs pass unchanged
-limits; resize p95 is 4.24–4.53 ms versus 16.17–16.71 ms in the paired baselines.
-Issue Browser now completes all five 500-operation scenarios with bounded resources
-and zero owned resources after close. Historical failed results remain retained.
-The physical held-border check passed on September 29 against a fresh NativeAOT
-build of the published source, completing
-[#318](https://github.com/RichiCoder1/lucent/issues/318) and parent #313. The layout
-switches while the resize border is still held; earlier blocked attempts remain
-recorded. #315 and #319 are delivered
-as `0.3.0-dev.89.1` from `48feed95` after
-[CI 89](https://github.com/RichiCoder1/lucent/actions/runs/36049540126) passed managed,
-package verification and publication; see the execution record for evidence and
-environment limits.
-Navigation restoration/Windows activation #205 is delivered as recorded above.
+| Delivered work | Evidence and supported boundary |
+| --- | --- |
+| Review corrections #320–326 and Notes #11/#12 | [Review execution](plans/comprehensive-review-execution.md): data integrity, authoring, SVG/UIA, presentation and measured repeated-work corrections; the final Select gutter correction is published in 107.1 |
+| Restoration and Windows activation #205/#221/#222 | [Implementation plan](plans/navigation-restoration-activation.md): explicit journal ownership, browser restart, registered transport in disposable Sandboxes and separate actual host/focus/close behavior |
+| Release identity #245 | [Release sets](RELEASE-SETS.md): exact package, SDK, compiler and tool identities with authenticated delivery |
+| Templates #246 and editor lifecycle #247 | [Templates](TEMPLATES.md) and [editor lifecycle](plans/editor-tooling-lifecycle.md): published in 107.1; package-only consumers and controlled cache/import/acquisition proof |
+| Environment doctor #248 | [Doctor plan](plans/environment-doctor.md): read-only static checks plus explicit project, native-prerequisite and anonymous feed diagnostics; published in 108.1 |
+| Onboarding #249 / #242 | [Execution record](plans/onboarding-execution.md): supported authenticated/local-package fallback, mapped debugging, managed/native interaction and official 110.1 editor semantics |
+| Application authoring #301–309 | [Execution record](plans/application-routing-component-authoring-execution.md): named components, companions, generated roots and routing; published in 85.1 |
+| Performance #313–319 | [Performance execution](plans/performance-execution.md): source-bound measurements and physical resize proof; published through 89.1 |
+
+Light Notes consumes official `0.3.0-dev.101.1` at `8d5cdaa`, with
+[green CI](https://github.com/RichiCoder1/light-notes/actions/runs/36776465450),
+locked restores, formatting, managed checks and NativeAOT publication. The actual
+minimum-window editor and save/reopen check passes. Computer Use walkthroughs are
+authorized and their sessions end after use. Injected keypad navigation is
+verified separately; physical main-arrow delivery is not claimed.
+
+Next, [native preview #224](https://github.com/RichiCoder1/lucent/issues/224) builds
+on #227's completed disposable-worker feasibility proof. Follow with diagnostics
+#243 and transfer #244 according to their technical dependencies. Design plans
+are not delivery or performance evidence. Historical CI failures and the previous
+chronological summary remain in the [earlier roadmap](https://github.com/RichiCoder1/lucent/blob/3205cbbd521f8171ffe751b924166d4826076b0d/docs/ROADMAP.md)
+and their linked execution records; they are not current blockers.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.
 
@@ -159,8 +64,8 @@ uses generated roots and route mappings; both inline and companion Windows sampl
 passed managed and NativeAOT execution. The [authoring guide](APPLICATION-AUTHORING.md)
 documents the supported surface, and the [execution record](plans/application-routing-component-authoring-execution.md)
 records exact evidence and limitations. Navigation restoration and Windows activation
-[#205](https://github.com/RichiCoder1/lucent/issues/205) are now delivered; environment
-diagnostics and the installed-editor journey are the next onboarding work.
+[#205](https://github.com/RichiCoder1/lucent/issues/205) and environment diagnostics
+#248 and the installed-editor journey #249 are delivered as recorded above.
 
 Whole-file `.lui` formatting and linting [#295–300](plans/lui-formatting-and-linting.md)
 implement the accepted source policy across the compiler, CLI, editor and SDK.

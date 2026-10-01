@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Scenario/Scenario.csproj" />
+    <ProjectReference Include="../Starter/NativePreviewStarter.csproj" />
+    <PackageReference Include="Lucent.Testing.Skia" Version="[__LUCENT_VERSION__]" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,36 @@
+namespace PreviewFeasibility;
+
+style CardLayout {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Uniform(16);
+    Spacing: 12;
+    Background: Color.Parse("#ffffff");
+    TextColor: Color.Parse("#102030");
+    MainGrow: 1;
+    CrossAlignment: LayoutAlignment.Stretch;
+}
+
+public component PreviewCard() {
+    int count = 0;
+    void Increment() {
+        count += 1;
+    }
+
+    <Layout style={CardLayout}>
+        <Text>Preview baseline</Text>
+        <Text>Real compiled text wraps across this deliberately narrow production layout.</Text>
+        <Row style={Style.Empty.Spacing(16)}>
+            <Image
+                source={Assets.Mark}
+                alternativeText="Embedded preview mark"
+                style={Style.Empty.Width(32).Height(32)}
+            />
+            <Icon
+                source={Lucent.Icons.Lucide.LucideIcons.CircleCheck}
+                style={Style.Empty.Width(32).Height(32)}
+            />
+        </Row>
+        <Button onInvoke={Increment}>Increment preview</Button>
+        <Text>{"Count: " + count}</Text>
+    </Layout>
+}
