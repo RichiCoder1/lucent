@@ -102,8 +102,17 @@ For reusable component/application tests without visible windows, use [the headl
 fixture instances, cancellation fences, cleanup and service-borrowing order. Its
 separate compiled `.lui` fixture has no preview/testing dependency. Empty, loading,
 error and long-text cases preserve explicit authored data. Builder/culture behavior
-stays in `Lucent.Testing.Tests`; worker processes and editor preview transport are
-separate follow-on checks. See [preview scenarios](PREVIEW-SCENARIOS.md).
+stays in `Lucent.Testing.Tests`. `Lucent.Preview.Hosting.Tests` owns shared frame
+contracts and real compiled scenario capture; `Lucent.Preview.Build.Tests` owns
+actual SDK graph/freshness fixtures. Run the latter with
+`./tools/Test-PreviewBuild.ps1 -Feed <candidate-directory> -Version <exact-version>`;
+it participates in package CI, not the default managed test run.
+`Lucent.Preview.Supervisor.Tests` exercises
+real Windows child processes, cancellation, descendant reaping and uncertain
+termination without opening windows. The editor's `preview-*.test.cjs` suites own
+coordinator races, trust boundaries, frame admission, watchers and retention; run
+them with the other extension suites through `./tools/Test-LuiEditor.ps1`.
+See [preview scenarios](PREVIEW-SCENARIOS.md) and [development setup](NATIVE-PREVIEW.md).
 
 Typed navigation and context/injection have package-only integration checks:
 `tests/Probes/Navigation/AotHost/Test-Package.ps1` exercises generated codecs and

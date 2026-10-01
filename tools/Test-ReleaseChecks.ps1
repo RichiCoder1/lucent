@@ -95,6 +95,8 @@ try {
         ./tests/Probes/ContextNavigation/Hosted/Test-Package.ps1 -Version $Version -Feed $directory
         ./tools/Verify-LuiAssets.ps1 -Version $Version -Feed $directory
         ./tools/Test-HeadlessPackages.ps1 -Version $Version -Feed $directory
+        $previewEvidence = Join-Path $root "artifacts/test/preview-build/$([Guid]::NewGuid().ToString('N'))"
+        ./tools/Test-PreviewBuild.ps1 -Version $Version -Feed $directory -OutputRoot $previewEvidence
         ./tools/Test-Packages.ps1 -Version $Version -Feed $directory
         ./tools/Test-Templates.ps1 -DescriptorPath $candidatePath -ArtifactDirectory $directory
     }
@@ -111,7 +113,7 @@ try {
         finally { $env:LUCENT_LSP_SERVER_DLL = $previousServer }
     }
     Invoke-RecordedCheck extension packaged-extension {
-        node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs extensions/lucent-lui-vscode/managed-tool.test.cjs extensions/lucent-lui-vscode/doctor-client.test.cjs extensions/lucent-lui-vscode/onboarding-ui.test.cjs extensions/lucent-lui-vscode/environment-ui.test.cjs
+        ./tools/Test-LuiEditor.ps1
         if ($LASTEXITCODE) { throw 'Extension tests failed.' }
         ./tools/Test-LuiReleaseCatalog.ps1
         ./tools/Test-ReleaseSet.ps1 -RunFixtures -ServerArchivePath (Join-Path $directory 'server.zip') -VsixPath (Join-Path $directory 'extension.vsix')

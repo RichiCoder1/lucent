@@ -7,16 +7,16 @@ CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. Implement trusted build and worker orchestration
-   [#230](https://github.com/RichiCoder1/lucent/issues/230). Explicit owned scenarios
-   #229 pass 18 preview and 51 headless tests, plus graph/output dependency checks.
-   The [implementation record](../plans/native-preview-scenarios.md) documents
-   the development-only catalog and builder/culture integration. Serialize shared
-   checkout builds and keep new outputs on C: while D: is constrained. The prior composition-scoped
-   `Design.IsDesignMode` #228 passes runtime, compiler/editor and SDK/NativeAOT
-   checks, with no remaining adversarial finding. Its
-   [execution record](../plans/design-mode-execution.md) retains exact candidate
-   evidence and review corrections. No new owner decision is pending.
+1. Implement the bounded preview panel
+   [#231](https://github.com/RichiCoder1/lucent/issues/231), following its
+   [execution design](../plans/native-preview-panel.md). Trusted build and worker
+   orchestration #230 passes 143 editor checks, 11 compiled worker contracts,
+   12 Windows supervisor contracts and the actual SDK build fixture. Its
+   [implementation record](../plans/native-preview-orchestration.md) separates
+   the integrated Skia pipeline, source-lock preservation, adversarial fixes and
+   actual editor walkthrough. Scenario #229 and design-mode #228 remain their
+   prerequisite owners. Serialize shared checkout builds and keep new outputs
+   on C: while D: is constrained. No new owner decision is pending.
 2. Native preview [#227](https://github.com/RichiCoder1/lucent/issues/227) feasibility
    passed on official 108.1: three fresh workers, attributable real Skia text/SVG/icon
    output, and failed builds rejected before launch. The retained
@@ -50,6 +50,10 @@ folder. No account sign-in or security setting was automated.
 
 The latest confirmed Lucent release is `0.3.0-dev.112.1`, source `d834ac78`.
 [CI112](https://github.com/RichiCoder1/lucent/actions/runs/36808337607) passed all jobs.
+CI113's package lane passed but an editor-test startup watchdog failed, so it
+did not publish. The corrected harness preserves the actual timeout contract;
+fault-injection evidence is recorded with #230. New source is not yet a claim
+of a newer published release.
 The preceding 110.1 complete artifact and descriptor were independently
 authenticated for onboarding:
 

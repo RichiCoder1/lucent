@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lucent.Preview.Protocol/Lucent.Preview.Protocol.csproj" />
+    <ProjectReference Include="../Lucent.Preview/Lucent.Preview.csproj" />
+    <ProjectReference Include="../Lucent.Testing.Skia/Lucent.Testing.Skia.csproj" />
+  </ItemGroup>
+</Project>

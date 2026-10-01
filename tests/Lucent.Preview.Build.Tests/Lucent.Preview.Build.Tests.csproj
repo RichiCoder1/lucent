@@ -1,0 +1,30 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Lucent.Preview.Build/Lucent.Preview.Build.csproj" />
+  </ItemGroup>
+  <Target Name="CopyPreviewBuildTool" AfterTargets="Build">
+    <MSBuild
+      Projects="../../src/Lucent.Preview.Build/Lucent.Preview.Build.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="_PreviewBuildTool" />
+    </MSBuild>
+    <PropertyGroup>
+      <_PreviewBuildToolDirectory>%(_PreviewBuildTool.RootDir)%(_PreviewBuildTool.Directory)</_PreviewBuildToolDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <_PreviewBuildPayload Include="$(_PreviewBuildToolDirectory)Lucent.Preview.Build.dll;$(_PreviewBuildToolDirectory)Lucent.Preview.Build.deps.json;$(_PreviewBuildToolDirectory)Lucent.Preview.Build.runtimeconfig.json;$(_PreviewBuildToolDirectory)Microsoft.Build.Locator.dll;$(_PreviewBuildToolDirectory)Preview.props;$(_PreviewBuildToolDirectory)Preview.targets" />
+    </ItemGroup>
+    <Error
+      Condition="!Exists('%(_PreviewBuildPayload.Identity)')"
+      Text="Required preview build test payload is missing: %(_PreviewBuildPayload.Identity)"
+    />
+    <Copy SourceFiles="@(_PreviewBuildPayload)" DestinationFolder="$(TargetDir)build-tool" />
+  </Target>
+</Project>

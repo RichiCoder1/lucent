@@ -1,0 +1,20 @@
+{
+  "protocolVersion": 1,
+  "sessionId": "session-1",
+  "generation": "generation-1",
+  "requestId": "request-1",
+  "projectTargetDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "inputDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "scenarioId": "card/empty",
+  "presentationId": "default",
+  "frameSequence": 1,
+  "fileName": "frame.png",
+  "byteLength": 1024,
+  "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "width": 177,
+  "height": 133,
+  "logicalWidth": 160,
+  "logicalHeight": 120,
+  "scale": 1.100000023841858
+}

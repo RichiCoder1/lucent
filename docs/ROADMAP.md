@@ -13,9 +13,13 @@ compiler/editor, runtime and SDK/NativeAOT verification; the
 candidate evidence. Explicit, owned preview scenarios
 [#229](https://github.com/RichiCoder1/lucent/issues/229) pass the preview and
 headless suites; their [implementation record](plans/native-preview-scenarios.md)
-describes lifecycle ownership and dependency isolation. The next work is trusted
-build and worker orchestration [#230](https://github.com/RichiCoder1/lucent/issues/230), following the measured
-[native preview feasibility](../tests/Probes/Preview/NativeFeasibility/REPORT.md).
+describes lifecycle ownership and dependency isolation. Trusted build and worker
+orchestration [#230](https://github.com/RichiCoder1/lucent/issues/230) adds isolated
+real-SDK builds, supervised Windows process trees and verified compiled Skia
+frames. Its [execution record](plans/native-preview-orchestration.md) retains
+automated and actual editor evidence, including the source-lock isolation fixes.
+Next is the bounded [preview panel #231](plans/native-preview-panel.md), followed
+by unsaved and interactive preview #232 and external delivery #233.
 Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
 distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit

@@ -105,7 +105,7 @@ test("activates only Lucent workspaces and registers C# cross-language selectors
     assert.deepEqual(manifest.extensionKind, ["workspace"]);
     assert.equal(manifest.capabilities.untrustedWorkspaces.supported, "limited");
     assert.deepEqual(manifest.capabilities.untrustedWorkspaces.restrictedConfigurations,
-        ["lucentLui.serverPath", "lucentLui.projectPath"]);
+        ["lucentLui.serverPath", "lucentLui.projectPath", "lucentLui.preview"]);
     assert.deepEqual(JSON.parse(JSON.stringify(loaded.exports.crossLanguageSelector)), [
         { language: "lui" }, { language: "csharp", scheme: "file" }
     ]);

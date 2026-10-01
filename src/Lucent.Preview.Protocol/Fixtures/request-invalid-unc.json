@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 1,
+  "sessionId": "session-1",
+  "generation": "generation-1",
+  "requestId": "request-1",
+  "projectTargetDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "inputDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "scenarioId": "card/empty",
+  "presentationId": "default",
+  "outputDirectory": "\\\\server\\share\\output"
+}

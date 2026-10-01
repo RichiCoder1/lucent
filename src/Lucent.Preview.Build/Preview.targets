@@ -1,0 +1,66 @@
+<Project>
+  <PropertyGroup>
+    <LucentPreviewOriginalNuGetLockFilePath>$(NuGetLockFilePath)</LucentPreviewOriginalNuGetLockFilePath>
+    <_LucentPreviewProjectLockName>packages.$(MSBuildProjectName.Replace(' ', '_')).lock.json</_LucentPreviewProjectLockName>
+    <LucentPreviewOriginalNuGetLockFilePath
+      Condition="'$(LucentPreviewOriginalNuGetLockFilePath)' == '' and Exists('$(MSBuildProjectDirectory)/$(_LucentPreviewProjectLockName)')"
+      >$(MSBuildProjectDirectory)/$(_LucentPreviewProjectLockName)</LucentPreviewOriginalNuGetLockFilePath>
+    <LucentPreviewOriginalNuGetLockFilePath
+      Condition="'$(LucentPreviewOriginalNuGetLockFilePath)' == ''"
+      >$(MSBuildProjectDirectory)/packages.lock.json</LucentPreviewOriginalNuGetLockFilePath>
+    <LucentPreviewOriginalNuGetLockFilePath>$([System.IO.Path]::GetFullPath('$(LucentPreviewOriginalNuGetLockFilePath)', '$(MSBuildProjectDirectory)'))</LucentPreviewOriginalNuGetLockFilePath>
+    <NuGetLockFilePath>$(ArtifactsPath)/locks/$(ArtifactsProjectName)/packages.lock.json</NuGetLockFilePath>
+  </PropertyGroup>
+  <UsingTask
+    TaskName="Lucent.Preview.Build.CapturePreviewInputs"
+    AssemblyFile="$(LucentPreviewBuildAssembly)"
+  />
+  <Target Name="CapturePreviewAssets" BeforeTargets="GenerateLucentAssets">
+    <CapturePreviewInputs
+      ProjectPath="$(MSBuildProjectFullPath)"
+      Stage="assets"
+      OutputDirectory="$(IntermediateOutputPath)preview-consumption"
+      Items="@(LucentAsset);@(_LucentApplicationIconInput);@(_LucentAssetToolClosure)"
+    />
+  </Target>
+  <Target Name="CapturePreviewResources" BeforeTargets="CoreResGen">
+    <CapturePreviewInputs
+      ProjectPath="$(MSBuildProjectFullPath)"
+      Stage="resources"
+      OutputDirectory="$(IntermediateOutputPath)preview-consumption"
+      Items="@(EmbeddedResource);@(Resource);@(LucentPreviewInput)"
+    />
+  </Target>
+  <Target
+    Name="CapturePreviewCompile"
+    BeforeTargets="CoreCompile"
+    DependsOnTargets="ResolveReferences;GenerateMSBuildEditorConfigFile"
+  >
+    <CapturePreviewInputs
+      ProjectPath="$(MSBuildProjectFullPath)"
+      Stage="compile"
+      OutputDirectory="$(IntermediateOutputPath)preview-consumption"
+      Items="@(Compile);@(AdditionalFiles);@(Analyzer);@(EditorConfigFiles);@(ReferencePath);@(EmbeddedResource);@(LucentAsset);@(LucentPreviewInput)"
+    />
+  </Target>
+  <Target Name="CapturePreviewPublish" AfterTargets="ComputeFilesToPublish">
+    <CapturePreviewInputs
+      ProjectPath="$(MSBuildProjectFullPath)"
+      Stage="publish"
+      OutputDirectory="$(IntermediateOutputPath)preview-consumption"
+      Items="@(ResolvedFileToPublish)"
+    />
+  </Target>
+  <Target
+    Name="CapturePreviewPreparedInputs"
+    AfterTargets="PrepareLucentLuiProjectEmitter"
+    Condition="'$(LucentLuiPreparedAuthoring)' == 'true'"
+  >
+    <CapturePreviewInputs
+      ProjectPath="$(MSBuildProjectFullPath)"
+      Stage="preparation"
+      OutputDirectory="$(IntermediateOutputPath)preview-consumption"
+      Items="@(Compile);@(AdditionalFiles);@(Analyzer);@(EditorConfigFiles);@(ReferencePath)"
+    />
+  </Target>
+</Project>

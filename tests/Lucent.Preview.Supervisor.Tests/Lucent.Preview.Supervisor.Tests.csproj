@@ -1,0 +1,53 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Lucent.Preview.Supervisor/Lucent.Preview.Supervisor.csproj" />
+    <ProjectReference
+      Include="../Probes/Preview/SupervisorFixture/SupervisorFixture.csproj"
+      ReferenceOutputAssembly="false"
+    />
+  </ItemGroup>
+  <Target
+    Name="CopySupervisorFixture"
+    AfterTargets="Build"
+    DependsOnTargets="ResolveProjectReferences"
+  >
+    <MSBuild
+      Projects="../Probes/Preview/SupervisorFixture/SupervisorFixture.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="SupervisorFixtureAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <SupervisorFixtureOutput>@(SupervisorFixtureAssembly->'%(RootDir)%(Directory)')</SupervisorFixtureOutput>
+    </PropertyGroup>
+    <Error
+      Condition="!Exists('$(SupervisorFixtureOutput)SupervisorFixture.exe')"
+      Text="Build the supervisor fixture before running its contracts."
+    />
+    <ItemGroup>
+      <SupervisorFixtureFiles Include="$(SupervisorFixtureOutput)SupervisorFixture.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SupervisorFixtureFiles)" DestinationFolder="$(OutDir)SupervisorFixture" />
+    <MSBuild
+      Projects="../../src/Lucent.Preview.Supervisor/Lucent.Preview.Supervisor.csproj"
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)"
+    >
+      <Output TaskParameter="TargetOutputs" ItemName="SupervisorAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <SupervisorOutput>@(SupervisorAssembly->'%(RootDir)%(Directory)')</SupervisorOutput>
+    </PropertyGroup>
+    <ItemGroup>
+      <SupervisorExecutableFiles Include="$(SupervisorOutput)Lucent.Preview.Supervisor.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(SupervisorExecutableFiles)" DestinationFolder="$(OutDir)Supervisor" />
+  </Target>
+</Project>

@@ -307,3 +307,19 @@ consulted September 30, 2026. Lucent supplies an immutable value through each
 composition's existing mount environment, so application and preview compositions
 can coexist. No Avalonia code or package is adopted. Explicit scenario fixtures
 own their sample data and service choices; the signal does not sandbox app code.
+
+## Native preview orchestration
+
+The development preview uses Microsoft's [MSBuild graph model](https://github.com/dotnet/msbuild/blob/main/documentation/specs/static-graph.md)
+and [evaluated item semantics](https://learn.microsoft.com/visualstudio/msbuild/evaluate-items-and-properties)
+to distinguish evaluated build inputs from emitted artifacts. Its manifest is
+optimistic freshness evidence for declared inputs, not a hermetic build claim.
+Windows process ownership follows the documented [job object](https://learn.microsoft.com/windows/win32/procthread/job-objects)
+and suspended-process APIs, using the repository's existing [CsWin32](https://github.com/microsoft/CsWin32)
+binding generator. No third-party supervisor implementation is copied. VS Code's
+[Workspace Trust](https://code.visualstudio.com/api/extension-guides/workspace-trust)
+gates executable work; a separate worker process does not sandbox author code.
+Lock selection and staging follow NuGet's [lock-file implementation](https://github.com/NuGet/NuGet.Client/blob/dev/src/NuGet.Core/NuGet.ProjectModel/ProjectLockFile/PackagesLockFileUtilities.cs)
+and [PackageReference lock-file guidance](https://learn.microsoft.com/nuget/consume-packages/package-references-in-project-files#locking-dependencies),
+preserving the application's restore policy without writing preview restore
+results into its source tree.

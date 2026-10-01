@@ -313,6 +313,12 @@ if ($manifest['lucentNuGetDoctor']) {
     Replace-Entries $path @{ 'extension/package.json' = Json-Bytes $changed }
     Expect-Rejected 'vsix-no-nuget-doctor-manifest' { Get-LuiVsix $path } 'no bundled NuGet doctor'
 }
+if ($manifest['files'] -contains 'preview-runtime.js') {
+    $path = Join-Path $rejections 'vsix-missing-preview-runtime.vsix'
+    Copy-Item -LiteralPath (Join-Path $fixture 'extension.vsix') -Destination $path
+    Replace-Entries $path @{ 'extension/preview-runtime.js' = $null }
+    Expect-Rejected 'vsix-missing-preview-runtime' { Get-LuiVsix $path } 'Missing declared VSIX entry'
+}
 if ($manifest['lucentDoctor']) {
     foreach ($case in @(
         @{ name = 'vsix-missing-doctor'; entry = 'extension/doctor/Lucent.Tools.dll'; bytes = $null; pattern = 'doctor payload' },

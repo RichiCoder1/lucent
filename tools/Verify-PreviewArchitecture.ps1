@@ -14,19 +14,19 @@ if (-not $OutputPath) {
 }
 
 function Assert-PreviewFixtureDependencies([string] $AssetsPath, [string] $OutputPath) {
-    $forbiddenFixtureDependencies = @('Lucent.Preview', 'Lucent.Testing', 'Lucent.Testing.Skia')
+    $forbiddenFixtureDependency = '^Lucent\.(Preview(?!\.Fixtures$)|Testing)(\.|$)'
     $assets = Get-Content -LiteralPath $AssetsPath -Raw | ConvertFrom-Json
     $resolved = @($assets.libraries.psobject.Properties.Name | ForEach-Object { ($_ -split '/')[0] })
     if ($resolved -notcontains 'Lucent.Core') { throw 'Compiled preview fixture does not resolve Core.' }
     foreach ($name in $resolved) {
-        if ($forbiddenFixtureDependencies -contains $name) {
+        if ($name -match $forbiddenFixtureDependency) {
             throw "Compiled preview fixture resolves a forbidden dependency: $name"
         }
     }
     foreach ($framework in $assets.project.restore.frameworks.psobject.Properties.Value) {
         foreach ($reference in $framework.projectReferences.psobject.Properties.Name) {
             $name = [IO.Path]::GetFileNameWithoutExtension($reference)
-            if ($forbiddenFixtureDependencies -contains $name) {
+            if ($name -match $forbiddenFixtureDependency) {
                 throw "Compiled preview fixture has a forbidden evaluated project reference: $name"
             }
         }
@@ -36,7 +36,7 @@ function Assert-PreviewFixtureDependencies([string] $AssetsPath, [string] $Outpu
     $runtime = @($deps.libraries.psobject.Properties.Name | ForEach-Object { ($_ -split '/')[0] })
     if ($runtime -notcontains 'Lucent.Core') { throw 'Compiled preview fixture runtime does not include Core.' }
     foreach ($name in $runtime) {
-        if ($forbiddenFixtureDependencies -contains $name) {
+        if ($name -match $forbiddenFixtureDependency) {
             throw "Compiled preview fixture runtime resolves a forbidden dependency: $name"
         }
     }
@@ -44,7 +44,7 @@ function Assert-PreviewFixtureDependencies([string] $AssetsPath, [string] $Outpu
         throw 'Compiled preview fixture assembly is missing.'
     }
     foreach ($file in Get-ChildItem -LiteralPath $OutputPath -Recurse -File -Filter '*.dll') {
-        if ($forbiddenFixtureDependencies -contains $file.BaseName) {
+        if ($file.BaseName -match $forbiddenFixtureDependency) {
             throw "Compiled preview fixture output includes a forbidden assembly: $($file.BaseName)"
         }
     }

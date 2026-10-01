@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <ArtifactsProjectName>preview-$([MSBuild]::StableStringHash('$(MSBuildProjectFullPath)'))</ArtifactsProjectName>
+  </PropertyGroup>
+  <Import Project="$(MSBuildSDKsPath)/Microsoft.NET.Sdk/Sdk/UseArtifactsOutputPath.props" />
+</Project>

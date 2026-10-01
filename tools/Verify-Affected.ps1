@@ -26,6 +26,7 @@ try {
     }
     $projects = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $allManaged = $false
+    $previewBuildRequired = $false
     foreach ($inputPath in $paths) {
         if ([string]::IsNullOrWhiteSpace($inputPath)) { continue }
         $relative = $inputPath.Replace('\', '/') -replace '^(\./)+', ''
@@ -40,8 +41,14 @@ try {
             '^src/Lucent\.Tools\.NuGet/|^tests/Lucent\.Tools\.NuGet\.Tests/' { 'Lucent.Tools.NuGet.Tests'; break }
             '^tests/Lucent\.Platform\.Windows\.Activation\.Tests/' { 'Lucent.Platform.Windows.Activation.Tests'; break }
             '^src/Lucent\.Platform\.Windows\.Activation/' { 'Lucent.Platform.Windows.Activation.Tests'; break }
-            '^tests/Lucent\.Testing\.Tests/|^src/Lucent\.Testing(\.Skia)?/' { 'Lucent.Testing.Tests'; 'Lucent.Preview.Tests'; break }
-            '^src/Lucent\.Preview/|^tests/Lucent\.Preview\.(Tests|Fixtures)/' { 'Lucent.Preview.Tests'; break }
+            '^tests/Lucent\.Testing\.Tests/|^src/Lucent\.Testing(\.Skia)?/' { 'Lucent.Testing.Tests'; 'Lucent.Preview.Tests'; 'Lucent.Preview.Hosting.Tests'; break }
+            '^src/Lucent\.Preview/|^tests/Lucent\.Preview\.(Tests|Fixtures)/' { 'Lucent.Preview.Tests'; 'Lucent.Preview.Hosting.Tests'; break }
+            '^src/Lucent\.Preview\.(Protocol|Hosting)/|^tests/Lucent\.Preview\.Hosting\.Tests/|^tests/Probes/Preview/WorkerFixture/' { 'Lucent.Preview.Hosting.Tests'; break }
+            '^src/Lucent\.Preview\.Build/|^tests/Lucent\.Preview\.Build\.Tests/' {
+                $previewBuildRequired = $true
+                break
+            }
+            '^src/Lucent\.Preview\.Supervisor/|^tests/Lucent\.Preview\.Supervisor\.Tests/|^tests/Probes/Preview/SupervisorFixture/' { 'Lucent.Preview.Supervisor.Tests'; break }
             '^tests/(Lucent\.(Core|Reactive\.R3|Hosting|Renderer\.Skia|Platform\.Windows|IssueBrowser|Lui\.(Compiler|Generator|LanguageServer|Tooling))\.Tests)/' { $Matches[1]; break }
             '^src/Lucent\.Reactive\.R3/' { 'Lucent.Reactive.R3.Tests'; 'Lucent.Testing.Tests'; break }
             '^src/Lucent\.Hosting/' { 'Lucent.Hosting.Tests'; break }
@@ -58,8 +65,11 @@ try {
         }
         foreach ($project in $selected) { [void] $projects.Add($project) }
     }
+    if ($previewBuildRequired) {
+        Write-Output 'Preview build changes require tools/Test-PreviewBuild.ps1 with the candidate -Feed and -Version.'
+    }
     if (-not $allManaged -and $projects.Count -eq 0) {
-        Write-Output 'No source checks selected. Inspect changed documentation and links when applicable.'
+        if (-not $previewBuildRequired) { Write-Output 'No source checks selected. Inspect changed documentation and links when applicable.' }
         exit 0
     }
     $testScript = Join-Path $PSScriptRoot 'Test-Repository.ps1'

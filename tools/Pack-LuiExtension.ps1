@@ -108,6 +108,11 @@ try {
         'doctor-client.js',
         'onboarding-ui.js',
         'environment-ui.js',
+        'preview-coordinator.js',
+        'preview-protocol.js',
+        'preview-process.js',
+        'preview-runtime.js',
+        'preview-ui.js',
         'release-catalog.json',
         'language-configuration.json',
         'README.md'

@@ -27,7 +27,7 @@
     "untrustedWorkspaces": {
       "supported": "limited",
       "description": "Syntax highlighting remains available; project evaluation and the language server require a trusted workspace.",
-      "restrictedConfigurations": ["lucentLui.serverPath", "lucentLui.projectPath"]
+      "restrictedConfigurations": ["lucentLui.serverPath", "lucentLui.projectPath", "lucentLui.preview"]
     },
     "virtualWorkspaces": false
   },
@@ -41,6 +41,11 @@
     "doctor-client.js",
     "onboarding-ui.js",
     "environment-ui.js",
+    "preview-coordinator.js",
+    "preview-protocol.js",
+    "preview-process.js",
+    "preview-runtime.js",
+    "preview-ui.js",
     "release-catalog.json",
     "tooling-cache/**",
     "doctor/**",
@@ -67,6 +72,15 @@
       "path": "./syntaxes/lui.tmLanguage.json"
     }],
     "commands": [{
+      "command": "lucentLui.startPreview",
+      "title": "Lucent: Start Native Preview (Development)"
+    }, {
+      "command": "lucentLui.refreshPreview",
+      "title": "Lucent: Refresh Native Preview"
+    }, {
+      "command": "lucentLui.stopPreview",
+      "title": "Lucent: Stop Native Preview"
+    }, {
       "command": "lucentLui.rename",
       "title": "Lucent: Rename Cross-Language Symbol"
     }, {
@@ -133,6 +147,21 @@
     "configuration": {
       "title": "Lucent .lui",
       "properties": {
+        "lucentLui.preview": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "additionalProperties": false,
+          "description": "Opt-in native preview development setup. Builds and executes the explicit scenario project only in trusted local Windows workspaces.",
+          "properties": {
+            "projectPath": { "type": "string", "description": "Explicit development executable project, relative to its workspace folder." },
+            "scenarioId": { "type": "string", "description": "Exact statically registered scenario ID." },
+            "targetFramework": { "type": "string", "description": "Selected root target framework." },
+            "configuration": { "type": "string", "default": "Debug" },
+            "toolsDirectory": { "type": "string", "description": "Absolute directory containing trusted build/ and supervisor/ development tools." },
+            "extraInputs": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Additional declared input files, relative to the workspace folder." }
+          }
+        },
         "lucentLui.serverPath": {
           "type": "string",
           "default": "",

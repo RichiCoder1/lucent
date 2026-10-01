@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lucent:preview-worker:1",
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "protocolVersion",
+        "sessionId",
+        "generation",
+        "requestId",
+        "projectTargetDigest",
+        "inputDigest",
+        "artifactDigest",
+        "scenarioId",
+        "presentationId",
+        "outputDirectory"
+      ],
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "sessionId": {
+          "$ref": "#/$defs/id"
+        },
+        "generation": {
+          "$ref": "#/$defs/id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "projectTargetDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifactDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "scenarioId": {
+          "type": "string",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "presentationId": {
+          "$ref": "#/$defs/id"
+        },
+        "outputDirectory": {
+          "description": "Absolute local path; host validates containment and reparse policy.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[A-Za-z]:[\\\\/][^:\\u0000-\\u001f\\u007f-\\u009f]*$"
+        }
+      }
+    },
+    {
+      "required": [
+        "protocolVersion",
+        "sessionId",
+        "generation",
+        "requestId",
+        "projectTargetDigest",
+        "inputDigest",
+        "artifactDigest",
+        "scenarioId",
+        "presentationId",
+        "frameSequence",
+        "fileName",
+        "byteLength",
+        "sha256",
+        "width",
+        "height",
+        "logicalWidth",
+        "logicalHeight",
+        "scale"
+      ],
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "sessionId": {
+          "$ref": "#/$defs/id"
+        },
+        "generation": {
+          "$ref": "#/$defs/id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "projectTargetDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifactDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "scenarioId": {
+          "type": "string",
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "presentationId": {
+          "$ref": "#/$defs/id"
+        },
+        "frameSequence": {
+          "const": 1
+        },
+        "fileName": {
+          "const": "frame.png"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 33,
+          "maximum": 33554432
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "logicalWidth": {
+          "description": "Physical width/height must equal ceil(binary32(binary32(logicalWidth/logicalHeight) * binary32(scale))), matching the Skia viewport binary32 product. Finite positive operands and bounded physical dimensions require semantic validation.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "logicalHeight": {
+          "description": "Physical width/height must equal ceil(binary32(binary32(logicalWidth/logicalHeight) * binary32(scale))), matching the Skia viewport binary32 product. Finite positive operands and bounded physical dimensions require semantic validation.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scale": {
+          "description": "Physical width/height must equal ceil(binary32(binary32(logicalWidth/logicalHeight) * binary32(scale))), matching the Skia viewport binary32 product. Finite positive operands and bounded physical dimensions require semantic validation.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  ]
+}

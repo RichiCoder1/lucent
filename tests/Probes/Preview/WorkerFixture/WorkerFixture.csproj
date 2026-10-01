@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Lucent.Preview.WorkerFixture</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../src/Lucent.Preview.Hosting/Lucent.Preview.Hosting.csproj" />
+    <ProjectReference Include="../../../Lucent.Preview.Fixtures/Lucent.Preview.Fixtures.csproj" />
+  </ItemGroup>
+</Project>

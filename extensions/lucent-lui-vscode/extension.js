@@ -12,6 +12,7 @@ const { acquireApprovedRelease } = require("./server-acquisition");
 const { preflightDotnet } = require("./doctor-client");
 const { createOnboardingUi } = require("./onboarding-ui");
 const { createEnvironmentCommands } = require("./environment-ui");
+const { createPreviewCommands } = require("./preview-ui");
 const manifest = require("./package.json");
 const clientRelease = manifest.lucentRelease;
 const releaseCatalog = require("./release-catalog.json");
@@ -914,6 +915,7 @@ async function activateTrusted(context, isActive, onStarted, onState, onSelected
 }
 
 async function activate(context) {
+    createPreviewCommands(vscode, context);
     const ui = createOnboardingUi(vscode, context);
     const environment = createEnvironmentCommands(vscode, context, manifest, checkTrustedProject);
     let currentStop;

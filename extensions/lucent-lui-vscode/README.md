@@ -9,7 +9,8 @@ dependencies. It does not include the .NET SDK.
 
 Follow the [Windows getting-started guide](https://github.com/RichiCoder1/lucent/blob/main/docs/GETTING-STARTED.md)
 for explicit release installation, managed run/debug, tests and NativeAOT publishing.
-The fresh-editor debugger walkthrough remains pending; the guide labels that boundary.
+The [onboarding record](https://github.com/RichiCoder1/lucent/blob/main/docs/plans/onboarding-execution.md)
+records the verified package, debugger and installed-editor boundaries.
 
 Run **Lucent: Open Getting Started** for the built-in walkthrough. **Lucent: Check
 Environment** inspects installed .NET tooling and configuration without restoring,
@@ -118,6 +119,24 @@ override are also available.
 The language server loads the evaluated `.csproj`, including its project
 references and `.lui` additional documents. Use the repository's pinned .NET
 SDK when building the server.
+
+## Development native preview
+
+**Lucent: Start Native Preview (Development)** builds an explicitly configured
+development executable and displays a frame from Lucent's real Skia renderer.
+The separate preview tools currently require a source checkout, a local Windows
+desktop workspace and Workspace Trust. They are not bundled executable tools in
+this VSIX. Configure `lucentLui.preview` using the
+[development setup guide](https://github.com/RichiCoder1/lucent/blob/main/docs/NATIVE-PREVIEW.md).
+
+Save or **Refresh Native Preview** starts a fresh build and worker. Failed builds
+retain a visibly stale last-good image. **Stop Native Preview** or closing the
+panel cancels active work without stopping language services. The
+**Lucent Preview** output channel reports separate build/worker diagnostics.
+Unsaved-buffer compilation, interactive inspection and presentation pickers are
+separate roadmap work.
+
+## Source checkout language services
 
 Keep the server and Core/SDK authoring versions aligned; property discovery uses
 Core's attributed metadata. For repository project references, build the selected

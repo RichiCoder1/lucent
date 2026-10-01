@@ -1,0 +1,3 @@
+CreateProcessW
+CloseHandle
+TerminateProcess

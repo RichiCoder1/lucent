@@ -455,12 +455,25 @@ test("timeout terminates a nonresponding doctor and returns a stable state", asy
         '.then(result=>console.log(JSON.stringify({reason:result.reason,killCount:fake.calls[1].child.killCount})),',
         'error=>{console.error(error);process.exitCode=1;});'
     ].join("\n");
-    const standalone = childProcess.spawnSync(process.execPath, ["-e", script], {
-        cwd: os.tmpdir(), encoding: "utf8", timeout: 2_000, windowsHide: true
+    // This proves event-loop ownership, not a two-second Node startup budget.
+    // Allow startup plus the client's bounded five-second cleanup, and assert
+    // the actual result. An unreferenced deadline exits early with no result.
+    const standalone = childProcess.spawn(process.execPath, ["-e", script], {
+        cwd: os.tmpdir(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
     });
-    assert.equal(standalone.error, undefined);
-    assert.equal(standalone.status, 0, standalone.stderr);
-    assert.equal(standalone.stdout.trim(), JSON.stringify({ reason: "doctor-timeout", killCount: 1 }));
+    let stdout = "";
+    let stderr = "";
+    standalone.stdout.on("data", chunk => { stdout += chunk; });
+    standalone.stderr.on("data", chunk => { stderr += chunk; });
+    const watchdog = setTimeout(() => standalone.kill(), 15_000);
+    t.after(() => { clearTimeout(watchdog); if (standalone.exitCode === null) standalone.kill(); });
+    const status = await new Promise((resolve, reject) => {
+        standalone.once("error", reject);
+        standalone.once("close", (code, signal) => resolve({ code, signal }));
+    });
+    clearTimeout(watchdog);
+    assert.deepEqual(status, { code: 0, signal: null }, stderr);
+    assert.equal(stdout.trim(), JSON.stringify({ reason: "doctor-timeout", killCount: 1 }));
 });
 
 test("cancellation kills the doctor and ignores late output", async t => {

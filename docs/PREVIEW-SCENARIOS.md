@@ -1,9 +1,9 @@
 # Explicit preview scenarios
 
 `Lucent.Preview` is an in-tree development library for registering compiled
-components with explicit fixture data. It does not launch an editor panel, watch
-files or execute an application's entry point. Those capabilities follow in the
-[native preview work](https://github.com/RichiCoder1/lucent/issues/224).
+components with explicit fixture data. The separate
+[development preview tools](NATIVE-PREVIEW.md) own editor panels, file watching and
+worker processes; neither library executes the shipping application's entry point.
 
 Put registrations in a separate development project that references the component
 project and `Lucent.Preview`. Keep that reference out of the shipping application's
@@ -108,7 +108,7 @@ continues to use the existing Hosting integration.
 Cancellation is checked before and after setup and around root construction.
 Await failed startup so cleanup can finish; do not detach it with a timeout that
 abandons the owned task. Code that ignores cancellation cannot be forcibly stopped
-by this library. Worker-process supervision belongs to #230.
+by this library. The separate worker supervisor enforces a process-level deadline.
 
 Design mode is not a sandbox. Build targets, static initializers and component
 code retain their normal machine capabilities. The scenario catalog performs no
