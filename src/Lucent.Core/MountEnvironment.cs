@@ -20,6 +20,7 @@ internal sealed class MountEnvironment
     }
 
     internal Composition Composition { get; }
+    internal DesignContext Design => Composition.Design;
     internal ComponentServiceBinding? Services { get; }
 
     internal static MountEnvironment CreateRoot(Composition composition, ThemeContext? theme)
@@ -82,6 +83,10 @@ internal sealed class MountEnvironment
         if (!ReferenceEquals(popup.Graph, Composition.Graph))
             throw new InvalidOperationException(
                 "A popup mount environment must remain on its owner's reactive graph."
+            );
+        if (popup.Design.Purpose != Design.Purpose)
+            throw new InvalidOperationException(
+                "A popup mount environment must preserve its originating composition purpose."
             );
 
         if (Services is not null)

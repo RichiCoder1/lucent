@@ -14,6 +14,112 @@ public sealed class RequirementEditorContracts
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task ContextualDesignEditorOperationsReclassifyUnsavedShadowing()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-design-editor-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Sample.csproj");
+            var path = Path.Combine(root, "Card.lui");
+            const string source =
+                "namespace Sample; using Lucent.Core; public component Card() { bool preview = Design.IsDesignMode; <Text content={Design.IsDesignMode.ToString()} /> }";
+            await File.WriteAllTextAsync(
+                project,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>"
+                    + LanguageServerTests.CoreMetadataReference
+                    + "<AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(path, source);
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            var uri = new Uri(path);
+            var receiver = source.LastIndexOf("Design.", StringComparison.Ordinal);
+            var initial = await context.CompileAsync(uri, CancellationToken.None);
+            Assert.IsNotNull(initial);
+            Assert.IsTrue(
+                initial.Result.Success,
+                string.Join("\n", initial.Result.Diagnostics.Select(item => item.Message))
+            );
+            var hover = await context.HoverAsync(uri, receiver + 2, CancellationToken.None);
+            Assert.IsNotNull(hover);
+            Assert.AreEqual("contextual Lucent.Core.DesignContext Design", hover.Value);
+            Assert.IsNull(
+                await context.PrepareRenameAsync(uri, receiver + 2, CancellationToken.None)
+            );
+            Assert.IsNull(
+                await context.RenameAsync(uri, receiver + 2, "Purpose", CancellationToken.None)
+            );
+            var completion = await context.CompletionsAsync(
+                uri,
+                receiver + "Design.".Length,
+                CancellationToken.None
+            );
+            Assert.IsTrue(completion.Any(item => item.Label == "IsDesignMode"));
+            Assert.IsTrue(completion.Any(item => item.Label == "Purpose"));
+            var incomplete = source.Replace(
+                "Design.IsDesignMode.ToString()",
+                "Design.",
+                StringComparison.Ordinal
+            );
+            context.ReplaceText(uri, incomplete);
+            var recovery = await context.CompletionsAsync(
+                uri,
+                receiver + "Design.".Length,
+                CancellationToken.None
+            );
+            Assert.IsTrue(recovery.Any(item => item.Label == "IsDesignMode"));
+
+            var shadow = source.Replace(
+                "Card()",
+                "Card(DesignContext Design)",
+                StringComparison.Ordinal
+            );
+            context.ReplaceText(uri, shadow);
+            var ordinary = await context.CompileAsync(uri, CancellationToken.None);
+            Assert.IsNotNull(ordinary);
+            Assert.AreEqual(0, ordinary.Result.Map.DesignIntrinsics.Count);
+            var ordinaryReceiver = shadow.LastIndexOf("Design.", StringComparison.Ordinal);
+            var ordinaryHover = await context.HoverAsync(
+                uri,
+                ordinaryReceiver + 2,
+                CancellationToken.None
+            );
+            Assert.IsNotNull(ordinaryHover);
+            Assert.IsFalse(ordinaryHover.Value.Contains("contextual", StringComparison.Ordinal));
+            var rename = await context.RenameAsync(
+                uri,
+                ordinaryReceiver + 2,
+                "text",
+                CancellationToken.None
+            );
+            Assert.IsNotNull(rename);
+            Assert.AreEqual(1, rename.Edits.Count);
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    shadow.IndexOf("Design)", StringComparison.Ordinal),
+                    shadow.IndexOf("Design.IsDesignMode", StringComparison.Ordinal),
+                    ordinaryReceiver,
+                },
+                rename.Edits[0].Spans.Select(item => item.Start).ToArray()
+            );
+            Assert.IsTrue(rename.Edits[0].Spans.All(item => item.Length == 6));
+            context.ReplaceText(uri, source);
+            Assert.AreEqual(
+                "contextual Lucent.Core.DesignContext Design",
+                (await context.HoverAsync(uri, receiver + 2, CancellationToken.None))?.Value
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task ReferencedAssemblyRequirementsRemainStaticAndRefreshWithTheReference()
     {
         var root = Path.GetFullPath(

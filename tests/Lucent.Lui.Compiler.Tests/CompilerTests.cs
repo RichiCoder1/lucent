@@ -4090,46 +4090,63 @@ style NamedMixed {
 }
 
 """;
-        var result = LuiCompiler.Compile(
-            LuiParser.Parse(source),
-            CSharpCompilation.Create(
-                "mixed-token-value",
-                [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
-                References()
-            ),
-            new LuiFreshnessIdentity(
-                "1",
-                "mixed-token-value",
-                new LuiDocumentIdentity("MixedTokenValue.lui"),
-                "v1",
-                "",
-                "",
-                "preview",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "App"
-            )
-        );
-        Assert(
-            result.Success
-                && result.Source!.Contains(
-                    ".BindValue<float>(global::Lucent.Core.VisualProperties.Opacity, () =>"
-                )
-                && result.Source.Contains(
-                    "global::Lucent.Core.StyleValue.FromToken<float>(LightNotesTheme.DenseSpacing)"
-                )
-                && result.Source.Contains("global::Lucent.Core.StyleValue.FromValue<float>(1)")
-                && result.Source.Contains(
-                    ".SetValue<float>(global::Lucent.Core.VisualProperties.Opacity, "
+        foreach (
+            var candidateSource in new[]
+            {
+                source,
+                source.Replace("menuOpen ?", "Design.IsDesignMode ?", StringComparison.Ordinal),
+            }
+        )
+        {
+            var result = LuiCompiler.Compile(
+                LuiParser.Parse(candidateSource),
+                CSharpCompilation.Create(
+                    "mixed-token-value",
+                    [
+                        CSharpSyntaxTree.ParseText(
+                            api,
+                            new CSharpParseOptions(LanguageVersion.Preview)
+                        ),
+                    ],
+                    References()
                 ),
-            "mixed token/value conditionals did not lower through typed StyleValue bindings: "
-                + string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message))
-                + "\n"
-                + result.Source
-        );
+                new LuiFreshnessIdentity(
+                    "1",
+                    "mixed-token-value",
+                    new LuiDocumentIdentity("MixedTokenValue.lui"),
+                    "v1",
+                    "",
+                    "",
+                    "preview",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "App"
+                )
+            );
+            Assert(
+                result.Success
+                    && result.Source!.Contains(
+                        ".BindValue<float>(global::Lucent.Core.VisualProperties.Opacity, () =>"
+                    )
+                    && result.Source.Contains(
+                        "global::Lucent.Core.StyleValue.FromToken<float>(LightNotesTheme.DenseSpacing)"
+                    )
+                    && result.Source.Contains("global::Lucent.Core.StyleValue.FromValue<float>(1)")
+                    && result.Source.Contains(
+                        ".SetValue<float>(global::Lucent.Core.VisualProperties.Opacity, "
+                    ),
+                "mixed token/value conditionals did not lower through typed StyleValue bindings: "
+                    + string.Join(
+                        " | ",
+                        result.Diagnostics.Select(diagnostic => diagnostic.Message)
+                    )
+                    + "\n"
+                    + result.Source
+            );
+        }
     }
 
     [TestMethod]

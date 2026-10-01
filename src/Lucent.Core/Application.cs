@@ -47,6 +47,7 @@ public sealed class LucentApplicationBuilder
     private string _title = "Lucent";
     private Func<ThemeAppearance, Theme> _themeFactory = DefaultTheme;
     private ControlPresentationMode _presentationMode = ControlPresentationMode.Standard;
+    private CompositionPurpose _purpose;
     private IApplicationHost? _host;
     private Action<ApplicationFailureReport>? _failureReporter;
     private readonly List<Func<ApplicationStartContext, ValueTask>> _startCallbacks = [];
@@ -83,6 +84,14 @@ public sealed class LucentApplicationBuilder
     {
         ValidatePresentationMode(mode, nameof(mode));
         _presentationMode = mode;
+        return this;
+    }
+
+    /// <summary>Sets the immutable composition purpose for subsequently built applications.</summary>
+    public LucentApplicationBuilder SetPurpose(CompositionPurpose purpose)
+    {
+        _ = new DesignContext(purpose);
+        _purpose = purpose;
         return this;
     }
 
@@ -188,6 +197,7 @@ public sealed class LucentApplicationBuilder
             _title,
             _themeFactory,
             _presentationMode,
+            _purpose,
             host,
             _failureReporter,
             new ApplicationLifecycleCallbacks(
@@ -223,6 +233,7 @@ public sealed class LucentApplication
     private readonly string _title;
     private readonly Func<ThemeAppearance, Theme> _themeFactory;
     private readonly ControlPresentationMode _presentationMode;
+    private readonly CompositionPurpose _purpose;
     private readonly IApplicationHost _host;
     private readonly Action<ApplicationFailureReport>? _failureReporter;
     private readonly ApplicationLifecycleCallbacks _lifecycleCallbacks;
@@ -233,6 +244,7 @@ public sealed class LucentApplication
         string title,
         Func<ThemeAppearance, Theme> themeFactory,
         ControlPresentationMode presentationMode,
+        CompositionPurpose purpose,
         IApplicationHost host,
         Action<ApplicationFailureReport>? failureReporter,
         ApplicationLifecycleCallbacks lifecycleCallbacks,
@@ -242,6 +254,7 @@ public sealed class LucentApplication
         _title = title;
         _themeFactory = themeFactory;
         _presentationMode = presentationMode;
+        _purpose = purpose;
         _host = host;
         _failureReporter = failureReporter;
         _lifecycleCallbacks = lifecycleCallbacks;
@@ -299,7 +312,7 @@ public sealed class LucentApplication
             throw new InvalidOperationException("A built application can run only once.");
 
         var graph = new ReactiveGraph();
-        var composition = new Composition(graph, "application");
+        var composition = new Composition(graph, "application", _purpose);
         ApplicationSession? session = null;
         try
         {

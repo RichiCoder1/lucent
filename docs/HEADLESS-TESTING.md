@@ -41,6 +41,11 @@ The Skia harness configures shared PNG/JPEG preparation automatically. For porta
 
 Configure viewport size, scale, appearance, and theme in `HeadlessApplicationOptions`. Use `AdvanceAsync` to advance the controlled clock; use `InvokeAsync` for owner-thread setup or queries that need direct production capabilities. Tests should explicitly complete asynchronous dependencies. Draining the queue does not complete arbitrary network or background operations.
 
+Headless execution defaults to `CompositionPurpose.Application`. Set
+`HeadlessApplicationOptions.Purpose` to `CompositionPurpose.Preview` only when
+testing explicit [design-mode behavior](DESIGN-MODE.md); the Skia harness preserves
+that selection. Each running application keeps its own immutable purpose.
+
 The work limit contains queued callback/effect loops and reports unsettled work. It cannot preempt a callback that blocks forever, or an endlessly repeating timer inside a single clock advance. Keep user callbacks short, use controlled dependencies, and retain a test-runner timeout for arbitrary code failures.
 
 ## Run the maintained examples

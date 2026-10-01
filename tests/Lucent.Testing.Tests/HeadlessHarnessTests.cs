@@ -8,6 +8,39 @@ namespace Lucent.Testing.Tests;
 public sealed class HeadlessHarnessTests
 {
     [TestMethod]
+    public async Task HeadlessPurposeDefaultsToApplicationAndSkiaPreservesExplicitPreview()
+    {
+        var recipe = Component.Define(
+            "headless-purpose",
+            context =>
+                Components.Text(
+                    context.Design.IsDesignMode ? "Preview purpose" : "Application purpose"
+                )
+        );
+        await using var application = await HeadlessApplication.StartAsync(recipe);
+        var options = new HeadlessApplicationOptions { Purpose = CompositionPurpose.Preview };
+        var startPreview = SkiaHeadlessApplication.StartAsync(recipe, options);
+        options.Purpose = CompositionPurpose.Application;
+        await using var preview = await startPreview;
+        using var normal = await application.SnapshotAsync();
+        using var design = await preview.SnapshotAsync();
+        normal.Require(SemanticRole.Text, "Application purpose");
+        design.Require(SemanticRole.Text, "Preview purpose");
+        Assert.IsFalse(
+            await application.InvokeAsync(context => context.Composition.Design.IsDesignMode)
+        );
+        Assert.IsTrue(
+            await preview.InvokeAsync(context => context.Composition.Design.IsDesignMode)
+        );
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() =>
+            HeadlessApplication.StartAsync(
+                recipe,
+                new HeadlessApplicationOptions { Purpose = (CompositionPurpose)9 }
+            )
+        );
+    }
+
+    [TestMethod]
     public void BoundedReactiveDrainRejectsSelfSchedulingEffect()
     {
         var graph = new ReactiveGraph();

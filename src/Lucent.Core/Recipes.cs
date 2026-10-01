@@ -65,6 +65,11 @@ public sealed class ComponentRecipe
         return new ComponentRecipe(kind, build);
     }
 
+    internal static ComponentRecipe DeferInEnvironment(
+        string kind,
+        Func<ReactiveScope, MountEnvironment, ComponentRecipe> build
+    ) => new(kind, new EnvironmentDeferredRecipe(build));
+
     /// <summary>Creates a recipe whose declared values resolve at each mount before setup begins.</summary>
     public static ComponentRecipe Defer<TValues>(
         string kind,
@@ -326,6 +331,23 @@ public sealed class ComponentRecipe
         {
             var mountOwner = Owner(context, kind, name, ref owner);
             return context.RunDeferred(mountOwner, () => build(mountOwner));
+        }
+    }
+
+    private sealed class EnvironmentDeferredRecipe(
+        Func<ReactiveScope, MountEnvironment, ComponentRecipe> build
+    ) : DeferredRecipe
+    {
+        internal override ComponentRecipe Build(
+            MountContext context,
+            MountEnvironment environment,
+            string kind,
+            string? name,
+            ref ReactiveScope? owner
+        )
+        {
+            var mountOwner = Owner(context, kind, name, ref owner);
+            return context.RunDeferred(mountOwner, () => build(mountOwner, environment));
         }
     }
 

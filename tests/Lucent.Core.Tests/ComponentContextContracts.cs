@@ -5,19 +5,65 @@ namespace Lucent.Core.Tests;
 [TestClass]
 public sealed class ComponentContextContracts
 {
+    [TestMethod]
+    public void ReusableDefineCapturesIndependentImmutablePurposeAtEachMount()
+    {
+        var graph = new ReactiveGraph();
+        using var application = new Composition(graph, "application-purpose");
+        using var preview = new Composition(graph, "preview-purpose", CompositionPurpose.Preview);
+        using var applicationTheme = new ThemeContext(application.Root.Scope, ControlThemes.Light);
+        using var previewTheme = new ThemeContext(preview.Root.Scope, ControlThemes.Light);
+        var callbacks = new List<Func<bool>>();
+        var recipe = Component.Define(
+            "purpose",
+            context =>
+            {
+                var design = context.Design;
+                callbacks.Add(() => design.IsDesignMode);
+                var width = context.State(design.IsDesignMode ? 20 : 10);
+                return ComponentRecipe.Create(
+                    "purpose-root",
+                    (mount, root) =>
+                    {
+                        Assert.AreEqual(design, mount.Design);
+                        root.Present(mount.Theme, author: Style.Empty.Width(width.Value));
+                    }
+                );
+            }
+        );
+        var applicationRoot = application.Mount(application.Root, applicationTheme, recipe);
+        var previewRoot = preview.Mount(preview.Root, previewTheme, recipe);
+        Assert.AreEqual(10f, applicationRoot.Resolve(LayoutProperties.Width).Value);
+        Assert.AreEqual(20f, previewRoot.Resolve(LayoutProperties.Width).Value);
+        Assert.IsFalse(callbacks[0]());
+        Assert.IsTrue(callbacks[1]());
+        applicationRoot.Dispose();
+        previewRoot.Dispose();
+        Assert.IsFalse(callbacks[0]());
+        Assert.IsTrue(callbacks[1]());
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() =>
+            new Composition(graph, "invalid-purpose", (CompositionPurpose)9)
+        );
+    }
+
     private static readonly string[] ExpectedRollbackOrder = ["inner-last", "inner-first", "outer"];
 
     [TestMethod]
-    public void DefineAllocatesIndependentStateForEveryMountAndPreservesTypedCapabilities()
+    [DataRow(CompositionPurpose.Application)]
+    [DataRow(CompositionPurpose.Preview)]
+    public void DefineAllocatesIndependentStateForEveryMountAndPreservesTypedCapabilities(
+        CompositionPurpose purpose
+    )
     {
         var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "component-define");
+        using var composition = new Composition(graph, "component-define", purpose);
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var states = new List<Signal<int>>();
         var erased = Component.Define(
             "counter",
             ui =>
             {
+                Assert.AreEqual(purpose == CompositionPurpose.Preview, ui.Design.IsDesignMode);
                 states.Add(ui.State(0));
                 return Presented("counter-root");
             }
@@ -41,10 +87,13 @@ public sealed class ComponentContextContracts
             ui =>
                 AuthorRecipe
                     .Create("typed-root", target)
-                    .Style(Style.Empty.Width(ui.State(41).Value))
+                    .Style(Style.Empty.Width(ui.State(ui.Design.IsDesignMode ? 51 : 41).Value))
         );
         var typedRoot = composition.Mount(composition.Root, theme, typed.Recipe);
-        Assert.AreEqual(41f, typedRoot.Resolve(LayoutProperties.Width).Value);
+        Assert.AreEqual(
+            purpose == CompositionPurpose.Preview ? 51f : 41f,
+            typedRoot.Resolve(LayoutProperties.Width).Value
+        );
     }
 
     [TestMethod]

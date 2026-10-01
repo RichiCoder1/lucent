@@ -8,7 +8,10 @@ public static partial class Component
     {
         ReactiveGraph.ValidateName(name, nameof(name));
         ArgumentNullException.ThrowIfNull(build);
-        return ComponentRecipe.Defer(name, owner => Build(owner, name, build));
+        return ComponentRecipe.DeferInEnvironment(
+            name,
+            (owner, environment) => Build(owner, name, environment.Design, build)
+        );
     }
 
     /// <summary>Defines a capability-bearing retained recipe whose setup runs once for each mount.</summary>
@@ -22,7 +25,11 @@ public static partial class Component
         ReactiveGraph.ValidateName(name, nameof(name));
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(build);
-        return AuthorRecipe.Defer(name, target, owner => Build(owner, name, build));
+        return AuthorRecipe.DeferInEnvironment(
+            name,
+            target,
+            (owner, environment) => Build(owner, name, environment.Design, build)
+        );
     }
 
     // Keep all Define entry points on this single per-owner construction seam. Generated state
@@ -30,11 +37,12 @@ public static partial class Component
     internal static TResult Build<TResult>(
         ReactiveScope owner,
         string name,
+        DesignContext design,
         Func<ComponentContext, TResult> build
     )
     {
         ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(build);
-        return build(new ComponentContext(owner, name));
+        return build(new ComponentContext(owner, name, design));
     }
 }

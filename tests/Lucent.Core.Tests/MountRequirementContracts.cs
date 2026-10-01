@@ -242,7 +242,11 @@ public sealed class MountRequirementContracts
     public void LayoutSplitPaneAndRetainedRegionsForwardThePlacementEnvironment()
     {
         var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "provider-structure");
+        using var composition = new Composition(
+            graph,
+            "provider-structure",
+            CompositionPurpose.Preview
+        );
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         using var split = new SplitPaneState(
             composition.Root.Scope,
@@ -258,6 +262,16 @@ public sealed class MountRequirementContracts
         ConditionalRegion? conditional = null;
         KeyedRegion<int, int>? keyed = null;
         VirtualizedRegion<int, int>? virtualized = null;
+        var observedPurposes = new List<bool>();
+        ComponentRecipe RequiredDesign(string member, Action<Capability> accept) =>
+            Component.Define(
+                "design-" + member,
+                context =>
+                {
+                    observedPurposes.Add(context.Design.IsDesignMode);
+                    return Required<Capability>(member, accept);
+                }
+            );
         var host = ComponentRecipe.Create(
             "structure-host",
             (context, root) =>
@@ -267,10 +281,7 @@ public sealed class MountRequirementContracts
                     root,
                     Components.Layout(
                         ComponentContent.Create([
-                            Required<Capability>(
-                                "layout",
-                                value => seen.Add("layout:" + value.Name)
-                            ),
+                            RequiredDesign("layout", value => seen.Add("layout:" + value.Name)),
                         ])
                     )
                 );
@@ -278,13 +289,10 @@ public sealed class MountRequirementContracts
                     root,
                     Components.SplitPane(
                         ComponentContent.Create([
-                            Required<Capability>("first", value => seen.Add("first:" + value.Name)),
+                            RequiredDesign("first", value => seen.Add("first:" + value.Name)),
                         ]),
                         ComponentContent.Create([
-                            Required<Capability>(
-                                "second",
-                                value => seen.Add("second:" + value.Name)
-                            ),
+                            RequiredDesign("second", value => seen.Add("second:" + value.Name)),
                         ]),
                         split
                     )
@@ -294,7 +302,7 @@ public sealed class MountRequirementContracts
                     "provider-conditional",
                     () => active.Value,
                     mounted =>
-                        Required<Capability>(
+                        RequiredDesign(
                                 "conditional",
                                 value => seen.Add("conditional:" + value.Name)
                             )
@@ -306,7 +314,7 @@ public sealed class MountRequirementContracts
                     () => rows.Value,
                     value => value,
                     (value, mounted) =>
-                        Required<Capability>(
+                        RequiredDesign(
                                 "keyed",
                                 item => seen.Add("keyed:" + item.Name + ":" + value.Value)
                             )
@@ -325,7 +333,7 @@ public sealed class MountRequirementContracts
                     () => VirtualRows,
                     value => value,
                     (value, mounted) =>
-                        Required<Capability>(
+                        RequiredDesign(
                                 "virtualized",
                                 item => seen.Add("virtualized:" + item.Name + ":" + value.Value)
                             )
@@ -345,6 +353,9 @@ public sealed class MountRequirementContracts
         virtualized!.Realize(new(20, 20, 1));
 
         CollectionAssert.IsSubsetOf(StructuralEvents, seen);
+        Assert.AreEqual(6, observedPurposes.Count);
+        foreach (var isDesignMode in observedPurposes)
+            Assert.IsTrue(isDesignMode);
         Assert.IsNotNull(conditional!.Active);
         Assert.AreEqual(1, keyed!.Items.Count);
         Assert.AreEqual(1, virtualized.Items.Count);
@@ -904,7 +915,11 @@ public sealed class MountRequirementContracts
     public void PopupBorrowsItsOriginRequirementsWithADistinctThemeAndLifetime()
     {
         var graph = new ReactiveGraph();
-        var composition = new Composition(graph, "popup-requirement-owner");
+        var composition = new Composition(
+            graph,
+            "popup-requirement-owner",
+            CompositionPurpose.Preview
+        );
         var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var session = new ApplicationSession(
             "Popup requirement owner",
@@ -944,6 +959,7 @@ public sealed class MountRequirementContracts
                     (context, root) =>
                     {
                         popupTheme = context.Theme;
+                        Assert.IsTrue(context.Design.IsDesignMode);
                         resolvedCapability = values.Previous;
                         resolvedService = values.Value;
                         Controls.Panel(root, context.Theme, "popup leaf");
@@ -960,6 +976,11 @@ public sealed class MountRequirementContracts
 
         var popup = request.CreateComposition();
 
+        Assert.IsTrue(popup.Design.IsDesignMode);
+        using var mismatched = new Composition(graph, "mismatched-popup");
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            target.MountEnvironment!.BorrowForPopup(mismatched, theme)
+        );
         Assert.AreSame(capability, resolvedCapability);
         Assert.AreSame(service, resolvedService);
         Assert.AreEqual(1, source.Resolutions);
@@ -1057,7 +1078,11 @@ public sealed class MountRequirementContracts
     public void SubmenuBorrowsTheTriggerPlacementAndPreservesNearestContextShadowing()
     {
         var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "submenu-placement-owner");
+        using var composition = new Composition(
+            graph,
+            "submenu-placement-owner",
+            CompositionPurpose.Preview
+        );
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var outer = new Capability("outer-popup");
         var inner = new Capability("inner-submenu");
@@ -1077,7 +1102,17 @@ public sealed class MountRequirementContracts
                     "More",
                     () =>
                         Components.Menu([
-                            Required<Capability>("submenu-context", value => resolved = value),
+                            Component.Define(
+                                "submenu-design",
+                                context =>
+                                {
+                                    Assert.IsTrue(context.Design.IsDesignMode);
+                                    return Required<Capability>(
+                                        "submenu-context",
+                                        value => resolved = value
+                                    );
+                                }
+                            ),
                         ])
                 )
             ),

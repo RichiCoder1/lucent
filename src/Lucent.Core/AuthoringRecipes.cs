@@ -220,6 +220,24 @@ public readonly struct AuthorRecipe<TCapability>
 /// <summary>Static construction entry points for capability-bearing retained recipes.</summary>
 public static class AuthorRecipe
 {
+    internal static AuthorRecipe<TCapability> DeferInEnvironment<TCapability>(
+        string kind,
+        AuthorRecipeTarget<TCapability> target,
+        Func<ReactiveScope, MountEnvironment, AuthorRecipe<TCapability>> build
+    )
+        where TCapability : AuthorCapability
+    {
+        AuthorCapabilityRules.Validate<TCapability>();
+        return new(
+            ComponentRecipe.DeferInEnvironment(
+                kind,
+                (scope, environment) => build(scope, environment).Recipe
+            ),
+            target,
+            null
+        );
+    }
+
     /// <summary>Creates an explicit mapping from a capability to one retained root target.</summary>
     public static AuthorRecipeTarget<TCapability> Target<TCapability>(
         Action<MountContext, Element, AuthorRecipeValues> apply

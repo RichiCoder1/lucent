@@ -1060,6 +1060,85 @@ public sealed class NamedComponentTests
             )
         );
 
+    [TestMethod]
+    public void NamedDesignCapturesPurposeBeforeInitializersAndPreservesCompanionShadow()
+    {
+        const string source = """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() {
+                context Config config;
+                bool preview = Design.IsDesignMode;
+                bool Read() { var value = Design.IsDesignMode; return value; }
+                Setup(owner) { if (Design.IsDesignMode) owner.OnDispose(() => { }); }
+                <Text content={(preview && Read() && Design.IsDesignMode).ToString()} />
+            }
+            """;
+        var projection = LuiAuthoredSourceProjection.Project(source);
+        var compilation = Compilation(
+            "namespace Sample; public sealed record Config();",
+            projection.EarlyComponentDeclaration
+        );
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            compilation,
+            Identity(),
+            "Card.lui"
+        );
+        Assert.IsTrue(
+            result.Success,
+            string.Join("\n", result.Diagnostics.Select(item => item.Message))
+        );
+        Assert.AreEqual(4, result.Map.DesignIntrinsics.Count);
+        StringAssert.Contains(result.Source!, "private readonly global::Lucent.Core.DesignContext");
+        var final = Compilation(
+                "namespace Sample; public sealed record Config();",
+                result.PreparedComponentDeclaration
+            )
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    result.Source!,
+                    new CSharpParseOptions(LanguageVersion.Preview)
+                )
+            );
+        using var output = new MemoryStream();
+        var emission = final.Emit(output);
+        Assert.IsTrue(emission.Success, string.Join("\n", emission.Diagnostics));
+        var shadow = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            Compilation(
+                "namespace Sample; public sealed record Config(); public sealed partial class Card { private string Design => \"ordinary\"; }",
+                projection.EarlyComponentDeclaration
+            ),
+            Identity(),
+            "Card.lui"
+        );
+        Assert.IsFalse(shadow.Success);
+        Assert.AreEqual(0, shadow.Map.DesignIntrinsics.Count);
+        Assert.IsTrue(
+            shadow.Diagnostics.Any(item =>
+                item.Message.Contains("IsDesignMode", StringComparison.Ordinal)
+            )
+        );
+        var capture = "__luiDesign_" + Identity().Document.StableId;
+        var collision = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            Compilation(
+                "namespace Sample; public sealed record Config(); public sealed partial class Card { private string "
+                    + capture
+                    + " => \"companion\"; }",
+                projection.EarlyComponentDeclaration
+            ),
+            Identity(),
+            "Card.lui"
+        );
+        Assert.IsTrue(
+            collision.Success,
+            string.Join("\n", collision.Diagnostics.Select(item => item.Message))
+        );
+        StringAssert.Contains(collision.Source!, "DesignContext " + capture + "_;");
+    }
+
     private static LuiFreshnessIdentity Identity() =>
         new(
             "named-component",

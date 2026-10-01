@@ -298,3 +298,12 @@ Lucent's default check remains static, offline and read-only; no Uno code or
 dependency is included. Editor onboarding uses VS Code's standard
 [walkthrough contribution](https://code.visualstudio.com/api/references/contribution-points#contributes.walkthroughs)
 and status/Quick Pick/Problems APIs rather than introducing a separate UI toolkit.
+
+## Composition-scoped design mode
+
+The #228 `Design.IsDesignMode` authoring spelling is inspired by Avalonia's
+[design-time settings](https://docs.avaloniaui.net/docs/app-development/xaml-preview-and-design-settings),
+consulted September 30, 2026. Lucent supplies an immutable value through each
+composition's existing mount environment, so application and preview compositions
+can coexist. No Avalonia code or package is adopted. Explicit scenario fixtures
+own their sample data and service choices; the signal does not sandbox app code.

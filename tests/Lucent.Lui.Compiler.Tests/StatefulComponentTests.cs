@@ -10,6 +10,7 @@ namespace Lucent.Lui.Compiler.Tests;
 [TestClass]
 public sealed class StatefulComponentTests
 {
+    public TestContext TestContext { get; set; } = null!;
     private const string Source = """
 namespace StatefulTrial;
 using System;
@@ -524,6 +525,163 @@ int count = Constants.Start;
             Assert.IsFalse(
                 result.Success,
                 "Unsupported declaration was silently accepted: " + declaration
+            );
+        }
+    }
+
+    [TestMethod]
+    public void ContextualDesignBindsBeforeInferenceAcrossAnonymousBodyExpressions()
+    {
+        const string source = """
+            namespace StatefulTrial;
+            using Lucent.Core;
+            public component Trial() {
+                bool preview = Design.IsDesignMode;
+                bool Read() { var value = Design.IsDesignMode; return value; }
+                Setup(owner) { if (Design.IsDesignMode) owner.OnDispose(() => { }); }
+                <Text content={(preview && Read() && Design.IsDesignMode).ToString()} />
+            }
+            """;
+        var (result, compilation) = Compile(source, "");
+        Assert.IsTrue(result.Success, Describe(result));
+        Assert.AreEqual(4, result.Map.DesignIntrinsics.Count);
+        StringAssert.Contains(result.Source!, "Derived");
+        StringAssert.Contains(result.Source!, "Derived<bool>");
+        var mutable = result.Map.DesignIntrinsics.ToList();
+        var snapshot = new LuiSourceMap(result.Identity, result.Map.Entries, mutable);
+        mutable.Clear();
+        Assert.AreEqual(4, snapshot.DesignIntrinsics.Count);
+        foreach (var access in result.Map.DesignIntrinsics)
+        {
+            Assert.AreEqual(
+                "Design",
+                source.Substring(access.Receiver.Start, access.Receiver.Length)
+            );
+            Assert.AreEqual(
+                "IsDesignMode",
+                source.Substring(access.Member.Start, access.Member.Length)
+            );
+            Assert.IsTrue(
+                result
+                    .Map.FromSource(access.Receiver)
+                    .Any(entry => !entry.Hidden && entry.Source.Equals(access.Receiver))
+            );
+        }
+        var emission = compilation
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    result.Source!,
+                    new CSharpParseOptions(LanguageVersion.Preview)
+                )
+            )
+            .Emit(new MemoryStream());
+        Assert.IsTrue(emission.Success, string.Join("\n", emission.Diagnostics));
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var largerSource = source.Replace(
+            "preview && Read() && Design.IsDesignMode",
+            string.Join(" && ", Enumerable.Repeat("Design.IsDesignMode", 64)),
+            StringComparison.Ordinal
+        );
+        var (larger, _) = Compile(largerSource, "");
+        Assert.IsTrue(larger.Success, Describe(larger));
+        Assert.AreEqual(67, larger.Map.DesignIntrinsics.Count);
+        TestContext.WriteLine(
+            $"Contextual Design compilation with 67 receivers: {timer.ElapsedMilliseconds} ms; characterization only."
+        );
+    }
+
+    [TestMethod]
+    public void MarkupOnlyDesignUsesMountContextAndOrdinaryShadowKeepsItsError()
+    {
+        const string source =
+            "namespace StatefulTrial; using Lucent.Core; public component Trial() { <Text content={Design.IsDesignMode.ToString()} /> }";
+        var (intrinsic, _) = Compile(source, "");
+        Assert.IsTrue(intrinsic.Success, Describe(intrinsic));
+        Assert.AreEqual(1, intrinsic.Map.DesignIntrinsics.Count);
+        StringAssert.Contains(intrinsic.Source!, "Component.Define(");
+        var (recovery, _) = Compile(
+            source.Replace("Design.IsDesignMode.ToString()", "Design."),
+            ""
+        );
+        Assert.AreEqual(1, recovery.Map.DesignIntrinsics.Count);
+        Assert.AreEqual(
+            source.IndexOf("Design.", StringComparison.Ordinal),
+            recovery.Map.DesignIntrinsics[0].Receiver.Start
+        );
+        Assert.AreEqual(0, recovery.Map.DesignIntrinsics[0].Member.Length);
+        var (shadow, _) = Compile(source.Replace("Trial()", "Trial(string Design)"), "");
+        Assert.IsFalse(shadow.Success);
+        Assert.AreEqual(0, shadow.Map.DesignIntrinsics.Count);
+        Assert.IsTrue(
+            shadow.Diagnostics.Any(item =>
+                item.Message.Contains("IsDesignMode", StringComparison.Ordinal)
+            )
+        );
+        var (global, _) = Compile(
+            source,
+            "namespace StatefulTrial; public static class Design { public static bool Other => false; }"
+        );
+        Assert.IsFalse(global.Success);
+        Assert.AreEqual(0, global.Map.DesignIntrinsics.Count);
+        Assert.IsTrue(
+            global.Diagnostics.Any(item =>
+                item.Message.Contains("IsDesignMode", StringComparison.Ordinal)
+            )
+        );
+    }
+
+    [TestMethod]
+    public void DesignFactoryParametersDoNotShadowAuthoredContextOrDiscardNames()
+    {
+        const string source =
+            "namespace StatefulTrial; using Lucent.Core; public component Trial(string context, string _) { context System.Uri uri; <Text content={context + _ + uri.Host + Design.IsDesignMode} /> }";
+        var (result, compilation) = Compile(source, "");
+        Assert.IsTrue(result.Success, Describe(result));
+        using var output = new MemoryStream();
+        var emission = compilation
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    result.Source!,
+                    new CSharpParseOptions(LanguageVersion.Preview)
+                )
+            )
+            .Emit(output);
+        Assert.IsTrue(emission.Success, string.Join("\n", emission.Diagnostics));
+    }
+
+    [TestMethod]
+    public void DesignDiagnosticsStayAuthoredAndAliasesAndLocalsKeepOrdinaryBinding()
+    {
+        const string missing =
+            "namespace StatefulTrial; using Lucent.Core; public component Trial() { <Text content={Design.DoesNotExist.ToString()} /> }";
+        var (invalid, _) = Compile(missing, "");
+        Assert.IsFalse(invalid.Success);
+        Assert.AreEqual(1, invalid.Map.DesignIntrinsics.Count);
+        var diagnostic = invalid.Diagnostics.Single(item =>
+            item.Message.Contains("DoesNotExist", StringComparison.Ordinal)
+        );
+        Assert.AreEqual(
+            missing.IndexOf("DoesNotExist", StringComparison.Ordinal),
+            diagnostic.Span.Start
+        );
+        Assert.AreEqual("DoesNotExist".Length, diagnostic.Span.Length);
+
+        foreach (
+            var source in new[]
+            {
+                "namespace StatefulTrial; using Lucent.Core; public component Trial() { var Design = \"ordinary\"; <Text content={Design.IsDesignMode.ToString()} /> }",
+                "namespace StatefulTrial; using Design = System.String; using Lucent.Core; public component Trial() { <Text content={Design.IsDesignMode.ToString()} /> }",
+                "namespace StatefulTrial; using Lucent.Core; public component Trial() { bool Read() { string Design = \"local\"; return Design.IsDesignMode; } <Text content={Read().ToString()} /> }",
+            }
+        )
+        {
+            var (ordinary, _) = Compile(source, "");
+            Assert.IsFalse(ordinary.Success);
+            Assert.AreEqual(0, ordinary.Map.DesignIntrinsics.Count);
+            Assert.IsTrue(
+                ordinary.Diagnostics.Any(item =>
+                    item.Message.Contains("IsDesignMode", StringComparison.Ordinal)
+                )
             );
         }
     }

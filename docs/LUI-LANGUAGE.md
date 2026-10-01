@@ -168,6 +168,15 @@ owned aliases; they do not prove ownership through arbitrary helper bodies or
 alias chains. Async-only resources belong to an explicit application lifecycle.
 `[Owned]` cannot be combined with `[Once]` or other declaration attributes.
 
+## Composition purpose
+
+Component initializers, methods, `Setup` and markup may read contextual
+`Design.IsDesignMode`. It reflects the immutable purpose selected by the host,
+defaults to false for application and headless execution, and stays attached to
+the originating component in retained callbacks. Ordinary symbols named `Design`
+take precedence. See [design mode](DESIGN-MODE.md) for explicit preview selection,
+name binding, C# access and lifetime boundaries.
+
 ## Context and injected services
 
 Components declare their ambient requirements explicitly:

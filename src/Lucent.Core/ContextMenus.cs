@@ -201,7 +201,7 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
         ObjectDisposedException.ThrowIf(IsDismissed, this);
         if (_popup is not null)
             return _popup;
-        var popup = new Composition(Owner.Graph, "context-menu");
+        var popup = new Composition(Owner.Graph, "context-menu", Owner.Design.Purpose);
         try
         {
             popup.ShareImagesFrom(Owner);
@@ -509,7 +509,7 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
         var content =
             registration.Content()
             ?? throw new InvalidOperationException("A submenu factory returned no recipe.");
-        var popup = new Composition(Owner.Graph, "context-submenu");
+        var popup = new Composition(Owner.Graph, "context-submenu", Owner.Design.Purpose);
         try
         {
             popup.ShareImagesFrom(Owner);

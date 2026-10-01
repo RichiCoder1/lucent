@@ -11,10 +11,15 @@ public static partial class Component
     {
         ReactiveGraph.ValidateName(name, nameof(name));
         ArgumentNullException.ThrowIfNull(build);
-        return ComponentRecipe.Defer(
+        return ComponentRecipe.DeferInEnvironment(
             name,
-            owner =>
-                Build(owner, name, context => build(context, TState.CreateComponentState(context)))
+            (owner, environment) =>
+                Build(
+                    owner,
+                    name,
+                    environment.Design,
+                    context => build(context, TState.CreateComponentState(context))
+                )
         );
     }
 
@@ -30,11 +35,16 @@ public static partial class Component
         ReactiveGraph.ValidateName(name, nameof(name));
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(build);
-        return AuthorRecipe.Defer(
+        return AuthorRecipe.DeferInEnvironment(
             name,
             target,
-            owner =>
-                Build(owner, name, context => build(context, TState.CreateComponentState(context)))
+            (owner, environment) =>
+                Build(
+                    owner,
+                    name,
+                    environment.Design,
+                    context => build(context, TState.CreateComponentState(context))
+                )
         );
     }
 }

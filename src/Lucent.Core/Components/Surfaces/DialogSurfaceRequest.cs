@@ -95,7 +95,7 @@ public sealed class DialogSurfaceRequest : PopupSurfaceRequest
         if (_popup is not null)
             return _popup;
 
-        var popup = new Composition(Owner.Graph, "dialog");
+        var popup = new Composition(Owner.Graph, "dialog", Owner.Design.Purpose);
         try
         {
             popup.ShareImagesFrom(Owner);

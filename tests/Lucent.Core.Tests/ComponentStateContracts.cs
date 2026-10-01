@@ -6,10 +6,14 @@ namespace Lucent.Core.Tests;
 public sealed class ComponentStateContracts
 {
     [TestMethod]
-    public void GeneratedStateContractCreatesIndependentMountStateAndPreservesTarget()
+    [DataRow(CompositionPurpose.Application)]
+    [DataRow(CompositionPurpose.Preview)]
+    public void GeneratedStateContractCreatesIndependentMountStateAndPreservesTarget(
+        CompositionPurpose purpose
+    )
     {
         var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "component-state");
+        using var composition = new Composition(graph, "component-state", purpose);
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var states = new List<ManualState>();
         var recipe = Component.Define<ManualState>(
@@ -26,6 +30,8 @@ public sealed class ComponentStateContracts
         states[0].Count = 8;
 
         Assert.AreEqual(2, states.Count);
+        Assert.AreEqual(purpose == CompositionPurpose.Preview, states[0].Design.IsDesignMode);
+        Assert.AreEqual(purpose == CompositionPurpose.Preview, states[1].Design.IsDesignMode);
         Assert.AreEqual(8, states[0].Count);
         Assert.AreEqual(1, states[1].Count);
         first.Dispose();
@@ -39,13 +45,16 @@ public sealed class ComponentStateContracts
         AuthorRecipe<StyledCapability> typed = Component.Define<ManualState, StyledCapability>(
             "typed-stateful",
             target,
-            (_, state) =>
+            (context, state) =>
                 AuthorRecipe
                     .Create("typed-stateful-root", target)
-                    .Style(Style.Empty.Width(state.Count + 40))
+                    .Style(Style.Empty.Width(state.Count + (state.Design.IsDesignMode ? 50 : 40)))
         );
         var typedRoot = composition.Mount(composition.Root, theme, typed.Recipe);
-        Assert.AreEqual(41f, typedRoot.Resolve(LayoutProperties.Width).Value);
+        Assert.AreEqual(
+            purpose == CompositionPurpose.Preview ? 51f : 41f,
+            typedRoot.Resolve(LayoutProperties.Width).Value
+        );
     }
 
     [TestMethod]
@@ -105,8 +114,13 @@ public sealed class ComponentStateContracts
     {
         private readonly Signal<int> _count;
 
-        private ManualState(ComponentContext context) =>
+        private ManualState(ComponentContext context)
+        {
+            Design = context.Design;
             _count = context.State(1, nameof(ManualState) + "." + nameof(Count));
+        }
+
+        public DesignContext Design { get; }
 
         public int Count
         {

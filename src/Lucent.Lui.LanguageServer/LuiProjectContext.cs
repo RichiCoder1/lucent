@@ -688,7 +688,8 @@ internal sealed partial class LuiProjectContext : IDisposable
         var name = displayText.TrimStart('@');
         if (!name.StartsWith("__lui", StringComparison.Ordinal))
             return false;
-
+        if (semantic.DesignCaptureNames.Contains(name))
+            return true;
         var userSymbols = semantic
             .Model.LookupSymbols(semantic.Position, name: name)
             .Where(symbol =>
@@ -883,6 +884,17 @@ internal sealed partial class LuiProjectContext : IDisposable
     )
     {
         var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (
+            semantic is not null
+            && semantic.Document.Result.Map.DesignIntrinsics.Any(intrinsic =>
+                intrinsic.Receiver.Start <= offset && offset < intrinsic.Receiver.End
+            )
+            && await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+        )
+            return new LuiHover(
+                "contextual Lucent.Core.DesignContext Design",
+                "Immutable purpose of this mounted composition. IsDesignMode is true for Preview compositions."
+            );
         if (
             uri.IsFile
             && uri.LocalPath.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
@@ -1882,6 +1894,16 @@ internal sealed partial class LuiProjectContext : IDisposable
         bool expandOwnerDeclarations = true
     )
     {
+        if (
+            snapshot.Generated.Values.Any(document =>
+                SameFile(document.Uri.LocalPath, uri)
+                && document.Map.DesignIntrinsics.Any(intrinsic =>
+                    intrinsic.Receiver.Start <= offset && offset < intrinsic.Receiver.End
+                    || intrinsic.Member.Start <= offset && offset < intrinsic.Member.End
+                )
+            )
+        )
+            return null;
         // Early declaration trees identify named types but cannot replace an incomplete
         // primary lowering map, including a linked file's other project ownership.
         if (
@@ -3052,7 +3074,7 @@ internal sealed partial class LuiProjectContext : IDisposable
         new(
             identity,
             prepared.Source,
-            new LuiSourceMap(identity, prepared.Map.Entries),
+            new LuiSourceMap(identity, prepared.Map.Entries, prepared.Map.DesignIntrinsics),
             prepared.Diagnostics,
             prepared.ProjectionSource
         );
@@ -4873,6 +4895,30 @@ internal sealed partial class LuiProjectContext : IDisposable
         internal SemanticModel Model { get; } = model;
         internal int Position { get; } = position;
         internal LuiMapEntry? Entry { get; } = entry;
+        internal HashSet<string> DesignCaptureNames { get; } = CaptureNames(document);
+
+        private static HashSet<string> CaptureNames(PublishedDocument document)
+        {
+            var receivers = document.Result.Map.DesignIntrinsics.ToDictionary(
+                static item => item.Receiver.Start,
+                static item => item.Receiver
+            );
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var mapping in document.Result.Map.Entries)
+                if (
+                    !mapping.Hidden
+                    && mapping.Kind == LuiMapKind.Symbol
+                    && receivers.TryGetValue(mapping.Source.Start, out var receiver)
+                    && mapping.Source.Equals(receiver)
+                )
+                    names.Add(
+                        document.GeneratedText.Substring(
+                            mapping.Generated.Start,
+                            mapping.Generated.Length
+                        )
+                    );
+            return names;
+        }
     }
 
     private sealed class SnapshotEpoch(long value, LuiFreshnessTarget freshness)

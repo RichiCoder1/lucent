@@ -13,12 +13,16 @@ public sealed class ComponentContext
     private readonly string _component;
     private int _ordinal;
 
-    internal ComponentContext(ReactiveScope owner, string component)
+    internal ComponentContext(ReactiveScope owner, string component, DesignContext design)
     {
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
         ReactiveGraph.ValidateName(component, nameof(component));
         _component = component;
+        Design = design;
     }
+
+    /// <summary>The immutable composition purpose, safe to capture in retained callbacks.</summary>
+    public DesignContext Design { get; }
 
     /// <summary>Gets the borrowed mount owner used by generated compatibility code.</summary>
     /// <remarks>

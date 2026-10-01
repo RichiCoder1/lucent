@@ -232,6 +232,7 @@ public sealed class HeadlessApplication : IAsyncDisposable
             _ = LucentApplication
                 .CreateBuilder()
                 .SetTitle(_options.Title)
+                .SetPurpose(_options.Purpose)
                 .SetTheme(appearance => RequireTheme(_options.ThemeFactory(appearance)))
                 .UseHost(host)
                 .Build()

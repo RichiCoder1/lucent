@@ -1,13 +1,17 @@
+param([string] $OutputRoot)
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$proofRoot = if ($OutputRoot) { [IO.Path]::GetFullPath($OutputRoot) } else { Join-Path $root 'artifacts' }
+if ($OutputRoot -and (Test-Path -LiteralPath $proofRoot)) { throw 'Explicit SDK verification output root must be new.' }
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'; if (!(Test-Path $dotnet)) { $dotnet = 'dotnet' }
-$artifacts = Join-Path $root 'artifacts/lui-matrix'
-$feed = Join-Path $root 'artifacts/lui-feed'
+$artifacts = Join-Path $proofRoot 'lui-matrix'
+$feed = Join-Path $proofRoot 'lui-feed'
 $consumer = Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Consumer/Consumer.csproj'
 $widgetPath = Join-Path (Split-Path $consumer) 'Widget.lui'
 $widgetSource = Get-Content $widgetPath -Raw
 $config = Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/NuGet.config'
-$env:NUGET_PACKAGES = Join-Path $root 'artifacts/lui-packages'
+$env:NUGET_PACKAGES = Join-Path $proofRoot 'lui-packages'
 
 function Invoke-Dotnet([string[]]$arguments) {
     & $dotnet @arguments
@@ -32,10 +36,10 @@ function Write-Project([string]$directory, [string]$name, [string]$body) {
     Set-Content (Join-Path $directory 'Program.cs') 'Console.WriteLine("lui sdk consumer");'
 }
 
-$artifactRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts')) + [IO.Path]::DirectorySeparatorChar
+$artifactRoot = [IO.Path]::GetFullPath($proofRoot) + [IO.Path]::DirectorySeparatorChar
 foreach ($targetPath in @($feed, $env:NUGET_PACKAGES, $artifacts)) {
     if (![IO.Path]::GetFullPath($targetPath).StartsWith($artifactRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "SDK verification cleanup escaped repository artifacts: $targetPath"
+        throw "SDK verification cleanup escaped its output root: $targetPath"
     }
 }
 Remove-Item -LiteralPath $feed, $env:NUGET_PACKAGES, $artifacts -Recurse -Force -ErrorAction Ignore
@@ -63,7 +67,7 @@ try {
     Invoke-Dotnet @('build', $consumer, '--no-restore', '-warnaserror', '-p:LucentLuiFormatCheck=true')
     $items = (& $dotnet 'msbuild' $consumer '-getItem:AdditionalFiles') -join "`n"
     if ($LASTEXITCODE -or $items -notmatch 'Widget\.lui' -or $items -match 'bin|obj|Hidden|\.g\.lui|\.generated\.lui') { throw 'SDK default glob evaluated an excluded input.' }
-    $preprocess = Join-Path $root 'artifacts/lui-consumer.preprocessed.xml'
+    $preprocess = Join-Path $proofRoot 'lui-consumer.preprocessed.xml'
     Invoke-Dotnet @('msbuild', $consumer, "-preprocess:$preprocess")
     if (!(Select-String -LiteralPath $preprocess -SimpleMatch 'LucentLuiLogicalPath="%(RecursiveDir)%(Filename)%(Extension)"' -Quiet)) { throw 'SDK props were absent from preprocess evidence.' }
     $generated = Get-ChildItem (Join-Path (Split-Path $consumer) 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' -ErrorAction Ignore
@@ -174,7 +178,7 @@ try {
     Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Content/*.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Content/ContentConsumer.cs') $matrix
     Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/Retained.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/RetainedConsumer.cs') $matrix
     Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Stateful/*.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Stateful/*.cs') $matrix
-    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.TransitionConsumer.Run(); Consumer.ContextMenuConsumer.Run(); Consumer.ContentConsumer.Run(); Consumer.RetainedConsumer.Run(); if (StatefulTrial.Harness.Run() != "42:first:first:first|42:first:first:first;43:edited:first:next|42:first:first:next;2:2") throw new InvalidOperationException("Stateful component contract failed."); Console.WriteLine("stateful component SDK proof: PASS"); StatefulTrial.AsyncHarness.Run(); Console.WriteLine("lui sdk consumer");'
+    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.TransitionConsumer.Run(); Consumer.ContextMenuConsumer.Run(); Consumer.ContentConsumer.Run(); Consumer.RetainedConsumer.Run(); if (StatefulTrial.Harness.Run() != "42:first:first:first|42:first:first:first;43:edited:first:next|42:first:first:next;2:2") throw new InvalidOperationException("Stateful component contract failed."); Console.WriteLine("stateful component SDK proof: PASS"); StatefulTrial.AsyncHarness.Run(); StatefulTrial.DesignHarness.Run(); Console.WriteLine("lui sdk consumer");'
 
     # Publish/run is the runtime-asset boundary proof; analyzers must not enter the app.
     $publish = Join-Path $artifacts 'publish'
@@ -187,12 +191,12 @@ try {
     if (!(Test-Path $exe)) { throw 'NativeAOT consumer executable is missing.' }
     $consumerOutput = @(& $exe)
     $consumerOutput | Write-Output
-    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'transition SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'context menu SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'content forwarding SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'stateful component SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'source-driven async SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
+    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'transition SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'context menu SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'content forwarding SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'stateful component SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'source-driven async SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'composition-scoped design SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
     $actual = Get-ChildItem $publish -Recurse -File | ForEach-Object { $_.FullName.Substring($publish.Length + 1).Replace('\', '/') } | Sort-Object
     $allowed = @('Consumer.exe', 'Consumer.pdb', 'Lucent.Core.pdb', 'Lucent.Core.xml')
     if ((Compare-Object $allowed $actual)) { throw "NativeAOT runtime inventory differs from its fail-closed allowlist: $($actual -join ', ')." }
 }
 finally {
     [IO.File]::WriteAllText($widgetPath, $widgetSource)
-    Remove-Item $config, (Join-Path $root 'artifacts/lui-matrix/publish.NuGet.config') -Force -ErrorAction Ignore
+    Remove-Item $config, (Join-Path $artifacts 'publish.NuGet.config') -Force -ErrorAction Ignore
 }

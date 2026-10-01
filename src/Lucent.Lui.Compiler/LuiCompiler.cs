@@ -144,6 +144,24 @@ public static partial class LuiCompiler
         var probeCompilation = compilation.AddSyntaxTrees(probeTree);
         var probeModel = probeCompilation.GetSemanticModel(probeTree);
         var probeMap = new LuiSourceMap(identity, writer.Entries);
+        var designPlan = DesignReceivers(document, probeModel, probeTree, probeMap);
+        if (designPlan is not null)
+        {
+            writer = new Writer(
+                document,
+                identity,
+                mappedPath,
+                null,
+                [],
+                namedComponent: namedComponent,
+                designPlan: designPlan
+            );
+            writer.Document(diagnostics);
+            probeTree = CSharpSyntaxTree.ParseText(writer.Text, parseOptions, identity.HintName);
+            probeCompilation = compilation.AddSyntaxTrees(probeTree);
+            probeModel = probeCompilation.GetSemanticModel(probeTree);
+            probeMap = new LuiSourceMap(identity, writer.Entries, designPlan.Intrinsics);
+        }
         var statePlans = StatePlans(probeModel, probeTree, writer, diagnostics);
         var refinedNamedDeclaration = namedComponent
             ? LuiAuthoredSourceProjection.EarlyDeclaration(
@@ -184,7 +202,8 @@ public static partial class LuiCompiler
             mappedPath,
             null,
             ["Lucent.Core.Components"],
-            namedComponent: namedComponent
+            namedComponent: namedComponent,
+            designPlan: designPlan
         );
         componentWriter.Document(diagnostics);
         var componentTree = CSharpSyntaxTree.ParseText(
@@ -202,7 +221,8 @@ public static partial class LuiCompiler
             mappedPath,
             null,
             implicitStylePropertyTypes,
-            namedComponent: namedComponent
+            namedComponent: namedComponent,
+            designPlan: designPlan
         );
         propertyWriter.Document(diagnostics);
         var propertyTree = CSharpSyntaxTree.ParseText(
@@ -225,7 +245,8 @@ public static partial class LuiCompiler
                 mappedPath,
                 null,
                 [rootTokens.ToDisplayString()],
-                namedComponent: namedComponent
+                namedComponent: namedComponent,
+                designPlan: designPlan
             );
             tokenWriter.Document(diagnostics);
             var tokenTree = CSharpSyntaxTree.ParseText(
@@ -363,10 +384,11 @@ public static partial class LuiCompiler
             plans,
             [],
             namedComponent: namedComponent,
-            namedPlan: namedPlan
+            namedPlan: namedPlan,
+            designPlan: designPlan
         );
         writer.Document(diagnostics);
-        var map = new LuiSourceMap(identity, writer.Entries);
+        var map = new LuiSourceMap(identity, writer.Entries, designPlan?.Intrinsics);
         if (HasBlockingErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
@@ -1440,8 +1462,13 @@ public static partial class LuiCompiler
     {
         var entry = map.FromGenerated(generated)
             .Where(item => !item.Hidden && item.Source.Start >= 0 && item.Generated.Length != 0)
-            .OrderBy(item => item.Kind == LuiMapKind.Expression ? 0 : 1)
+            .OrderBy(item =>
+                item.Generated.Start <= generated.Start && item.Generated.End >= generated.End
+                    ? 0
+                    : 1
+            )
             .ThenBy(item => item.Generated.Length)
+            .ThenBy(item => item.Kind == LuiMapKind.Expression ? 0 : 1)
             .FirstOrDefault();
         if (entry is null)
             return null;
@@ -2166,7 +2193,8 @@ public static partial class LuiCompiler
                             liveValues,
                             true,
                             namedComponent,
-                            namedPlan
+                            namedPlan,
+                            writer.designPlan
                         )
                     )
                     .ToArray();
@@ -2242,7 +2270,8 @@ public static partial class LuiCompiler
                             liveValues,
                             item.WrapLiveReader,
                             namedComponent,
-                            namedPlan
+                            namedPlan,
+                            writer.designPlan
                         )
                     )
                     .ToArray();
@@ -2264,7 +2293,8 @@ public static partial class LuiCompiler
                         liveValues,
                         true,
                         namedComponent,
-                        namedPlan
+                        namedPlan,
+                        writer.designPlan
                     )
                 )
                 .ToArray();
@@ -2344,7 +2374,8 @@ public static partial class LuiCompiler
         HashSet<int> liveValues,
         bool wrapLiveReader,
         bool namedComponent,
-        NamedComponentPlan? namedPlan
+        NamedComponentPlan? namedPlan,
+        DesignPlan? designPlan
     )
     {
         var candidate = ContentPlan.For(parameter, wrapLiveReader);
@@ -2368,7 +2399,8 @@ public static partial class LuiCompiler
             [parameter.ContainingSymbol.ContainingType.ToDisplayString()],
             suppressDefaultContentAttribute: true,
             namedComponent: namedComponent,
-            namedPlan: namedPlan
+            namedPlan: namedPlan,
+            designPlan: designPlan
         );
         var diagnostics = new List<LuiDiagnostic>();
         writer.Document(diagnostics);
@@ -3039,6 +3071,7 @@ public static partial class LuiCompiler
         private readonly bool suppressDefaultContentAttribute;
         private readonly bool namedComponent;
         private readonly NamedComponentPlan? namedPlan;
+        internal readonly DesignPlan? designPlan;
         private readonly IReadOnlyDictionary<string, string> styleNames;
         private readonly IReadOnlyList<string> styleMemberNames;
         private readonly HashSet<string> componentLocalNames;
@@ -3143,7 +3176,8 @@ public static partial class LuiCompiler
             IReadOnlyList<string> implicitStaticTypes,
             bool suppressDefaultContentAttribute = false,
             bool namedComponent = false,
-            NamedComponentPlan? namedPlan = null
+            NamedComponentPlan? namedPlan = null,
+            DesignPlan? designPlan = null
         )
         {
             this.document = document;
@@ -3154,6 +3188,7 @@ public static partial class LuiCompiler
             this.suppressDefaultContentAttribute = suppressDefaultContentAttribute;
             this.namedComponent = namedComponent;
             this.namedPlan = namedPlan;
+            this.designPlan = designPlan;
             componentLocalNames = new HashSet<string>(
                 document.Component?.Parameters.Select(parameter => parameter.Name.Text)
                     ?? Enumerable.Empty<string>(),
@@ -3215,6 +3250,52 @@ public static partial class LuiCompiler
         private LuiSpan Mapped(string value, LuiSpan source, LuiMapKind kind)
         {
             var start = text.Length;
+            var receivers = designPlan?.Intrinsics;
+            var receiverIndex = designPlan?.FirstReceiverAtOrAfter(source.Start) ?? 0;
+            if (
+                receivers is not null
+                && receiverIndex < receivers.Count
+                && receivers[receiverIndex].Receiver.End <= source.End
+                && value.Length == source.Length
+            )
+            {
+                var cursor = 0;
+                for (; receiverIndex < receivers.Count; receiverIndex++)
+                {
+                    var intrinsic = receivers[receiverIndex];
+                    if (intrinsic.Receiver.End > source.End)
+                        break;
+                    var offset = intrinsic.Receiver.Start - source.Start;
+                    if (offset > cursor)
+                        Mapped(
+                            value.Substring(cursor, offset - cursor),
+                            new LuiSpan(source.Start + cursor, offset - cursor),
+                            kind
+                        );
+                    text.Append(designPlan!.Capture);
+                    Entries.Add(
+                        new LuiMapEntry(
+                            intrinsic.Receiver,
+                            new LuiSpan(
+                                text.Length - designPlan.Capture.Length,
+                                designPlan.Capture.Length
+                            ),
+                            LuiMapKind.Symbol,
+                            false
+                        )
+                    );
+                    cursor = offset + intrinsic.Receiver.Length;
+                }
+                if (cursor < value.Length)
+                    Mapped(
+                        value.Substring(cursor),
+                        new LuiSpan(source.Start + cursor, value.Length - cursor),
+                        kind
+                    );
+                var whole = new LuiSpan(start, text.Length - start);
+                Entries.Add(new LuiMapEntry(source, whole, kind, false));
+                return whole;
+            }
             text.Append(value);
             var generated = new LuiSpan(start, value.Length);
             Entries.Add(new LuiMapEntry(source, generated, kind, false));
@@ -3329,7 +3410,11 @@ public static partial class LuiCompiler
                 .Body.OfType<LuiRequirementSyntax>()
                 .OrderBy(requirement => requirement.Kind)
                 .ToArray();
-            var stateful = namedComponent || members.Length != 0 || requirements.Length != 0;
+            var stateful =
+                namedComponent
+                || members.Length != 0
+                || requirements.Length != 0
+                || designPlan is not null;
             var stateIdentity = LuiDocumentIdentity.Hash(
                 identity.Document.LogicalPath + "\0" + component.Name.Text
             );
@@ -3340,6 +3425,9 @@ public static partial class LuiCompiler
             var stateBuild = stateful ? UniqueGeneratedName("__luiBuild") : "";
             var stateInitialize = stateful ? UniqueGeneratedName("__luiInitialize") : "";
             var stateOwner = stateful ? UniqueGeneratedName("__luiOwner") : "";
+            var designFactory = designPlan?.Capture + "_factory";
+            var designState = designPlan?.Capture + "_state";
+            var designRequirementOwner = designPlan?.Capture + "_requirements";
             var requirementPlan =
                 requirements.Length != 0
                     ? UniqueGeneratedName("__luiRequirements_" + stateIdentity + "_")
@@ -3418,11 +3506,30 @@ public static partial class LuiCompiler
                     {
                         Hidden("global::Lucent.Core.ComponentRecipe.Defer(");
                         Hidden(Escape(component.Name.Text));
-                        Hidden(", " + requirementPlan + ", (_, " + requirementValues + ") => ");
+                        Hidden(
+                            ", "
+                                + requirementPlan
+                                + ", ("
+                                + (designPlan is null ? "_" : designRequirementOwner)
+                                + ", "
+                                + requirementValues
+                                + ") => "
+                        );
                     }
                     Hidden("global::Lucent.Core.Component.Define<" + stateClass + ">(");
                     Hidden(Escape(component.Name.Text));
-                    Hidden(", (context, state) => { state." + stateInitialize + "(context");
+                    Hidden(
+                        ", ("
+                            + (designPlan is null ? "context" : designFactory)
+                            + ", "
+                            + (designPlan is null ? "state" : designState)
+                            + ") => { "
+                            + (designPlan is null ? "state" : designState)
+                            + "."
+                            + stateInitialize
+                            + "("
+                            + (designPlan is null ? "context" : designFactory)
+                    );
                     foreach (var parameter in component.Parameters)
                     {
                         Hidden(", ");
@@ -3432,35 +3539,85 @@ public static partial class LuiCompiler
                         Hidden(
                             ", " + RequirementAccess(requirementValues, index, requirements.Length)
                         );
-                    Hidden("); return state." + stateBuild + "(); })");
+                    Hidden(
+                        "); return "
+                            + (designPlan is null ? "state" : designState)
+                            + "."
+                            + stateBuild
+                            + "(); })"
+                    );
                     if (requirements.Length != 0)
                         Hidden(")");
                 }
                 else
                 {
-                    Hidden("global::Lucent.Core.ComponentRecipe.Defer(");
-                    Hidden(Escape(component.Name.Text));
-                    Hidden(
-                        requirements.Length == 0
-                            ? ", " + stateOwner + " => new "
-                            : ", "
-                                + requirementPlan
-                                + ", ("
-                                + stateOwner
-                                + ", "
-                                + requirementValues
-                                + ") => new "
-                    );
-                    Hidden(stateClass);
-                    Hidden("(" + stateOwner);
-                    foreach (var parameter in component.Parameters)
+                    if (designPlan is not null)
                     {
-                        Hidden(", ");
-                        Mapped(parameter.Name.Text, parameter.Name.Span, LuiMapKind.Symbol);
+                        if (requirements.Length != 0)
+                        {
+                            Hidden(
+                                "global::Lucent.Core.ComponentRecipe.Defer("
+                                    + Escape(component.Name.Text)
+                                    + ", "
+                                    + requirementPlan
+                                    + ", ("
+                                    + designRequirementOwner
+                                    + ", "
+                                    + requirementValues
+                                    + ") => "
+                            );
+                        }
+                        Hidden(
+                            "global::Lucent.Core.Component.Define("
+                                + Escape(component.Name.Text)
+                                + ", "
+                                + designFactory
+                                + " => new "
+                                + stateClass
+                                + "("
+                                + designFactory
+                        );
+                        foreach (var parameter in component.Parameters)
+                        {
+                            Hidden(", ");
+                            Mapped(parameter.Name.Text, parameter.Name.Span, LuiMapKind.Symbol);
+                        }
+                        for (var i = 0; i < requirements.Length; i++)
+                            Hidden(
+                                ", " + RequirementAccess(requirementValues, i, requirements.Length)
+                            );
+                        Hidden(")." + stateBuild + "())");
+                        if (requirements.Length != 0)
+                            Hidden(")");
                     }
-                    for (var i = 0; i < requirements.Length; i++)
-                        Hidden(", " + RequirementAccess(requirementValues, i, requirements.Length));
-                    Hidden(")." + stateBuild + "())");
+                    else
+                    {
+                        Hidden("global::Lucent.Core.ComponentRecipe.Defer(");
+                        Hidden(Escape(component.Name.Text));
+                        Hidden(
+                            requirements.Length == 0
+                                ? ", " + stateOwner + " => new "
+                                : ", "
+                                    + requirementPlan
+                                    + ", ("
+                                    + stateOwner
+                                    + ", "
+                                    + requirementValues
+                                    + ") => new "
+                        );
+                        Hidden(stateClass);
+                        Hidden("(" + stateOwner);
+                        foreach (var parameter in component.Parameters)
+                        {
+                            Hidden(", ");
+                            Mapped(parameter.Name.Text, parameter.Name.Span, LuiMapKind.Symbol);
+                        }
+                        for (var i = 0; i < requirements.Length; i++)
+                            Hidden(
+                                ", " + RequirementAccess(requirementValues, i, requirements.Length)
+                            );
+                        Hidden(")." + stateBuild + "())");
+                    }
                 }
             }
             else if (root is LuiElementSyntax element)
@@ -3515,6 +3672,13 @@ public static partial class LuiCompiler
         {
             if (!namedComponent)
                 Hidden("\n    private sealed class " + stateClass + "\n    {\n");
+            if (designPlan is not null)
+                Hidden(
+                    "        private readonly "
+                        + "global::Lucent.Core.DesignContext "
+                        + designPlan.Capture
+                        + ";\n"
+                );
             RequirementProperties(requirements);
             var parameterBackings = component.Parameters.ToDictionary(
                 static parameter => parameter.Name.Text,
@@ -3571,7 +3735,17 @@ public static partial class LuiCompiler
             if (namedComponent && namedPlan is not null)
             {
                 NamedCompanionStateMembers(component);
-                Hidden("\n        private " + stateClass + "() { }\n");
+                Hidden(
+                    "\n        private "
+                        + stateClass
+                        + (
+                            designPlan is null
+                                ? "() { }\n"
+                                : "(global::Lucent.Core.DesignContext design) { "
+                                    + designPlan.Capture
+                                    + " = design; }\n"
+                        )
+                );
                 Hidden(
                     "        static "
                         + stateClass
@@ -3579,7 +3753,7 @@ public static partial class LuiCompiler
                         + stateClass
                         + ">.CreateComponentState(global::Lucent.Core.ComponentContext context)\n        {\n            var state = new "
                         + stateClass
-                        + "();\n"
+                        + (designPlan is null ? "();\n" : "(context.Design);\n")
                 );
                 foreach (var companionState in namedPlan.States)
                     Hidden(
@@ -3604,7 +3778,15 @@ public static partial class LuiCompiler
             else
             {
                 Hidden("\n        internal " + stateClass + "(");
-                Hidden("global::Lucent.Core.ReactiveScope " + stateOwner);
+                Hidden(
+                    (
+                        designPlan is null
+                            ? "global::Lucent.Core.ReactiveScope "
+                            : "global::Lucent.Core.ComponentContext "
+                                + designPlan!.Capture
+                                + "_context"
+                    ) + (designPlan is null ? stateOwner : "")
+                );
             }
             for (
                 var parameterIndex = 0;
@@ -3620,6 +3802,26 @@ public static partial class LuiCompiler
             for (var i = 0; i < requirements.Count; i++)
                 Hidden(", " + RequirementType(requirements[i]) + " " + requirementArguments[i]);
             Hidden(")\n        {\n");
+            if (designPlan is not null)
+            {
+                if (!namedComponent || namedPlan is null)
+                {
+                    Hidden(
+                        "            "
+                            + designPlan.Capture
+                            + " = "
+                            + designPlan.Capture
+                            + "_context.Design;\n"
+                    );
+                    Hidden(
+                        "            var "
+                            + stateOwner
+                            + " = "
+                            + designPlan.Capture
+                            + "_context.MountOwner;\n"
+                    );
+                }
+            }
             for (var i = 0; i < requirements.Count; i++)
             {
                 Hidden("            this.");
@@ -3850,7 +4052,22 @@ public static partial class LuiCompiler
                     || varPlan.InferredType is null
                 )
             )
+            {
+                // Recovery still reserves the authored field's ordinary lexical name.
+                // Its explicit-type diagnostic remains authoritative; initialization
+                // inference later refines this placeholder for member diagnostics.
+                Hidden("        private global::System.Object ");
+                Mapped(
+                    name,
+                    new LuiSpan(
+                        member.Span.Start + variable.Identifier.SpanStart,
+                        variable.Identifier.Span.Length
+                    ),
+                    LuiMapKind.Symbol
+                );
+                Hidden(" => default!;\n");
                 return;
+            }
             var nameSpan = new LuiSpan(
                 member.Span.Start + variable.Identifier.SpanStart,
                 variable.Identifier.Span.Length
@@ -5496,6 +5713,8 @@ public static partial class LuiCompiler
             else if (replacements.Count == 0)
                 Mapped(value, source, LuiMapKind.Expression);
             var generated = LuiSpan.From(generatedStart, text.Length);
+            if (designPlan?.HasReceiverIn(source) == true)
+                Entries.Add(new LuiMapEntry(source, generated, LuiMapKind.Expression, false));
             Hidden("\n#line hidden\n");
             Mark(openBrace.Span, LuiMapKind.Structure);
             Mark(closeBrace.Span, LuiMapKind.Structure);

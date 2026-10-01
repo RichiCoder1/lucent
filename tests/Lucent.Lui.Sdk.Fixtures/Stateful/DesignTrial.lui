@@ -1,0 +1,16 @@
+namespace StatefulTrial;
+using Lucent.Core;
+using static StatefulTrial.DesignHarness;
+
+internal component DesignTrial() {
+    bool mode = Design.IsDesignMode;
+    readonly bool initialMode = Design.IsDesignMode;
+    bool ReadMode() {
+        var value = Design.IsDesignMode;
+        return value;
+    }
+
+    <DesignProbe initial={initialMode} read={ReadMode}>
+        {mode ? "preview" : "application"}
+    </DesignProbe>
+}

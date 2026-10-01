@@ -39,10 +39,14 @@ public sealed class HeadlessApplicationOptions
     /// <summary>Gets or sets the maximum work items processed while settling one operation.</summary>
     public int MaximumWorkItems { get; set; } = 10_000;
 
+    /// <summary>Gets or sets the explicit purpose; headless execution defaults to Application.</summary>
+    public CompositionPurpose Purpose { get; set; }
+
     internal HeadlessApplicationOptions Snapshot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(Title);
         Viewport.Validate();
+        _ = new DesignContext(Purpose);
         ArgumentNullException.ThrowIfNull(ThemeFactory);
         ArgumentNullException.ThrowIfNull(TextShaperFactory);
         ArgumentNullException.ThrowIfNull(TimeProviderFactory);
@@ -54,6 +58,7 @@ public sealed class HeadlessApplicationOptions
         return new()
         {
             Title = Title,
+            Purpose = Purpose,
             Viewport = Viewport,
             Appearance = Appearance,
             ThemeFactory = ThemeFactory,

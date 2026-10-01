@@ -8,7 +8,11 @@ public sealed class DialogContracts
     [TestMethod]
     public void SecondEscapePassesClosedTooltipAndCancelsDialog()
     {
-        using var composition = new Composition(new ReactiveGraph(), "dialog-tooltip-escape");
+        using var composition = new Composition(
+            new ReactiveGraph(),
+            "dialog-tooltip-escape",
+            CompositionPurpose.Preview
+        );
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         using var controller = new DialogController<int>(composition.Root.Scope);
         composition.Mount(
@@ -24,12 +28,14 @@ public sealed class DialogContracts
         composition.Flush();
         var request = composition.Input.ActiveSurface!;
         var popup = request.CreateComposition();
+        Assert.IsTrue(popup.Design.IsDesignMode);
         popup.Flush();
         using var scene = SceneLayout.Project(popup, new(420, 340, 1), new EmptyShaper());
         Assert.IsTrue(popup.Input.SetScene(scene));
         Assert.IsTrue(request.FocusInitial());
         var tooltip = popup.Input.ActiveSurface;
         Assert.IsNotNull(tooltip);
+        Assert.IsTrue(tooltip.CreateComposition().Design.IsDesignMode);
         Assert.IsTrue(popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled);
         Assert.IsTrue(tooltip.IsDismissed);
         Assert.IsTrue(controller.IsOpen);

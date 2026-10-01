@@ -39,6 +39,9 @@ public sealed class MountContext : IDisposable
     /// <summary>The root mount's theme. Nested recipes can observe it but cannot replace it.</summary>
     public ThemeContext Theme => _environment.Theme;
 
+    /// <summary>The immutable design context inherited by this component mount.</summary>
+    public DesignContext Design => _environment.Design;
+
     /// <summary>Creates the one root supplied by this conditional or keyed-item factory.</summary>
     public Element Element(string name)
     {

@@ -274,8 +274,22 @@ public sealed class LuiSourceMap
 {
     /// <summary>Creates and deterministically orders source/generated relations for one freshness identity.</summary>
     public LuiSourceMap(LuiFreshnessIdentity identity, IReadOnlyList<LuiMapEntry> entries)
+        : this(identity, entries, null) { }
+
+    /// <summary>Creates a map with snapshotted contextual composition-purpose ranges.</summary>
+    public LuiSourceMap(
+        LuiFreshnessIdentity identity,
+        IReadOnlyList<LuiMapEntry> entries,
+        IReadOnlyList<LuiDesignIntrinsic>? designIntrinsics
+    )
     {
         Identity = identity;
+        DesignIntrinsics =
+            designIntrinsics
+                ?.OrderBy(static item => item.Receiver.Start)
+                .ThenBy(static item => item.Member.Start)
+                .ToArray()
+            ?? Array.Empty<LuiDesignIntrinsic>();
         Entries = entries
             .OrderBy(entry => entry.Source.Start)
             .ThenBy(entry => entry.Source.Length)
@@ -291,6 +305,9 @@ public sealed class LuiSourceMap
 
     /// <summary>Immutable entries sorted deterministically by source and generated span.</summary>
     public IReadOnlyList<LuiMapEntry> Entries { get; }
+
+    /// <summary>Contextual Design receivers and member ranges in the authored component body.</summary>
+    public IReadOnlyList<LuiDesignIntrinsic> DesignIntrinsics { get; }
 
     /// <summary>Finds every generated relation whose authored source span intersects <paramref name="span"/>.</summary>
     /// <param name="span">Half-open range in the <c>.lui</c> source text.</param>
@@ -318,6 +335,23 @@ public sealed class LuiSourceMap
             return left.Start <= right.Start && right.Start < left.End;
         return left.Start < right.End && right.Start < left.End;
     }
+}
+
+/// <summary>Authored ranges for one contextual composition-purpose access, including an incomplete member.</summary>
+public sealed class LuiDesignIntrinsic
+{
+    /// <summary>Creates contextual receiver and optional member ranges.</summary>
+    public LuiDesignIntrinsic(LuiSpan receiver, LuiSpan member)
+    {
+        Receiver = receiver;
+        Member = member;
+    }
+
+    /// <summary>The authored contextual receiver.</summary>
+    public LuiSpan Receiver { get; }
+
+    /// <summary>The authored member, or empty recovery anchor after the dot.</summary>
+    public LuiSpan Member { get; }
 }
 
 /// <summary>Immutable lowering outcome consumed by build or editor tooling.</summary>

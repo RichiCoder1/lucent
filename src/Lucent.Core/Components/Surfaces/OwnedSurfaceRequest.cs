@@ -108,7 +108,11 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         ObjectDisposedException.ThrowIf(IsDismissed, this);
         if (_popup is not null)
             return _popup;
-        var popup = new Composition(Owner.Graph, IsInteractive ? "popover" : "tooltip");
+        var popup = new Composition(
+            Owner.Graph,
+            IsInteractive ? "popover" : "tooltip",
+            Owner.Design.Purpose
+        );
         try
         {
             popup.ShareImagesFrom(Owner);

@@ -34,9 +34,14 @@ public sealed partial class Composition : IDisposable
 
     /// <summary>Initializes a composition with a stable root on the graph UI thread.</summary>
     public Composition(ReactiveGraph graph, string name)
+        : this(graph, name, CompositionPurpose.Application) { }
+
+    /// <summary>Initializes a composition with an explicit immutable execution purpose.</summary>
+    public Composition(ReactiveGraph graph, string name, CompositionPurpose purpose)
     {
         _graph = graph ?? throw new ArgumentNullException(nameof(graph));
         ReactiveGraph.ValidateName(name, nameof(name));
+        Design = new DesignContext(purpose);
         var scope = graph.CreateScope(name);
         Root = new Element(this, null, scope, NextId(), name);
         _elements.Add(Root.Id, Root);
@@ -48,6 +53,9 @@ public sealed partial class Composition : IDisposable
 
     /// <summary>The stable root element for this composition.</summary>
     public Element Root { get; }
+
+    /// <summary>The immutable purpose shared by all component mounts in this composition.</summary>
+    public DesignContext Design { get; }
 
     /// <summary>The optional application-owned image preparation cache installed by the host.</summary>
     public ImageCache? Images { get; private set; }

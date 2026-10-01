@@ -39,6 +39,7 @@ public static class SkiaHeadlessApplication
         new()
         {
             Title = source?.Title ?? "Lucent headless test",
+            Purpose = source?.Purpose ?? CompositionPurpose.Application,
             Viewport = source?.Viewport ?? new LayoutViewport(1024, 768, 1),
             Appearance = source?.Appearance ?? ThemeAppearance.Light,
             ThemeFactory =
