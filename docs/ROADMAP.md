@@ -86,7 +86,7 @@ VS Code onboarding surfaces pass review and local package proof. Explicit editor
 project inspection now adds evaluated target/tool identity and fresh evidence
 reuse. The real-project contract, 14 cache tests and 99 extension tests pass,
 including two corrected review races. Default checks preserve explicit unverified
-capabilities; the accepted issue is not yet complete. The
+capabilities. The
 [doctor plan](plans/environment-doctor.md) records its optional diagnostics.
 Windows native-prerequisite inspection passes focused contracts, a real installed
 toolchain observation and independent review; it leaves actual publication unverified.
@@ -95,8 +95,10 @@ editor. Review corrected shared scratch storage, transitive adapter files leakin
 into static output, and stale output inclusion. SDK-declared payloads and required
 notices now pass real tool installation, the complete VSIX producer and 83 release
 contracts. Fifty Tools contracts, the focused adapter checks and 110 editor tests
-pass; final independent review has no findings. Publication of these additions
-remains pending, followed by the fresh installed-editor journey in #249.
+pass; final independent review has no findings. All CI108 jobs pass, and the
+independently authenticated `0.3.0-dev.108.1` release delivers these additions,
+closing #248. It is the latest confirmed release. The fresh installed-editor
+journey continues in #249, using the explicitly supported CI-bundle/VSIX channel.
 Standalone trusted-project CLI parity passes 32 Tools
 contracts and a real coherent development-server invocation; it remains separate
 from default static checks and does not claim release authentication or build readiness.

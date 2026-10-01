@@ -100,6 +100,7 @@ test("raw attribute strings stay inside tags and do not promise C# escapes", () 
 test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
     assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);
+    assert.deepEqual(manifest.contributes.breakpoints, [{ language: "lui" }]);
     assert.equal(manifest.contributes.configuration.properties["lucentLui.projectPath"].scope, "resource");
     assert.deepEqual(manifest.extensionKind, ["workspace"]);
     assert.equal(manifest.capabilities.untrustedWorkspaces.supported, "limited");

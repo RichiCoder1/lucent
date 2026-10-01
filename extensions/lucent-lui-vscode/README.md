@@ -7,6 +7,10 @@ dependencies. It does not include the .NET SDK.
 
 ## Setup
 
+Follow the [Windows getting-started guide](https://github.com/RichiCoder1/lucent/blob/main/docs/GETTING-STARTED.md)
+for explicit release installation, managed run/debug, tests and NativeAOT publishing.
+The fresh-editor debugger walkthrough remains pending; the guide labels that boundary.
+
 Run **Lucent: Open Getting Started** for the built-in walkthrough. **Lucent: Check
 Environment** inspects installed .NET tooling and configuration without restoring,
 evaluating a project, contacting feeds or changing settings. It is available in
@@ -105,7 +109,7 @@ Both commands preserve the running server and existing cache generations. Use **
 Language Services** after a successful installation. Returning a project to an older
 supported pin selects that exact compatible cached generation; it never substitutes
 the newest server or changes the project's pins. The shipped catalog currently
-approves `0.3.0-dev.101.1`, authenticated against its complete GitHub Actions release
+approves `0.3.0-dev.107.1`, authenticated against its complete GitHub Actions release
 artifact. Unknown releases require an extension catalog update. Expired GitHub
 artifacts cannot be downloaded; an existing verified cache or an approved offline
 server archive remains usable. The compatible bundle and an explicit trusted

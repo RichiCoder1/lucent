@@ -56,7 +56,7 @@ Offline import is explicit and performs no network request. A raw server ZIP mus
 match an approved entry shipped in the extension, including the evaluated SDK
 package digest, compiler, source, language and protocol. A user-provided descriptor
 or hash cannot establish publisher authenticity. The initial catalog approves
-`0.3.0-dev.101.1`, authenticated against CI101's complete GitHub Actions artifact.
+`0.3.0-dev.107.1`, authenticated against CI107's complete GitHub Actions artifact.
 `tools/New-LuiReleaseCatalog.ps1` verifies the fixed repository/workflow, run,
 artifact digest and complete release descriptor before producing a catalog entry.
 

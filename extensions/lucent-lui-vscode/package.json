@@ -1,7 +1,7 @@
 {
   "name": "lucent-lui",
   "displayName": "Lucent .lui",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "publisher": "lucent",
   "lucentRelease": {
     "schemaVersion": 1,
@@ -54,6 +54,7 @@
   ],
   "activationEvents": ["onLanguage:lui", "workspaceContains:**/*.lui"],
   "contributes": {
+    "breakpoints": [{ "language": "lui" }],
     "languages": [{
       "id": "lui",
       "aliases": ["Lucent LUI", "lui"],

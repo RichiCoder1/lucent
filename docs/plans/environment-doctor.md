@@ -2,9 +2,9 @@
 
 Execution: [#248](https://github.com/RichiCoder1/lucent/issues/248), following the
 [onboarding design](https://github.com/RichiCoder1/lucent/issues/242) and
-[editor tooling lifecycle](editor-tooling-lifecycle.md). Static and trusted-project
-inspection are published in 107.1. Native and feed additions pass development
-delivery checks; official publication and the installed-editor journey are separate.
+[editor tooling lifecycle](editor-tooling-lifecycle.md). Delivered in
+`0.3.0-dev.108.1` from `f14bfe47`; #248 is closed. The installed-editor journey
+remains separately tracked in #249.
 
 The current implementation slice covers static inspection, host/runtime/installed
 SDK preflight, a standard editor walkthrough and setup status, explicit project
@@ -15,8 +15,10 @@ producer, including authoritative target/tool identity and fresh active-evidence
 reuse. Standalone CLI parity is implemented and has a real development-project
 proof. Explicit Windows native-prerequisite observations, feed configuration and
 anonymous feed access pass focused contracts, installed-tool checks and independent
-review. The complete development VSIX passes 83 release-set contracts. Official
-publication remains pending for these additions; the installed-editor journey is #249.
+review. The complete development VSIX passes 83 release-set contracts.
+[CI108](https://github.com/RichiCoder1/lucent/actions/runs/36789199087) passes managed,
+package/native verification and publication. Its complete artifact and descriptor
+are independently authenticated; the installed-editor journey is #249.
 
 ## Boundaries
 

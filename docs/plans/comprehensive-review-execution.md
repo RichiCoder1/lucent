@@ -475,8 +475,11 @@ require all six upstream notices. Final independent review has no findings.
 Fresh installed-tool checks pass static/native/offline/anonymous observations and
 confirm unchanged workspace/package-cache snapshots. The complete development
 VSIX and 83 release-set contracts pass; retained output is located by
-`artifacts/doctor-vsix-current.txt`. This is development delivery proof, with
-publication and #249's visual editor journey still separate.
+`artifacts/doctor-vsix-current.txt`. These development checks are followed by the
+successful CI108 managed/package/native/publication run for `f14bfe47`. The
+independently authenticated 108.1 bundle delivers the additions, closing #248;
+`artifacts/ci108-catalog-location.txt` retains its acquisition/descriptor evidence.
+#249's visual editor journey remains separate.
 
 ### Browser follow-up evidence
 

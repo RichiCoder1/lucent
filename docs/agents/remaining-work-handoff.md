@@ -172,7 +172,7 @@ CI107 subsequently passed and published the correction in 107.1.
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
 | Templates #246 | Published in 107.1; official template consumer and NativeAOT checks pass | Closed; fresh installed-editor journey remains #249 |
 | Editor lifecycle #247 | Official CI107 server/VSIX delivery authenticated; reviewed cache/import/acquisition behavior passes | Closed; visual VS Code sign-in remains part of #249 |
-| Environment doctor #248 | Static/trusted-project checks published in 107.1; native/feed additions pass contracts, review, real tool installation, full VSIX production and 83 release contracts | Commit/publish the additions; fresh installed-editor journey belongs to #249 |
+| Environment doctor #248 | Published in 108.1 after all CI jobs passed; complete artifact independently authenticated; closed and Project Done | Fresh installed-editor journey belongs to #249 |
 | Windows keypad #326 | Published in 101.1 and closed; three focused contracts pass in both managed and NativeAOT runs | No remaining issue work; no physical main-arrow claim |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
@@ -327,7 +327,13 @@ pass. Evidence is on C: via `artifacts/doctor-vsix-current.txt`; the development
 VSIX SHA-256 is `418ACBE80ED19FE858EEDDA72EE3A0BF6D24F08837C03DA89406384837B52214`.
 The first producer attempt supplied an apphost-enabled doctor and was correctly
 rejected; the passing invocation uses the existing CI recipe's `UseAppHost=false`.
-These additions await commit/publication; #249 remains a separate editor journey.
+The additions are pushed in `f14bfe47` and published in 108.1 after
+[CI108](https://github.com/RichiCoder1/lucent/actions/runs/36789199087) passed all jobs.
+The authenticated complete artifact SHA-256 is
+`aef9ae753c9f90374718f2adb06490a7799aa1cda3ffb5ece1305670515c3f8e`, and its
+descriptor SHA-256 is `6e7cd036ced64e14361049a9568fa1236604a929bc172a3191da11e288b7721e`.
+`artifacts/ci108-catalog-location.txt` points to retained evidence. #248 is closed
+and Project Done; #249 remains a separate editor journey.
 
 The local CI 103 reproduction exhausted its restore space with D: at about 145 MB
 free. The owner subsequently authorized removing only the failed repository-local
