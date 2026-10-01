@@ -21,8 +21,8 @@ distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit
 `3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
-The latest confirmed release is `0.3.0-dev.111.1`, from `f4bccbe1` after
-[CI111](https://github.com/RichiCoder1/lucent/actions/runs/36804636370) passed managed,
+The latest confirmed release is `0.3.0-dev.112.1`, from `d834ac78` after
+[CI112](https://github.com/RichiCoder1/lucent/actions/runs/36808337607) passed managed,
 package/native and publication jobs. The preceding 110.1 complete artifact was
 independently authenticated for onboarding. Supported distribution uses authenticated GitHub Packages and
 verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is

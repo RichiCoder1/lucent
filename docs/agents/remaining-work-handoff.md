@@ -48,8 +48,8 @@ folder. No account sign-in or security setting was automated.
 | Fresh-consumer onboarding #249 / #242 | Verified authenticated/local-package fallback, mapped debugging, managed/native interaction and final official 110.1 installed-editor semantics; [execution](../plans/onboarding-execution.md) distinguishes artifact versions |
 | Performance #313–319 | Delivered through 89.1, including physical resize proof; [performance execution](../plans/performance-execution.md) preserves characterization and failures separately |
 
-The latest confirmed Lucent release is `0.3.0-dev.111.1`, source `f4bccbe1`.
-[CI111](https://github.com/RichiCoder1/lucent/actions/runs/36804636370) passed all jobs.
+The latest confirmed Lucent release is `0.3.0-dev.112.1`, source `d834ac78`.
+[CI112](https://github.com/RichiCoder1/lucent/actions/runs/36808337607) passed all jobs.
 The preceding 110.1 complete artifact and descriptor were independently
 authenticated for onboarding:
 
