@@ -738,8 +738,46 @@ internal static partial class LuiProjectRequirements
         // does not carry it; lock contents are checked separately below.
         left["restore"]?["restoreLockProperties"]?.AsObject().Remove("restoreLockedMode");
         right["restore"]?["restoreLockProperties"]?.AsObject().Remove("restoreLockedMode");
+        if (
+            OperatingSystem.IsWindows()
+            && left["restore"] is JsonObject currentRestore
+            && right["restore"] is JsonObject restoredRestore
+        )
+        {
+            // VS Code file URIs can use a lower-case drive while NuGet preserves
+            // the restore invocation's casing. Only declared physical path fields
+            // receive Windows path comparison; package IDs and other values stay exact.
+            foreach (
+                var property in new[]
+                {
+                    "projectUniqueName",
+                    "projectPath",
+                    "outputPath",
+                    "packagesPath",
+                }
+            )
+                if (CaseEquivalentWindowsPath(currentRestore[property], restoredRestore[property]))
+                    currentRestore[property] = restoredRestore[property]!.DeepClone();
+            if (
+                currentRestore["configFilePaths"] is JsonArray currentConfigs
+                && restoredRestore["configFilePaths"] is JsonArray restoredConfigs
+                && currentConfigs.Count == restoredConfigs.Count
+            )
+                for (var index = 0; index < currentConfigs.Count; index++)
+                    if (CaseEquivalentWindowsPath(currentConfigs[index], restoredConfigs[index]))
+                        currentConfigs[index] = restoredConfigs[index]!.DeepClone();
+        }
         return JsonNode.DeepEquals(left, right);
     }
+
+    private static bool CaseEquivalentWindowsPath(JsonNode? current, JsonNode? restored) =>
+        current is JsonValue currentValue
+        && restored is JsonValue restoredValue
+        && currentValue.TryGetValue<string>(out var currentPath)
+        && restoredValue.TryGetValue<string>(out var restoredPath)
+        && Path.IsPathFullyQualified(currentPath)
+        && Path.IsPathFullyQualified(restoredPath)
+        && string.Equals(currentPath, restoredPath, StringComparison.OrdinalIgnoreCase);
 
     private static List<LucentPackage> ReadRestoredPackages(JsonElement assets)
     {

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Lucent.Lui.LanguageServer.Tests;
 
@@ -95,6 +96,51 @@ public sealed class ProjectRequirementsContracts
                 .ToLowerInvariant(),
             InputHash(firstJson.RootElement, customLock)
         );
+
+        if (OperatingSystem.IsWindows())
+        {
+            var assetsPath = Path.Combine(application, "obj", "project.assets.json");
+            var originalAssets = await File.ReadAllBytesAsync(assetsPath);
+            var differentlyCasedProject =
+                (
+                    char.IsUpper(project[0])
+                        ? char.ToLowerInvariant(project[0])
+                        : char.ToUpperInvariant(project[0])
+                ) + project[1..];
+            var differentCasing = await Requirements(root, fixture, differentlyCasedProject);
+            Assert.AreEqual(
+                0,
+                differentCasing.ExitCode,
+                "Windows drive casing changed restore equivalence: "
+                    + differentCasing.Error
+                    + differentCasing.Output
+            );
+            CollectionAssert.AreEqual(
+                originalAssets,
+                await File.ReadAllBytesAsync(assetsPath),
+                "Requirements discovery changed the restored assets."
+            );
+
+            // Case-insensitive physical paths must not make ordinary restore values
+            // case-insensitive. The project name is not a filesystem path.
+            var changedName = JsonNode.Parse(originalAssets)!;
+            changedName["project"]!["restore"]!["projectName"] = "application";
+            try
+            {
+                await File.WriteAllTextAsync(assetsPath, changedName.ToJsonString());
+                var staleName = await Requirements(root, fixture, differentlyCasedProject);
+                Assert.AreEqual(3, staleName.ExitCode, staleName.Error + staleName.Output);
+                using var staleNameJson = JsonDocument.Parse(staleName.Output);
+                Assert.AreEqual(
+                    "stale-restore",
+                    staleNameJson.RootElement.GetProperty("error").GetProperty("code").GetString()
+                );
+            }
+            finally
+            {
+                await File.WriteAllBytesAsync(assetsPath, originalAssets);
+            }
+        }
 
         var originalLock = await File.ReadAllTextAsync(customLock);
         const string marker = "\"contentHash\": \"";
