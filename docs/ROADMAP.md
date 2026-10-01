@@ -18,8 +18,12 @@ orchestration [#230](https://github.com/RichiCoder1/lucent/issues/230) adds isol
 real-SDK builds, supervised Windows process trees and verified compiled Skia
 frames. Its [execution record](plans/native-preview-orchestration.md) retains
 automated and actual editor evidence, including the source-lock isolation fixes.
-Next is the bounded [preview panel #231](plans/native-preview-panel.md), followed
-by unsaved and interactive preview #232 and external delivery #233.
+The bounded [preview panel #231](plans/native-preview-panel.md) adds scenario and
+presentation controls, mapped diagnostics, acknowledged frame delivery and hidden
+panel suspension, verified in the real development editor. Next is unsaved and
+interactive preview #232, followed by external delivery #233. Its first steps
+must preserve original source/configuration semantics in SDK overlays and separate
+live renderer ownership from confirmed process cleanup.
 Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
 distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit

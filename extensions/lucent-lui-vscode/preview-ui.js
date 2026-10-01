@@ -3,27 +3,19 @@
 const path = require("node:path");
 const { createPreviewCoordinator } = require("./preview-coordinator");
 const { createPreviewRuntime } = require("./preview-runtime");
+const { createPreviewPanel } = require("./preview-panel");
+const { verifyDiagnosticLocation } = require("./preview-diagnostics");
 
-function escapeHtml(text) {
-    return String(text).replace(/[&<>"']/g, value => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[value]));
-}
-
-function frameHtml(state) {
-    const labels = { idle: "Ready", building: "Building preview", rendering: "Rendering preview", current: "Up to date",
-        stale: "Previous preview · out of date", stopped: "Preview stopped", blocked: "Preview cleanup needs attention",
-        untrusted: "Workspace trust required", error: "Preview unavailable" };
-    const label = (labels[state.phase] ?? "Preview") + (state.stale && state.phase !== "stale" ? " · previous image is out of date" : "");
-    const logicalWidth = Number.isFinite(state.frame?.logicalWidth) ? `width:${state.frame.logicalWidth}px;` : "";
-    const image = state.frame?.png ? `<img alt="Compiled component preview" style="${logicalWidth}opacity:${state.stale ? "0.6" : "1"}" src="data:image/png;base64,${state.frame.png.toString("base64")}">` : "";
-    return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline';"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-body{font:var(--vscode-font-size) var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);padding:16px}header{margin-bottom:16px}p{white-space:pre-wrap}img{display:block;max-width:100%;height:auto;border:1px solid var(--vscode-panel-border)}</style></head><body><header role="status">${escapeHtml(label)}</header>${state.diagnostic ? `<p>${escapeHtml(state.diagnostic)}</p>` : ""}${image}</body></html>`;
-}
-
-function createPreviewCommands(vscode, context, { runtimeFactory = createPreviewRuntime, platform = process.platform,
+function createPreviewCommands(vscode, context, { runtimeFactory = createPreviewRuntime, panelFactory = createPreviewPanel, platform = process.platform,
     schedule = setTimeout, cancelScheduled = clearTimeout } = {}) {
     let coordinator;
     let retiring;
     let panel;
+    let view;
+    let selection;
+    let lastState = { phase: "idle", generation: "0", stale: false };
+    let running = false;
+    let zoom = 1;
     let output;
     let selectedFolder;
     let settingsIdentity;
@@ -34,25 +26,31 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
     let refreshTimer;
     const watchers = [];
     const ownedStorage = path.join(context.globalStorageUri?.fsPath ?? "", "preview");
-    const log = message => { output ??= vscode.window.createOutputChannel("Lucent Preview"); output.appendLine(message); };
-    const supported = folder => platform === "win32" && !vscode.env.remoteName && folder?.uri?.scheme === "file";
+    const log = message => { if (disposed) return; output ??= vscode.window.createOutputChannel("Lucent Preview"); output.appendLine(message); };
+    const supported = folder => platform === "win32" && !vscode.env.remoteName && folder?.uri?.scheme === "file"
+        && vscode.workspace.workspaceFolders?.some(current => current.uri.scheme === "file"
+            && path.resolve(current.uri.fsPath).toLowerCase() === path.resolve(folder.uri.fsPath).toLowerCase());
 
     function clearWatchers() {
         cancelScheduled(refreshTimer);
+        refreshTimer = undefined;
+        watchGeneration = undefined;
         saveEvent = undefined;
         while (watchers.length) watchers.pop().dispose();
     }
 
     function installWatchers(projects, inputs, generation, globWatchRoots = []) {
         clearWatchers();
-        watchGeneration = generation;
+        if (!running || panel?.visible === false || disposed) return;
+        const owner = Symbol(generation);
+        watchGeneration = owner;
         const exact = new Set(inputs.map(file => path.resolve(file).toLowerCase()));
         const projectRoots = [...new Set([...projects.map(file => path.dirname(file)), ...globWatchRoots]
             .map(root => path.resolve(root)))];
         if (projectRoots.length > 512 || projectRoots.some(root => root === path.parse(root).root))
             throw new Error("Preview recursive watch roots exceed the supported scope.");
         const sourceEvent = uri => {
-            if (disposed || !coordinator || watchGeneration !== generation || uri.scheme !== "file") return;
+            if (disposed || !running || panel?.visible === false || !coordinator || watchGeneration !== owner || uri.scheme !== "file") return;
             const file = path.resolve(uri.fsPath);
             const relative = path.relative(ownedStorage, file);
             if (!relative || relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) return;
@@ -60,7 +58,8 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
             coordinator.invalidate();
             cancelScheduled(refreshTimer);
             refreshTimer = schedule(() => {
-                void coordinator.refresh().catch(error => log(error.message));
+                if (watchGeneration === owner && running && coordinator)
+                    void coordinator.refresh().catch(error => log(error.message));
             }, 100);
         };
         saveEvent = uri => {
@@ -92,8 +91,66 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
     }
 
     function showState(state) {
-        if (panel) panel.webview.html = frameHtml(state);
+        if (disposed) return;
+        lastState = state;
+        updateView();
         if (state.diagnostic) log(state.diagnostic);
+    }
+
+    function updateView() {
+        const state = running && panel?.visible === false && lastState.phase !== "blocked"
+            ? { ...lastState, phase: "suspended", stale: !!lastState.frame } : lastState;
+        view?.update({ state, selection, zoom });
+    }
+
+    async function launch(chosen = selection) {
+        if (disposed || !panel || !chosen || !coordinator || retiring) return;
+        if (coordinator.state.phase === "blocked") { updateView(); return; }
+        if (!vscode.workspace.isTrusted || !supported(selectedFolder)) { await stop(); return; }
+        selection = { ...chosen, presentation: chosen.presentation ? { ...chosen.presentation } : undefined };
+        running = true;
+        updateView();
+        if (panel?.visible === false) return;
+        installWatchers([selection.projectPath], [], "initial");
+        await coordinator.start(selection);
+    }
+
+    async function openDiagnostic(index) {
+        const state = lastState;
+        const diagnostic = state.diagnostics?.[index];
+        if (!diagnostic || !selectedFolder || !vscode.workspace.isTrusted) return;
+        const location = await verifyDiagnosticLocation(diagnostic, [selectedFolder.uri.fsPath]);
+        if (lastState !== state || disposed || !vscode.workspace.isTrusted) return;
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(location.file));
+        if (lastState !== state || disposed || !vscode.workspace.isTrusted) return;
+        const line = Math.min(document.lineCount - 1, location.line - 1);
+        const column = Math.min(document.lineAt(line).text.length, location.column - 1);
+        await vscode.window.showTextDocument(document, { selection: new vscode.Range(line, column, line, column), preview: true });
+    }
+
+    async function action(message) {
+        if (disposed || !panel || panel.visible === false) return;
+        if (message.kind === "zoom") { zoom = message.zoom; updateView(); return; }
+        if (message.kind === "stop") { await stop(); return; }
+        if (message.kind === "diagnostic") { await openDiagnostic(message.index); return; }
+        if (!selection || !coordinator || retiring || !vscode.workspace.isTrusted) return;
+        if (message.kind === "select") {
+            if (!lastState.catalog?.scenarios.some(item => item.id === message.scenarioId)) return;
+            await launch({ ...selection, scenarioId: message.scenarioId, presentation: undefined });
+        } else if (message.kind === "presentation") {
+            if (!lastState.catalog?.scenarios.some(item => item.id === selection.scenarioId)) return;
+            await launch({ ...selection, presentation: message.presentation });
+        } else if (message.kind === "reset" || message.kind === "refresh") await launch();
+    }
+
+    function visibility(visible) {
+        if (disposed || !running) return;
+        if (visible) void launch().catch(error => log(error.message));
+        else {
+            clearWatchers();
+            void coordinator?.stop().catch(error => log(error.message));
+            updateView();
+        }
     }
 
     async function retireCoordinator() {
@@ -117,6 +174,7 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
 
     async function stop() {
         ++commandGeneration;
+        running = false;
         clearWatchers();
         if (retiring) await retireCoordinator();
         else await coordinator?.stop();
@@ -166,8 +224,11 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
                 supervisorPath: path.join(settings.toolsDirectory, "supervisor", "Lucent.Preview.Supervisor.exe"),
                 buildToolPath: path.join(settings.toolsDirectory, "build", "Lucent.Preview.Build.exe"),
                 storageDirectory: ownedStorage, isTrusted: () => !disposed && vscode.workspace.isTrusted,
-                onInputs: (report, request) => installWatchers(report.projects.map(project => project.projectPath),
-                    report.projects.flatMap(project => project.inputs.map(input => input.path)), request.generation, report.globWatchRoots), log
+                onInputs: (report, request) => {
+                    if (coordinator?.state.generation !== request.generation) return;
+                    installWatchers(report.projects.map(project => project.projectPath),
+                        report.projects.flatMap(project => project.inputs.map(input => input.path)), request.generation, report.globWatchRoots);
+                }, log
             });
             coordinator = createPreviewCoordinator({ ...runtime, isTrusted: () => !disposed && vscode.workspace.isTrusted,
                 isSupported: () => supported(selectedFolder), onState: showState, log });
@@ -175,22 +236,36 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
         }
         if (!panel) {
             panel = vscode.window.createWebviewPanel("lucent.preview", "Lucent Preview", vscode.ViewColumn.Beside,
-                { enableScripts: false, localResourceRoots: [] });
-            panel.onDidDispose(() => { panel = undefined; void stop().catch(error => log(error.message)); });
+                { enableScripts: true, localResourceRoots: [] });
+            view = panelFactory({ panel, onAction: message => action(message).catch(error => {
+                log(error.message);
+                vscode.window.showErrorMessage(error.message);
+            }), onVisibility: visibility, onClose: () => {
+                view?.dispose(); view = undefined; panel = undefined;
+                selection = undefined;
+                void stop().catch(error => log(error.message));
+            } });
+        } else if (panel.visible === false) {
+            // Suppress automatic visibility resume; this explicit Start owns the next selection.
+            running = false;
+            panel.reveal?.(vscode.ViewColumn.Beside);
         }
-        installWatchers([projectPath], [], "initial");
-        await coordinator.start({ projectPath, scenarioId: settings.scenarioId, targetFramework: settings.targetFramework,
+        await launch({ projectPath, scenarioId: settings.scenarioId, targetFramework: settings.targetFramework,
             configuration: settings.configuration ?? "Debug", extraInputs: (settings.extraInputs ?? []).map(file => path.resolve(folder.uri.fsPath, file)) });
     }
 
     context.subscriptions.push(
         vscode.commands.registerCommand("lucentLui.startPreview", () => start().catch(error => vscode.window.showErrorMessage(error.message))),
-        vscode.commands.registerCommand("lucentLui.refreshPreview", () => coordinator?.refresh()),
+        vscode.commands.registerCommand("lucentLui.refreshPreview", () => launch()),
         vscode.commands.registerCommand("lucentLui.stopPreview", stop),
-        { dispose() { disposed = true; clearWatchers(); panel?.dispose(); void coordinator?.dispose().catch(error => log(error.message)); output?.dispose(); } }
+        { dispose() { disposed = true; running = false; clearWatchers(); view?.dispose(); panel?.dispose(); void coordinator?.dispose().catch(error => log(error.message)); output?.dispose(); } }
     );
     if (vscode.workspace.onDidChangeWorkspaceFolders) context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(event => {
-        if (event.removed?.some(folder => folder.uri.fsPath === selectedFolder?.uri.fsPath)) void stop().catch(error => log(error.message));
+        if (event.removed?.some(folder => folder.uri.fsPath === selectedFolder?.uri.fsPath)) {
+            selection = undefined;
+            selectedFolder = undefined;
+            void stop().catch(error => log(error.message));
+        }
     }));
     if (vscode.workspace.onDidSaveTextDocument) context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(document => saveEvent?.(document.uri)));
     if (vscode.workspace.onDidChangeConfiguration) context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
@@ -199,4 +274,4 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
     return { stop };
 }
 
-module.exports = { createPreviewCommands, frameHtml };
+module.exports = { createPreviewCommands };

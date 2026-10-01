@@ -336,7 +336,7 @@ function Get-LuiVsix([string] $Path) {
         elseif (@($archive.Entries.Keys | Where-Object { $_.StartsWith('extension/nuget-doctor/', [StringComparison]::OrdinalIgnoreCase) }).Count) { throw 'Extension contains an undeclared NuGet doctor.' }
         $declared = @(@{ path = $manifest['main']; json = $false })
         if ($null -ne $bundle) { $declared += @{ path = './server-bundle.js'; json = $false } }
-        foreach ($file in @('project-requirements.js', 'server-cache.js', 'server-acquisition.js', 'managed-tool.js', 'doctor-client.js', 'onboarding-ui.js', 'environment-ui.js', 'preview-coordinator.js', 'preview-protocol.js', 'preview-process.js', 'preview-runtime.js', 'preview-ui.js', 'release-catalog.json')) {
+        foreach ($file in @('project-requirements.js', 'server-cache.js', 'server-acquisition.js', 'managed-tool.js', 'doctor-client.js', 'onboarding-ui.js', 'environment-ui.js', 'preview-coordinator.js', 'preview-protocol.js', 'preview-process.js', 'preview-runtime.js', 'preview-ui.js', 'preview-panel.js', 'preview-diagnostics.js', 'release-catalog.json')) {
             if ($manifest['files'] -contains $file) { $declared += @{ path = $file; json = $file.EndsWith('.json') } }
         }
         if ($manifest['lucentDoctor']) {

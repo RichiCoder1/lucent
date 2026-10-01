@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "sessionId": "session-1",
   "generation": "generation-1",
   "requestId": "request-1",
@@ -8,5 +8,12 @@
   "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "scenarioId": "card/empty",
   "presentationId": "default",
-  "outputDirectory": "C:\\preview-owned\\frame"
+  "outputDirectory": "C:\\preview-owned\\frame",
+  "kind": "preview-capture-request",
+  "logicalWidth": 160,
+  "logicalHeight": 120,
+  "scale": 1,
+  "colorScheme": "light",
+  "contrast": "normal",
+  "density": 1
 }

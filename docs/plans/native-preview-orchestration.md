@@ -155,6 +155,16 @@ exact-result assertion; sensitivity evidence is under
 verification succeeded, but its managed failure prevented publication. Official
 112.1 remains the latest confirmed release at this checkpoint.
 
+CI114 exposed a separate Windows path-spelling defect: its temporary folder uses
+an 8.3 profile alias, while canonical paths expand the profile name. The original
+lexical comparison wrongly rejected that owned output. Commit `fcd2783c` rejects
+actual links along the ancestor chain, then compares canonical containment. The
+independent alias regression fails against the preceding implementation; the
+corrected baseline passes 145 editor tests, including linked-ancestor rejection.
+Evidence: `C:\Users\richa\AppData\Local\Temp\lucent-preview114-path-ia68NQ` and
+`artifacts/ci114-managed-failed.log`. This is a source correction, not a claim that
+CI114 published a release.
+
 The package-dependent build fixture runs through `tools/Test-PreviewBuild.ps1`
 with an explicit feed/version in package CI. Ordinary managed tests need no
 preconfigured preview feed. Runtime tests retain only three confirmed diagnostic
@@ -175,5 +185,7 @@ the editor was closed, Computer Use reset, and disposable project restored.
 Evidence is under the onboarding folder's
 `vscode-data/User/globalStorage/lucent.lucent-lui/preview/diagnostics/failure-we74mf`.
 
-Continuous preview, presentation controls, inspection and authenticated external
-delivery remain #231–233. This work establishes no incremental-build latency target.
+Presentation controls and mapped diagnostics are recorded separately in
+[panel #231](native-preview-panel.md). Continuous preview, inspection and
+authenticated external delivery remain #232–233. This work establishes no
+incremental-build latency target.

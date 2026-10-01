@@ -6,16 +6,18 @@ const path = require("node:path");
 const os = require("node:os");
 const { createHash } = require("node:crypto");
 const { test } = require("node:test");
-const { decodeWorkerRequest, decodeWorkerResult, readVerifiedFrame } = require("./preview-protocol");
+const { decodeWorkerRequest, decodeWorkerResult, decodeCatalogResult, readVerifiedFrame,
+    readVerifiedCatalog, resolvePresentation } = require("./preview-protocol");
 const fixtures = path.resolve(__dirname, "../../src/Lucent.Preview.Protocol/Fixtures");
 
 test("worker and coordinator share the same valid and invalid wire fixtures", async () => {
-    const names = (await fs.readdir(fixtures)).filter(name => /^(request|result)-.*\.json$/.test(name));
+    const names = (await fs.readdir(fixtures)).filter(name => /^(?:catalog-)?(?:request|result)-.*\.json$/.test(name));
     assert.ok(names.includes("request-valid.json") && names.includes("result-valid.json"));
     assert.ok(names.includes("request-invalid-duplicate.json"));
     for (const name of names) {
         const bytes = await fs.readFile(path.join(fixtures, name));
-        const decode = name.startsWith("request") ? decodeWorkerRequest : decodeWorkerResult;
+        const decode = name.startsWith("catalog-result") ? decodeCatalogResult
+            : name.includes("request-") ? decodeWorkerRequest : decodeWorkerResult;
         if (name.includes("-invalid-")) assert.throws(() => decode(bytes), undefined, name);
         else assert.doesNotThrow(() => decode(bytes), name);
     }
@@ -23,9 +25,9 @@ test("worker and coordinator share the same valid and invalid wire fixtures", as
 
 test("bounded flat parsing rejects disguised duplicates, trailing data and missing fields", async () => {
     const text = await fs.readFile(path.join(fixtures, "request-valid.json"), "utf8");
-    assert.throws(() => decodeWorkerRequest(text.replace('"protocolVersion": 1,', '"protocolVersion": 1, "protocol\\u0056ersion": 1,')), /duplicate/);
+    assert.throws(() => decodeWorkerRequest(text.replace('"protocolVersion": 2,', '"protocolVersion": 2, "protocol\\u0056ersion": 2,')), /duplicate/i);
     assert.throws(() => decodeWorkerRequest(text + "{}"));
-    assert.throws(() => decodeWorkerRequest(text.replace('"protocolVersion": 1', '"protocolVersion": 1.0')));
+    assert.throws(() => decodeWorkerRequest(text.replace('"protocolVersion": 2', '"protocolVersion": 2.0')));
     assert.throws(() => decodeWorkerRequest(" ".repeat(65537)), /size/);
     assert.throws(() => decodeWorkerRequest(Buffer.from([0xff, 0xff])));
 });
@@ -45,6 +47,8 @@ async function frameFixture(t) {
     const metadata = { ...JSON.parse(await fs.readFile(path.join(fixtures, "result-valid.json"), "utf8")),
         byteLength: pixel.length, sha256: createHash("sha256").update(pixel).digest("hex"),
         width: 1, height: 1, logicalWidth: 1, logicalHeight: 1, scale: 1 };
+    Object.assign(expected, { logicalWidth: 1, logicalHeight: 1, scale: 1,
+        culture: metadata.culture, uiCulture: metadata.uiCulture, initialTime: metadata.initialTime });
     await fs.writeFile(path.join(directory, "frame.png"), pixel);
     await fs.writeFile(path.join(directory, "result.json"), JSON.stringify(metadata));
     return { directory, expected, metadata };
@@ -59,7 +63,48 @@ test("frame admission independently checks bytes, header dimensions and correlat
     await assert.rejects(readVerifiedFrame(f.directory, f.expected), /bytes/);
     await fs.writeFile(path.join(f.directory, "frame.png"), pixel);
     await fs.writeFile(path.join(f.directory, "result.json"), JSON.stringify({ ...f.metadata, width: 2, logicalWidth: 2 }));
-    await assert.rejects(readVerifiedFrame(f.directory, f.expected), /header/);
+    await assert.rejects(readVerifiedFrame(f.directory, { ...f.expected, logicalWidth: 2 }), /header/);
+});
+
+test("catalog admission binds identity and deeply freezes bounded scenario metadata", async t => {
+    const f = await frameFixture(t);
+    const catalog = JSON.parse(await fs.readFile(path.join(fixtures, "catalog-result-valid.json"), "utf8"));
+    await fs.writeFile(path.join(f.directory, "catalog.json"), JSON.stringify(catalog));
+    const accepted = await readVerifiedCatalog(f.directory, f.expected);
+    assert.equal(accepted.scenarios[0].sourceDocument, "ScenarioCard.lui");
+    assert.ok(Object.isFrozen(accepted) && Object.isFrozen(accepted.scenarios) && Object.isFrozen(accepted.scenarios[0]));
+    await assert.rejects(readVerifiedCatalog(f.directory, { ...f.expected, artifactDigest: "d".repeat(64) }), /identity/);
+    const scenario = catalog.scenarios[0];
+    assert.throws(() => decodeCatalogResult(JSON.stringify({ ...catalog, scenarios: Array(65).fill(scenario) })), /count/);
+    assert.throws(() => decodeCatalogResult(JSON.stringify({ ...catalog, scenarios: [{ ...scenario, title: "x".repeat(257) }] })));
+    assert.throws(() => decodeCatalogResult(JSON.stringify({ ...catalog, scenarios: [{ ...scenario,
+        initialTime: "2025-02-29T00:00:00.1234567+00:00" }] })), /time/);
+    assert.throws(() => decodeCatalogResult(JSON.stringify({ ...catalog, scenarios: [{ ...scenario, extra: "unrecognized" }] })), /field/);
+    const nested = JSON.stringify(catalog).replace('"density":1', '"density":1,"dens\\u0069ty":2');
+    assert.throws(() => decodeCatalogResult(nested), /Duplicate/);
+});
+
+test("effective presentation uses float32 bounds and preserves scenario culture and clock ticks", async () => {
+    const catalog = decodeCatalogResult(await fs.readFile(path.join(fixtures, "catalog-result-valid.json")));
+    const scenario = { ...catalog.scenarios[0], initialTime: "2024-02-29T23:59:59.1234567+00:00", culture: "en-US" };
+    const effective = resolvePresentation(scenario, { scale: 1.1, density: 0.3, colorScheme: "dark", contrast: "high" });
+    assert.equal(effective.scale, 1.100000023841858);
+    assert.equal(effective.density, 0.30000001192092896);
+    assert.equal(effective.initialTime, "2024-02-29T23:59:59.1234567+00:00");
+    assert.equal(effective.culture, "en-US");
+    assert.equal(scenario.colorScheme, "light");
+    assert.ok(Object.isFrozen(effective));
+    for (const overrides of [{ culture: "fr-FR" }, { scale: Infinity }, { density: 0.249999999 },
+        { logicalWidth: 8192, logicalHeight: 8192, scale: 1 }, { logicalWidth: 8192, scale: 4 },
+        { colorScheme: "system" }, { contrast: "auto" }, { logicalWidth: "160" }])
+        assert.throws(() => resolvePresentation(scenario, overrides));
+});
+
+test("frame admission rejects every differing effective presentation field", async t => {
+    const f = await frameFixture(t);
+    for (const [key, value] of Object.entries({ colorScheme: "dark", contrast: "high", density: 2,
+        culture: "fr-FR", uiCulture: "fr-FR", initialTime: "1970-01-01T00:00:00.0000001+00:00" }))
+        await assert.rejects(readVerifiedFrame(f.directory, { ...f.expected, [key]: value }), /identity/, key);
 });
 
 test("frame admission rejects linked output directories", async t => {

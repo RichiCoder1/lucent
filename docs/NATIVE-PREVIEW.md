@@ -7,8 +7,8 @@ not call the shipping application's entry point or run inside the language serve
 
 This first delivery supports local Windows desktop workspaces and managed .NET
 development projects. The preview libraries and tools are in-tree, non-packable
-development dependencies. External package delivery, scenario/presentation pickers,
-inspection and continuous interaction have separate roadmap work.
+development dependencies. External package delivery, inspection and continuous
+interaction have separate roadmap work.
 
 ## Try the compiled fixture
 
@@ -38,6 +38,21 @@ closing the panel cancels the active work. Saving a watched file invalidates the
 current image immediately and coalesces the next build. A failed build or scenario
 leaves the previous image visibly marked out of date. Unsaved buffers are not
 compiled by this slice.
+
+The panel lists the executable's registered scenarios. Selecting a scenario uses
+its defaults; **Apply presentation** changes logical width/height, device scale,
+light/dark appearance, contrast and fixture density for this preview only.
+The authored theme factory receives the selected appearance. Density remains
+explicit fixture data, so its visual effect depends on the fixture using it.
+**Display zoom** changes editor magnification without rebuilding or changing DPI.
+**Reset** rebuilds with a fresh fixture and clock, retaining the current controls.
+No setting or application source is rewritten by these controls.
+
+Hidden panels stop executable work and resume when visible again, unless explicitly
+stopped. Images remain noninteractive, including when current. A stale frame is
+dimmed and labeled. Frame delivery allows one unacknowledged image and one latest
+pending state; an unresponsive webview suspends delivery instead of collecting
+images. Hiding and showing the panel creates a fresh delivery session.
 
 The tools directory contains `build/Lucent.Preview.Build.exe` and
 `supervisor/Lucent.Preview.Supervisor.exe`. The selected .NET SDK must be installed.
@@ -100,5 +115,15 @@ uncertain termination directories are quarantined and never automatically pruned
 
 Build, worker and protocol diagnostics are separate from **Lucent LUI** language
 server logs. A preview failure does not restart or dispose the language server.
+Mapped compiler diagnostics offer **Open source** actions for `.lui` and C# files
+inside the selected workspace. The extension verifies the physical file and owns
+the target location; the webview cannot choose an arbitrary path. Diagnostic
+details for files outside that workspace remain in the output log.
 The [orchestration design](plans/native-preview-orchestration.md) records the
 ownership and verification boundaries.
+
+Worker protocol v2 requires a matching development worker and extension. There
+is no compatibility adapter for the earlier development-only protocol. Catalog
+and frame metadata are bounded to 64 KiB, with at most 64 scenarios. Captures
+allow logical dimensions 1–8192, scale/density 0.25–4, at most 16,777,216 pixels,
+and PNG payloads up to 32 MiB. Unsupported defaults fail before allocation.

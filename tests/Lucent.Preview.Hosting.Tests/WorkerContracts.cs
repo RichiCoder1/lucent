@@ -32,6 +32,14 @@ public sealed class WorkerContracts
         );
         Assert.AreEqual(176, fractionalResult.Width);
         Assert.AreEqual(132, fractionalResult.Height);
+        var catalog = PreviewProtocol.ReadCatalogResult(
+            File.ReadAllBytes(Path.Combine(directory, "catalog-result-valid.json"))
+        );
+        Assert.AreEqual("card/empty", catalog.Scenarios.Single().Id);
+        Assert.AreEqual("", catalog.Scenarios.Single().Culture);
+        PreviewProtocol.ReadCatalogRequest(
+            File.ReadAllBytes(Path.Combine(directory, "catalog-request-valid.json"))
+        );
         var invalid = Directory.GetFiles(directory, "*-invalid-*.json");
         Assert.IsGreaterThanOrEqualTo(8, invalid.Length);
         foreach (var path in invalid)
@@ -40,7 +48,14 @@ public sealed class WorkerContracts
             Assert.Throws<Exception>(
                 () =>
                 {
-                    if (Path.GetFileName(path).StartsWith("request-", StringComparison.Ordinal))
+                    if (
+                        Path.GetFileName(path)
+                            .StartsWith("catalog-result-", StringComparison.Ordinal)
+                    )
+                        PreviewProtocol.ReadCatalogResult(bytes);
+                    else if (
+                        Path.GetFileName(path).StartsWith("request-", StringComparison.Ordinal)
+                    )
                         PreviewProtocol.ReadRequest(bytes);
                     else
                         PreviewProtocol.ReadResult(bytes);
@@ -79,7 +94,7 @@ public sealed class WorkerContracts
             },
             scale
         );
-        var request = Request(directory.Output);
+        var request = Request(directory.Output) with { Scale = scale };
         var requestPath = directory.Write(request);
         var exit = await PreviewWorker.RunAsync(
             catalog,
@@ -276,9 +291,214 @@ public sealed class WorkerContracts
             Assert.AreEqual("preserve caller content", File.ReadAllText(sentinel));
     }
 
+    [TestMethod]
+    public async Task CatalogDiscoveryCopiesDefaultsWithoutExecutingAuthorCallbacks()
+    {
+        using var directory = new OwnedDirectory();
+        using var parent = new ParentReader();
+        var catalog = Catalog(
+            (_, _) => throw new InvalidOperationException("setup must not run"),
+            theme: _ => throw new InvalidOperationException("theme must not run")
+        );
+        var request = PreviewProtocol.ReadCatalogRequest(
+            File.ReadAllBytes(
+                Path.Combine(AppContext.BaseDirectory, "Fixtures", "catalog-request-valid.json")
+            )
+        ) with
+        {
+            OutputDirectory = directory.Output,
+        };
+        var path = Path.Combine(directory.Root, "catalog-request.json");
+        File.WriteAllBytes(path, PreviewProtocol.WriteCatalogRequest(request));
+        Assert.AreEqual(
+            0,
+            await PreviewWorker.RunAsync(
+                catalog,
+                ["--request", path],
+                new PreviewWorkerOptions { ParentInput = parent }
+            )
+        );
+        var result = PreviewProtocol.ReadCatalogResult(
+            File.ReadAllBytes(Path.Combine(directory.Output, "catalog.json"))
+        );
+        Assert.AreEqual(1, result.Scenarios.Length);
+        Assert.AreEqual("card/empty", result.Scenarios[0].Id);
+        Assert.AreEqual("fixture.csproj", result.Scenarios[0].SourceProject);
+        Assert.AreEqual(160, result.Scenarios[0].LogicalWidth);
+        Assert.AreEqual(1, result.Scenarios[0].Density);
+        Assert.AreEqual("1970-01-01T00:00:00.0000000+00:00", result.Scenarios[0].InitialTime);
+        Assert.IsFalse(File.Exists(Path.Combine(directory.Output, "frame.png")));
+    }
+
+    [TestMethod]
+    public async Task EffectivePresentationReachesSetupHostAndFrameWithoutChangingDefaults()
+    {
+        using var directory = new OwnedDirectory();
+        using var parent = new ParentReader();
+        var setup = false;
+        var catalog = Catalog(
+            (context, _) =>
+            {
+                setup = true;
+                Assert.AreEqual(2, context.Descriptor.Presentation.Density);
+                Assert.AreEqual(
+                    new LayoutViewport(200, 140, 1.25f),
+                    context.Descriptor.Presentation.Viewport
+                );
+                Assert.AreEqual(
+                    ThemeColorScheme.Dark,
+                    context.Descriptor.Presentation.Appearance.ColorScheme
+                );
+                Assert.AreEqual(
+                    ThemeContrast.High,
+                    context.Descriptor.Presentation.Appearance.Contrast
+                );
+                Assert.AreEqual(ControlThemes.HighContrast.Name, context.Session.Theme.Theme.Name);
+                Assert.AreEqual(DateTimeOffset.UnixEpoch, context.Clock.GetUtcNow());
+                return ValueTask.FromResult("Override density 2");
+            },
+            theme: appearance =>
+                appearance.Contrast == ThemeContrast.High
+                    ? ControlThemes.HighContrast
+                    : ControlThemes.Light
+        );
+        var request = Request(directory.Output) with
+        {
+            LogicalWidth = 200,
+            LogicalHeight = 140,
+            Scale = 1.25,
+            ColorScheme = "dark",
+            Contrast = "high",
+            Density = 2,
+        };
+        Assert.AreEqual(
+            0,
+            await PreviewWorker.RunAsync(
+                catalog,
+                ["--request", directory.Write(request)],
+                new PreviewWorkerOptions
+                {
+                    ParentInput = parent,
+                    PrepareImagesAsync = async (application, _) =>
+                    {
+                        Assert.AreEqual(
+                            new LayoutViewport(200, 140, 1.25f),
+                            await application.InvokeAsync(context => context.Viewport)
+                        );
+                        using var snapshot = await application.SnapshotAsync();
+                        snapshot.Require(SemanticRole.Text, "Override density 2");
+                    },
+                }
+            )
+        );
+        Assert.IsTrue(setup);
+        var result = PreviewProtocol.ReadResult(
+            File.ReadAllBytes(Path.Combine(directory.Output, "result.json"))
+        );
+        Assert.AreEqual("dark", result.ColorScheme);
+        Assert.AreEqual("high", result.Contrast);
+        Assert.AreEqual(2, result.Density);
+        Assert.AreEqual(250, result.Width);
+        Assert.AreEqual(175, result.Height);
+        Assert.AreEqual("", result.Culture);
+        Assert.AreEqual("1970-01-01T00:00:00.0000000+00:00", result.InitialTime);
+        Assert.AreEqual(
+            new LayoutViewport(160, 120, 1),
+            catalog.Get("card/empty").Descriptor.Presentation.Viewport
+        );
+        Assert.AreEqual(1, catalog.Get("card/empty").Descriptor.Presentation.Density);
+    }
+
+    [TestMethod]
+    public void CatalogCountLabelsAndEncodedBudgetAreBounded()
+    {
+        var result = PreviewProtocol.ReadCatalogResult(
+            File.ReadAllBytes(
+                Path.Combine(AppContext.BaseDirectory, "Fixtures", "catalog-result-valid.json")
+            )
+        );
+        var entry = result.Scenarios.Single();
+        Assert.Throws<InvalidDataException>(() =>
+            PreviewProtocol.WriteCatalogResult(
+                result with
+                {
+                    Scenarios = new PreviewCatalogEntry[65],
+                }
+            )
+        );
+        Assert.Throws<InvalidDataException>(() =>
+            PreviewProtocol.WriteCatalogResult(
+                result with
+                {
+                    Scenarios = [entry with { Title = new string('x', 257) }],
+                }
+            )
+        );
+        var many = Enumerable
+            .Range(0, 64)
+            .Select(index =>
+                entry with
+                {
+                    Id = index.ToString(CultureInfo.InvariantCulture),
+                    SourceProject = new string('x', 2048),
+                }
+            )
+            .ToArray();
+        Assert.Throws<InvalidDataException>(() =>
+            PreviewProtocol.WriteCatalogResult(result with { Scenarios = many })
+        );
+        Assert.Throws<InvalidDataException>(() =>
+            PreviewProtocol.WriteRequest(
+                Request(@"C:\owned") with
+                {
+                    LogicalWidth = 8192,
+                    LogicalHeight = 8192,
+                }
+            )
+        );
+    }
+
+    [TestMethod]
+    public async Task AggregatePixelBudgetRejectsBeforeFixtureSetup()
+    {
+        using var directory = new OwnedDirectory();
+        using var parent = new ParentReader();
+        var setups = 0;
+        var catalog = Catalog(
+            (_, _) =>
+            {
+                setups++;
+                return ValueTask.FromResult("root");
+            }
+        );
+        var path = Path.Combine(directory.Root, "invalid-request.json");
+        var json = System.Text.Encoding.UTF8.GetString(
+            File.ReadAllBytes(
+                Path.Combine(AppContext.BaseDirectory, "Fixtures", "request-invalid-pixels.json")
+            )
+        );
+        json = json.Replace(
+            @"C:\\preview-owned\\frame",
+            directory.Output.Replace("\\", "\\\\", StringComparison.Ordinal),
+            StringComparison.Ordinal
+        );
+        File.WriteAllText(path, json);
+        Assert.AreEqual(
+            1,
+            await PreviewWorker.RunAsync(
+                catalog,
+                ["--request", path],
+                new PreviewWorkerOptions { ParentInput = parent }
+            )
+        );
+        Assert.AreEqual(0, setups);
+        Assert.IsFalse(File.Exists(Path.Combine(directory.Output, "frame.png")));
+    }
+
     private static PreviewCatalog Catalog(
         Func<PreviewSetupContext, CancellationToken, ValueTask<string>> setup,
-        float scale = 1
+        float scale = 1,
+        Func<ThemeAppearance, Theme>? theme = null
     ) =>
         new PreviewCatalogBuilder()
             .Add(
@@ -289,7 +509,7 @@ public sealed class WorkerContracts
                     new PreviewPresentation(
                         new LayoutViewport(160, 120, scale),
                         ThemeAppearance.Light,
-                        static _ => ControlThemes.Light,
+                        theme ?? (static _ => ControlThemes.Light),
                         1,
                         CultureInfo.InvariantCulture,
                         CultureInfo.InvariantCulture,
@@ -304,7 +524,8 @@ public sealed class WorkerContracts
     private static PreviewWorkerRequest Request(string output) =>
         new()
         {
-            ProtocolVersion = 1,
+            ProtocolVersion = 2,
+            Kind = PreviewProtocol.CaptureRequestKind,
             SessionId = "session",
             Generation = "generation",
             RequestId = "request",
@@ -314,6 +535,12 @@ public sealed class WorkerContracts
             ScenarioId = "card/empty",
             PresentationId = "default",
             OutputDirectory = output,
+            LogicalWidth = 160,
+            LogicalHeight = 120,
+            Scale = 1,
+            ColorScheme = "light",
+            Contrast = "normal",
+            Density = 1,
         };
 
     private sealed class OwnedDirectory : IDisposable
@@ -329,6 +556,7 @@ public sealed class WorkerContracts
         }
 
         internal string Output => Path.Combine(_root, "output");
+        internal string Root => _root;
 
         internal string Write(PreviewWorkerRequest request)
         {

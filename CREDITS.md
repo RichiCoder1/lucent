@@ -323,3 +323,7 @@ Lock selection and staging follow NuGet's [lock-file implementation](https://git
 and [PackageReference lock-file guidance](https://learn.microsoft.com/nuget/consume-packages/package-references-in-project-files#locking-dependencies),
 preserving the application's restore policy without writing preview restore
 results into its source tree.
+The panel follows VS Code's [webview lifecycle and security guidance](https://code.visualstudio.com/api/extension-guides/webview):
+explicit message validation, nonce-scoped scripts, no local resource roots and
+no retained hidden page. Frame acknowledgments account for the documented
+distinction between posting a message and the page receiving it.

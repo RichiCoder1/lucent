@@ -12,7 +12,13 @@ foreach (
 {
     var descriptor = new PreviewScenarioDescriptor(
         id,
-        "Worker fixture",
+        id switch
+        {
+            "card/empty" => "Empty card",
+            "card/fractional" => "Fractional scale",
+            "card/setup-wait" => "Waiting setup",
+            _ => "Cleanup failure",
+        },
         new PreviewSource(
             "Lucent.Preview.Fixtures.csproj",
             "ScenarioCard.lui",
@@ -23,7 +29,10 @@ foreach (
                 ? new LayoutViewport(160, 120, 1.1f)
                 : new LayoutViewport(320, 240, 1),
             ThemeAppearance.Light,
-            static _ => ControlThemes.Light,
+            static appearance =>
+                appearance.Contrast == ThemeContrast.High ? ControlThemes.HighContrast
+                : appearance.ColorScheme == ThemeColorScheme.Dark ? ControlThemes.Dark
+                : ControlThemes.Light,
             1,
             CultureInfo.InvariantCulture,
             CultureInfo.InvariantCulture,
@@ -48,7 +57,16 @@ foreach (
                 Console.Error.WriteLine("Fixture setup waiting.");
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
             }
-            return new ScenarioContent("Empty", "Compiled worker fixture.");
+            var effective = context.Descriptor.Presentation;
+            return new ScenarioContent(
+                "Empty",
+                "Compiled worker fixture. "
+                    + effective.Appearance.ColorScheme
+                    + "/"
+                    + effective.Appearance.Contrast
+                    + "; density "
+                    + effective.Density.ToString(CultureInfo.InvariantCulture)
+            );
         },
         (content, _) => PreviewFixtures.Components.ScenarioCard(content)
     );

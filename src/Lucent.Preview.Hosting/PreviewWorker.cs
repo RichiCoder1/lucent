@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using Lucent.Core;
 using Lucent.Preview.Protocol;
@@ -36,19 +37,68 @@ public static class PreviewWorker
             if (args.Length != 2 || args[0] != "--request")
                 throw new InvalidDataException("Invalid worker arguments.");
             var requestPath = LocalPath(args[1], directory: false);
-            var request = PreviewProtocol.ReadRequest(
-                await ReadBoundedAsync(
-                        requestPath,
-                        PreviewProtocol.MaximumMessageBytes,
+            var requestBytes = await ReadBoundedAsync(
+                    requestPath,
+                    PreviewProtocol.MaximumMessageBytes,
+                    cancellation.Token
+                )
+                .ConfigureAwait(false);
+            if (PreviewProtocol.ReadKind(requestBytes) == PreviewProtocol.CatalogRequestKind)
+            {
+                stage = "catalog";
+                var discovery = PreviewProtocol.ReadCatalogRequest(requestBytes);
+                var discoveryOutput = EmptyOutput(discovery.OutputDirectory);
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (catalog.Scenarios.Count > PreviewProtocol.MaximumScenarios)
+                    throw new InvalidDataException("Preview catalog count exceeds its bound.");
+                var entries = new PreviewCatalogEntry[catalog.Scenarios.Count];
+                for (var i = 0; i < entries.Length; i++)
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    entries[i] = Describe(catalog.Scenarios[i].Descriptor);
+                }
+                var discoveryResult = new PreviewCatalogResult
+                {
+                    ProtocolVersion = discovery.ProtocolVersion,
+                    Kind = PreviewProtocol.CatalogResultKind,
+                    SessionId = discovery.SessionId,
+                    Generation = discovery.Generation,
+                    RequestId = discovery.RequestId,
+                    ProjectTargetDigest = discovery.ProjectTargetDigest,
+                    InputDigest = discovery.InputDigest,
+                    ArtifactDigest = discovery.ArtifactDigest,
+                    Scenarios = entries,
+                };
+                await PublishMetadataAsync(
+                        discoveryOutput,
+                        "catalog.json",
+                        PreviewProtocol.WriteCatalogResult(discoveryResult),
                         cancellation.Token
                     )
-                    .ConfigureAwait(false)
-            );
-            var output = LocalPath(request.OutputDirectory, directory: true);
-            if (Directory.EnumerateFileSystemEntries(output).Any())
-                throw new InvalidDataException("Worker output must be empty.");
+                    .ConfigureAwait(false);
+                return 0;
+            }
+            var request = PreviewProtocol.ReadRequest(requestBytes);
+            var output = EmptyOutput(request.OutputDirectory);
             var scenario = catalog.Get(request.ScenarioId);
-            var presentation = scenario.Descriptor.Presentation;
+            var defaults = scenario.Descriptor.Presentation;
+            var appearance = new ThemeAppearance(
+                request.ColorScheme == "light" ? ThemeColorScheme.Light : ThemeColorScheme.Dark,
+                request.Contrast == "normal" ? ThemeContrast.Normal : ThemeContrast.High
+            );
+            var presentation = new PreviewPresentation(
+                new LayoutViewport(
+                    (float)request.LogicalWidth,
+                    (float)request.LogicalHeight,
+                    (float)request.Scale
+                ),
+                appearance,
+                _ => defaults.ThemeFactory(appearance),
+                (float)request.Density,
+                defaults.Culture,
+                defaults.UICulture,
+                defaults.InitialTime
+            );
             var width = MathF.Ceiling(presentation.Viewport.Width * presentation.Viewport.Scale);
             var height = MathF.Ceiling(presentation.Viewport.Height * presentation.Viewport.Scale);
             if (
@@ -65,7 +115,13 @@ public static class PreviewWorker
                 var application = await SkiaHeadlessApplication
                     .StartAsync(
                         context => binding!.CreateRoot(context.Session),
-                        builder => binding = scenario.Bind(builder, clock, cancellation.Token),
+                        builder =>
+                            binding = scenario.Bind(
+                                builder,
+                                clock,
+                                presentation,
+                                cancellation.Token
+                            ),
                         new HeadlessApplicationOptions
                         {
                             Title = scenario.Descriptor.Title,
@@ -100,6 +156,7 @@ public static class PreviewWorker
             var result = new PreviewWorkerResult
             {
                 ProtocolVersion = request.ProtocolVersion,
+                Kind = PreviewProtocol.FrameResultKind,
                 SessionId = request.SessionId,
                 Generation = request.Generation,
                 RequestId = request.RequestId,
@@ -117,18 +174,22 @@ public static class PreviewWorker
                 LogicalWidth = presentation.Viewport.Width,
                 LogicalHeight = presentation.Viewport.Height,
                 Scale = presentation.Viewport.Scale,
+                ColorScheme = request.ColorScheme,
+                Contrast = request.Contrast,
+                Density = presentation.Density,
+                Culture = presentation.Culture.Name,
+                UICulture = presentation.UICulture.Name,
+                InitialTime = presentation
+                    .InitialTime.ToUniversalTime()
+                    .ToString("O", CultureInfo.InvariantCulture),
             };
             var resultBytes = PreviewProtocol.WriteResult(result);
             stage = "publication";
             _ = LocalPath(output, directory: true);
             await WriteNewAsync(Path.Combine(output, "frame.png"), png, cancellation.Token)
                 .ConfigureAwait(false);
-            var temporaryResult = Path.Combine(output, "result.tmp");
-            await WriteNewAsync(temporaryResult, resultBytes, cancellation.Token)
+            await PublishMetadataAsync(output, "result.json", resultBytes, cancellation.Token)
                 .ConfigureAwait(false);
-            _ = LocalPath(output, directory: true);
-            cancellation.Token.ThrowIfCancellationRequested();
-            File.Move(temporaryResult, Path.Combine(output, "result.json"), overwrite: false);
             return 0;
         }
         catch (Exception error)
@@ -147,6 +208,56 @@ public static class PreviewWorker
         {
             parentMonitor.Disarm();
         }
+    }
+
+    private static string EmptyOutput(string path)
+    {
+        var output = LocalPath(path, directory: true);
+        if (Directory.EnumerateFileSystemEntries(output).Any())
+            throw new InvalidDataException("Worker output must be empty.");
+        return output;
+    }
+
+    private static PreviewCatalogEntry Describe(PreviewScenarioDescriptor descriptor)
+    {
+        var presentation = descriptor.Presentation;
+        var entry = new PreviewCatalogEntry
+        {
+            Id = descriptor.Id,
+            Title = descriptor.Title,
+            SourceProject = descriptor.Source.Project,
+            SourceDocument = descriptor.Source.Document,
+            SourceComponent = descriptor.Source.Component,
+            LogicalWidth = presentation.Viewport.Width,
+            LogicalHeight = presentation.Viewport.Height,
+            Scale = presentation.Viewport.Scale,
+            ColorScheme =
+                presentation.Appearance.ColorScheme == ThemeColorScheme.Light ? "light" : "dark",
+            Contrast = presentation.Appearance.Contrast == ThemeContrast.Normal ? "normal" : "high",
+            Density = presentation.Density,
+            Culture = presentation.Culture.Name,
+            UICulture = presentation.UICulture.Name,
+            InitialTime = presentation
+                .InitialTime.ToUniversalTime()
+                .ToString("O", CultureInfo.InvariantCulture),
+        };
+        PreviewProtocol.Validate(entry);
+        return entry;
+    }
+
+    private static async Task PublishMetadataAsync(
+        string output,
+        string name,
+        byte[] bytes,
+        CancellationToken token
+    )
+    {
+        _ = LocalPath(output, directory: true);
+        var temporary = Path.Combine(output, "result.tmp");
+        await WriteNewAsync(temporary, bytes, token).ConfigureAwait(false);
+        _ = LocalPath(output, directory: true);
+        token.ThrowIfCancellationRequested();
+        File.Move(temporary, Path.Combine(output, name), overwrite: false);
     }
 
     private sealed class ParentMonitor(TextReader input, CancellationTokenSource operation)

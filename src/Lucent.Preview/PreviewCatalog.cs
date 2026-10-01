@@ -68,6 +68,14 @@ public abstract class PreviewScenario
         TimeProvider clock,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>Binds one immutable effective presentation without changing catalog defaults.</summary>
+    public abstract PreviewScenarioBinding Bind(
+        LucentApplicationBuilder builder,
+        TimeProvider clock,
+        PreviewPresentation presentation,
+        CancellationToken cancellationToken = default
+    );
 }
 
 internal sealed class TypedPreviewScenario<TFixture>(
@@ -80,12 +88,26 @@ internal sealed class TypedPreviewScenario<TFixture>(
         LucentApplicationBuilder builder,
         TimeProvider clock,
         CancellationToken cancellationToken = default
+    ) => Bind(builder, clock, Descriptor.Presentation, cancellationToken);
+
+    public override PreviewScenarioBinding Bind(
+        LucentApplicationBuilder builder,
+        TimeProvider clock,
+        PreviewPresentation presentation,
+        CancellationToken cancellationToken = default
     )
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(presentation);
+        var effectiveDescriptor = new PreviewScenarioDescriptor(
+            Descriptor.Id,
+            Descriptor.Title,
+            Descriptor.Source,
+            presentation
+        );
         var binding = new TypedPreviewScenarioBinding<TFixture>(
-            Descriptor,
+            effectiveDescriptor,
             clock,
             setup,
             createRoot,
@@ -94,7 +116,7 @@ internal sealed class TypedPreviewScenario<TFixture>(
         builder
             .SetPurpose(CompositionPurpose.Preview)
             .SetTitle(Descriptor.Title)
-            .SetTheme(Descriptor.Presentation.ThemeFactory)
+            .SetTheme(presentation.ThemeFactory)
             .OnStart(binding.StartAsync);
         return binding;
     }

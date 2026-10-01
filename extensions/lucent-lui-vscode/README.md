@@ -133,8 +133,11 @@ Save or **Refresh Native Preview** starts a fresh build and worker. Failed build
 retain a visibly stale last-good image. **Stop Native Preview** or closing the
 panel cancels active work without stopping language services. The
 **Lucent Preview** output channel reports separate build/worker diagnostics.
-Unsaved-buffer compilation, interactive inspection and presentation pickers are
-separate roadmap work.
+The panel selects registered scenarios, logical size, device scale, appearance,
+contrast and fixture density. Display zoom needs no rebuild. Reset uses a fresh
+fixture and clock. Hidden panels suspend execution; explicit Stop stays stopped.
+Mapped compiler diagnostics can open authored source inside the workspace.
+Unsaved-buffer compilation and interactive inspection remain separate roadmap work.
 
 ## Source checkout language services
 
@@ -169,7 +172,7 @@ need to be checked in for these editor features.
 Run the extension tests from the repository root:
 
 ```powershell
-node --test extensions/lucent-lui-vscode/extension.test.cjs extensions/lucent-lui-vscode/server-bundle.test.cjs extensions/lucent-lui-vscode/server-cache.test.cjs extensions/lucent-lui-vscode/server-acquisition.test.cjs extensions/lucent-lui-vscode/managed-tool.test.cjs extensions/lucent-lui-vscode/doctor-client.test.cjs extensions/lucent-lui-vscode/onboarding-ui.test.cjs extensions/lucent-lui-vscode/environment-ui.test.cjs
+./tools/Test-LuiEditor.ps1
 ```
 
 Create a local VSIX with the maintained packaging script:

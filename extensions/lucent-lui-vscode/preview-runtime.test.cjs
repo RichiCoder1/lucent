@@ -12,7 +12,7 @@ const { createPreviewCoordinator } = require("./preview-coordinator");
 const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ZkAAAAASUVORK5CYII=", "base64");
 
 async function fixture(t, { uncertain = false, failBuild = false, failWorker = false, logBytes = 0, sdkError,
-    retentionPolicy } = {}) {
+    retentionPolicy, onWorkerRequest, uncertainWorker, corruptEcho, catalogScenarios } = {}) {
     const storageDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "lucent-preview-runtime-"));
     t.after(async () => {
         assert.equal(path.dirname(storageDirectory), os.tmpdir());
@@ -21,8 +21,9 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
     });
     let trusted = true;
     const calls = [];
+    const workerRequests = [];
     let buildDirectory;
-    async function supervise(_supervisor, request) {
+    async function supervise(_supervisor, request, { signal } = {}) {
         calls.push(request.args[0]);
         const ok = { status: "completed", exitCode: 0, treeReaped: true };
         if (request.args[0] === "build") {
@@ -38,7 +39,8 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
                 kind: "preview-build", status: "succeeded", reportPath: request.args[4] }));
             if (uncertain) return { ...ok, treeReaped: false };
             if (failBuild) {
-                if (sdkError) await fs.writeFile(path.join(buildDirectory, "publish.stdout.log"), sdkError);
+                if (sdkError) await fs.writeFile(path.join(buildDirectory, "publish.stdout.log"),
+                    typeof sdkError === "function" ? sdkError(input) : sdkError);
                 await fs.writeFile(path.join(request.logDirectory, "stderr.log"),
                     `compiler failure for generation ${input.generation}\n` + "x".repeat(logBytes));
                 return { ...ok, exitCode: 17 };
@@ -51,17 +53,31 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
                 projectTargetDigest: report.projectTargetDigest, inputDigest: report.inputDigest, artifactDigest: report.artifactDigest }));
         } else {
             assert.equal(request.args[0], "--request");
+            const input = JSON.parse(await fs.readFile(request.args[1], "utf8"));
+            workerRequests.push({ input, program: request.program });
+            await onWorkerRequest?.(input, signal);
+            if (signal?.aborted) return { ...ok, status: "cancelled" };
+            if (uncertainWorker === input.kind) return { ...ok, treeReaped: false };
+            const defaults = { logicalWidth: 1, logicalHeight: 1, scale: 1, colorScheme: "light", contrast: "normal",
+                density: 1, culture: "", uiCulture: "", initialTime: "1970-01-01T00:00:00.0000000+00:00" };
+            if (input.kind === "preview-catalog-request") {
+                const { outputDirectory, ...identity } = input;
+                await fs.writeFile(path.join(outputDirectory, "catalog.json"), JSON.stringify({ ...identity,
+                    kind: "preview-catalog-result", scenarios: catalogScenarios ?? [{ id: "card/empty", title: "Empty",
+                        sourceProject: "Fixture.csproj", sourceDocument: "Card.lui", sourceComponent: "Fixture.Card", ...defaults }] }));
+                return ok;
+            }
+            assert.equal(input.kind, "preview-capture-request");
             if (failWorker) {
                 await fs.writeFile(path.join(request.logDirectory, "stderr.log"), "scenario cleanup failed\n");
                 return { ...ok, exitCode: 19 };
             }
-            const input = JSON.parse(await fs.readFile(request.args[1], "utf8"));
             const { outputDirectory, ...correlation } = input;
             await fs.writeFile(path.join(outputDirectory, "frame.png"), pixel);
-            await fs.writeFile(path.join(outputDirectory, "result.json"), JSON.stringify({ ...correlation,
+            await fs.writeFile(path.join(outputDirectory, "result.json"), JSON.stringify({ ...correlation, kind: "preview-frame-result",
+                culture: defaults.culture, uiCulture: defaults.uiCulture, initialTime: defaults.initialTime,
                 frameSequence: 1, fileName: "frame.png", byteLength: pixel.length,
-                sha256: createHash("sha256").update(pixel).digest("hex"), width: 1, height: 1,
-                logicalWidth: 1, logicalHeight: 1, scale: 1 }));
+                sha256: createHash("sha256").update(pixel).digest("hex"), width: 1, height: 1, ...corruptEcho }));
         }
         return ok;
     }
@@ -71,7 +87,7 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
         retentionPolicy, log: message => messages.push(message) });
     const request = generation => ({ sessionId: "session", generation: String(generation), requestId: "request-" + generation,
         selection: { projectPath: path.join(storageDirectory, "Fixture.csproj"), targetFramework: "net10.0", scenarioId: "card/empty" } });
-    return { runtime: makeRuntime(), makeRuntime, request, storageDirectory, calls, messages,
+    return { runtime: makeRuntime(), makeRuntime, request, storageDirectory, calls, messages, workerRequests,
         trust(value) { trusted = value; }, get buildDirectory() { return buildDirectory; } };
 }
 
@@ -80,7 +96,7 @@ test("runtime removes completed generation payloads while the admitted frame rem
     const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
     await coordinator.start({ projectPath: path.join(f.storageDirectory, "Fixture.csproj"), targetFramework: "net10.0", scenarioId: "card/empty" });
     assert.equal(coordinator.state.phase, "current", coordinator.state.diagnostic);
-    assert.deepEqual(f.calls, ["build", "verify", "--request", "verify"]);
+    assert.deepEqual(f.calls, ["build", "verify", "--request", "verify", "--request", "verify"]);
     assert.deepEqual(coordinator.state.frame.png, pixel);
     await assert.rejects(fs.stat(path.join(f.buildDirectory, "artifacts")), { code: "ENOENT" });
     await assert.rejects(fs.stat(path.dirname(f.buildDirectory)), { code: "ENOENT" });
@@ -121,6 +137,7 @@ test("successive completed generations leave no disk payloads", async t => {
     for (let generation = 1; generation <= 6; generation++) {
         const request = f.request(generation);
         const artifact = await f.runtime.build(request);
+        await f.runtime.discover(artifact, request);
         const frame = await f.runtime.render(artifact, request);
         await f.runtime.release(artifact);
         assert.deepEqual(frame.png, pixel);
@@ -227,4 +244,88 @@ test("the executable adapter independently rejects trust loss", async t => {
     await assert.rejects(f.runtime.build({ selection: {} }, new AbortController().signal), /Trust/);
     assert.deepEqual(f.calls, []);
     assert.deepEqual(await fs.readdir(f.storageDirectory), []);
+});
+
+test("catalog and capture share verified artifact identity and resolve only session presentation overrides", async t => {
+    const f = await fixture(t);
+    const request = f.request(1);
+    request.presentationId = "effective-1";
+    request.selection.presentation = { density: 0.3, colorScheme: "dark", contrast: "high" };
+    const artifact = await f.runtime.build(request);
+    await assert.rejects(f.runtime.render(artifact, request), /not registered/);
+    const catalog = await f.runtime.discover(artifact, request);
+    const frame = await f.runtime.render(artifact, request);
+    const [listed, captured] = f.workerRequests;
+    assert.equal(listed.program, captured.program);
+    assert.equal(listed.program, artifact.report.entryPoint);
+    assert.notEqual(listed.input.requestId, captured.input.requestId);
+    for (const field of ["sessionId", "generation", "projectTargetDigest", "inputDigest", "artifactDigest"])
+        assert.equal(listed.input[field], captured.input[field]);
+    assert.equal(captured.input.protocolVersion, 2);
+    assert.equal(captured.input.kind, "preview-capture-request");
+    assert.equal(captured.input.density, 0.30000001192092896);
+    assert.equal(captured.input.colorScheme, "dark");
+    assert.equal(captured.input.contrast, "high");
+    assert.equal(frame.effectivePresentation.density, 0.30000001192092896);
+    assert.equal(frame.initialTime, "1970-01-01T00:00:00.0000000+00:00");
+    assert.equal(catalog.scenarios[0].density, 1);
+    assert.equal(catalog.scenarios[0].colorScheme, "light");
+    assert.ok(Object.isFrozen(frame.effectivePresentation));
+    await f.runtime.release(artifact);
+});
+
+test("runtime catalog cancellation releases confirmed generation before capture can execute", async t => {
+    const f = await fixture(t, { onWorkerRequest: (input, signal) => {
+        if (input.kind === "preview-catalog-request") controller.abort();
+        assert.equal(signal.aborted, true);
+    } });
+    const controller = new AbortController();
+    const request = f.request(1);
+    const artifact = await f.runtime.build(request, controller.signal);
+    await assert.rejects(f.runtime.discover(artifact, request, controller.signal), { code: "cancelled" });
+    await f.runtime.release(artifact);
+    assert.deepEqual(f.workerRequests.map(entry => entry.input.kind), ["preview-catalog-request"]);
+    assert.deepEqual(await fs.readdir(f.storageDirectory), []);
+});
+
+test("unconfirmed catalog ownership quarantines its entire generation", async t => {
+    const f = await fixture(t, { uncertainWorker: "preview-catalog-request" });
+    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    await coordinator.start(f.request(1).selection);
+    assert.equal(coordinator.state.phase, "blocked");
+    assert.equal(coordinator.state.catalog, undefined);
+    assert.deepEqual(f.workerRequests.map(entry => entry.input.kind), ["preview-catalog-request"]);
+    assert.ok((await fs.stat(path.join(f.buildDirectory, "artifacts"))).isDirectory());
+    await assert.rejects(f.runtime.release({ root: path.dirname(f.buildDirectory) }), /unowned/);
+});
+
+test("capture with a differing effective echo cannot publish pixels", async t => {
+    const f = await fixture(t, { corruptEcho: { density: 2 } });
+    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    await coordinator.start(f.request(1).selection);
+    assert.equal(coordinator.state.phase, "error");
+    assert.match(coordinator.state.diagnostic, /identity/);
+    assert.equal(coordinator.state.frame, undefined);
+    assert.equal(coordinator.state.catalog.scenarios[0].id, "card/empty");
+    await assert.rejects(fs.stat(path.dirname(f.buildDirectory)), { code: "ENOENT" });
+});
+
+test("compiler mapped locations survive retained build failure after payload deletion", async t => {
+    const f = await fixture(t, { failBuild: true, sdkError: request =>
+        `${path.join(path.dirname(request.projectPath), "Card.lui")}(12,4): error CS0103: MissingValue is not declared [${request.projectPath}]\n` });
+    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    await coordinator.start(f.request(1).selection);
+    assert.equal(coordinator.state.phase, "error");
+    const [diagnostic] = coordinator.state.diagnostics;
+    assert.equal(diagnostic.file.toLowerCase(), path.join(f.storageDirectory, "Card.lui").toLowerCase());
+    assert.equal(diagnostic.line, 12);
+    assert.equal(diagnostic.column, 4);
+    assert.equal(diagnostic.code, "CS0103");
+    assert.equal(diagnostic.message, "MissingValue is not declared");
+    assert.match(diagnostic.id, /^[a-f0-9]{32}$/);
+    assert.match(coordinator.state.diagnostic, /Retained diagnostics:/);
+    await assert.rejects(fs.stat(path.dirname(f.buildDirectory)), { code: "ENOENT" });
+    const [retained] = await history(f.storageDirectory);
+    const sdkLog = retained.summary.logs.find(entry => entry.file === "sdk-publish.stdout.log");
+    assert.match(await fs.readFile(path.join(retained.root, sdkLog.file), "utf8"), /CS0103: MissingValue/);
 });

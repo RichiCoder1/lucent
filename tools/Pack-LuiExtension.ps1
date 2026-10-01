@@ -113,6 +113,8 @@ try {
         'preview-process.js',
         'preview-runtime.js',
         'preview-ui.js',
+        'preview-panel.js',
+        'preview-diagnostics.js',
         'release-catalog.json',
         'language-configuration.json',
         'README.md'

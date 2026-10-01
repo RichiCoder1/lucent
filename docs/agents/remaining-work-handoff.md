@@ -1,17 +1,20 @@
 # Current work and handoff
 
-Updated September 30, 2026. The owner authorized the remaining review corrections,
+Updated October 1, 2026. The owner authorized the remaining review corrections,
 then the broader roadmap, with completed chunks committed and pushed as needed.
 GitHub acceptance and the [roadmap](../ROADMAP.md) govern scope. Recheck live source,
 CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. Implement the bounded preview panel
-   [#231](https://github.com/RichiCoder1/lucent/issues/231), following its
-   [execution design](../plans/native-preview-panel.md). Trusted build and worker
-   orchestration #230 passes 143 editor checks, 11 compiled worker contracts,
-   12 Windows supervisor contracts and the actual SDK build fixture. Its
+1. Continue unsaved and interactive preview
+   [#232](https://github.com/RichiCoder1/lucent/issues/232). The bounded panel
+   #231 passes 176 editor checks, 15 compiled worker contracts, 18 existing
+   scenario contracts, the integrated v2 SDK/Skia pipeline and actual editor
+   controls/diagnostic navigation. Its [execution record](../plans/native-preview-panel.md)
+   retains exact artifacts and review corrections. Trusted build and worker
+   orchestration #230 also passed 12 Windows supervisor contracts and the actual
+   SDK build fixture. Its
    [implementation record](../plans/native-preview-orchestration.md) separates
    the integrated Skia pipeline, source-lock preservation, adversarial fixes and
    actual editor walkthrough. Scenario #229 and design-mode #228 remain their

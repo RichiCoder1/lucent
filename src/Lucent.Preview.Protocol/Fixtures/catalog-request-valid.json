@@ -6,15 +6,6 @@
   "projectTargetDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "inputDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  "scenarioId": "compiled.scenario",
-  "presentationId": "default",
   "outputDirectory": "C:\\preview-owned\\frame",
-  "extra": "unrecognized",
-  "kind": "preview-capture-request",
-  "logicalWidth": 160,
-  "logicalHeight": 120,
-  "scale": 1,
-  "colorScheme": "light",
-  "contrast": "normal",
-  "density": 1
+  "kind": "preview-catalog-request"
 }

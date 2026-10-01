@@ -5,7 +5,9 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
 const { runSupervised } = require("./preview-process");
-const { decodeWorkerRequest, readVerifiedFrame, readBoundedFile } = require("./preview-protocol");
+const { decodeWorkerRequest, readVerifiedFrame, readVerifiedCatalog, readBoundedFile,
+    resolvePresentation } = require("./preview-protocol");
+const { parseCompilerDiagnostics } = require("./preview-diagnostics");
 
 function inside(root, candidate) {
     const relative = path.relative(root, candidate);
@@ -252,6 +254,11 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
         } catch (error) {
             if (error.code === "termination-failed") log(`Preview generation evidence: ${root}`);
             else {
+                try { error.diagnostics = await compilerDiagnostics(artifact); }
+                catch (diagnosticError) {
+                    log("Preview compiler diagnostic extraction failed", diagnosticError);
+                    error.diagnostics = Object.freeze([]);
+                }
                 const retained = await cleanup(artifact, {
                     failed: error.code !== "cancelled" && !signal?.aborted, diagnostic: error.message
                 });
@@ -260,6 +267,23 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
             }
             throw error;
         }
+    }
+
+    async function compilerDiagnostics(artifact) {
+        const directory = path.join(artifact.root, "build");
+        try {
+            const info = await fs.lstat(directory);
+            if (!info.isDirectory() || info.isSymbolicLink()) return Object.freeze([]);
+        } catch (error) { if (error.code === "ENOENT") return Object.freeze([]); throw error; }
+        const logs = [];
+        for (const name of ["publish.stdout.log", "publish.stderr.log", "restore.stdout.log", "restore.stderr.log"]) {
+            const file = path.join(directory, name);
+            try {
+                const info = await fs.lstat(file);
+                if (info.isFile() && !info.isSymbolicLink()) logs.push(await readBoundedFile(file, 1024 * 1024));
+            } catch (error) { if (error.code !== "ENOENT") throw error; }
+        }
+        return parseCompilerDiagnostics(logs, artifact.buildRequest.requestId);
     }
 
     async function verify(artifact, signal) {
@@ -271,27 +295,59 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
             && ["projectTargetDigest", "inputDigest", "artifactDigest"].every(key => result[key] === report[key]);
     }
 
+    function workerIdentity(artifact, request) {
+        if (artifact.buildRequest.sessionId !== request.sessionId || artifact.buildRequest.generation !== request.generation
+            || artifact.buildRequest.requestId !== request.requestId)
+            throw new Error("Preview artifact does not belong to this generation.");
+        return { protocolVersion: 2, sessionId: request.sessionId, generation: request.generation,
+            requestId: request.requestId, projectTargetDigest: artifact.report.projectTargetDigest,
+            inputDigest: artifact.report.inputDigest, artifactDigest: artifact.report.artifactDigest };
+    }
+
+    async function discover(artifact, request, signal) {
+        admitted(signal);
+        await ownedRoot(artifact);
+        const identity = workerIdentity(artifact, request);
+        const outputDirectory = path.join(artifact.root, "catalog");
+        await fs.mkdir(outputDirectory);
+        const workerRequest = { ...identity, kind: "preview-catalog-request", requestId: randomUUID(), outputDirectory };
+        const bytes = Buffer.from(JSON.stringify(workerRequest));
+        decodeWorkerRequest(bytes);
+        const requestPath = path.join(artifact.root, "catalog-request.json");
+        await fs.writeFile(requestPath, bytes, { flag: "wx" });
+        await invoke(artifact.root, artifact.report.entryPoint, ["--request", requestPath], "catalog", signal);
+        const catalog = await readVerifiedCatalog(outputDirectory, workerRequest);
+        admitted(signal);
+        artifact.catalog = catalog;
+        return catalog;
+    }
+
     async function render(artifact, request, signal) {
         admitted(signal);
+        await ownedRoot(artifact);
+        const identity = workerIdentity(artifact, request);
+        const scenario = artifact.catalog?.scenarios.find(entry => entry.id === request.selection.scenarioId);
+        if (!scenario) throw new Error("The selected preview scenario is not registered in the current catalog.");
+        const effectivePresentation = resolvePresentation(scenario, request.selection.presentation);
         const outputDirectory = path.join(artifact.root, "frame");
         await fs.mkdir(outputDirectory);
         const workerRequest = {
-            protocolVersion: 1, sessionId: request.sessionId, generation: request.generation, requestId: request.requestId,
-            projectTargetDigest: artifact.report.projectTargetDigest, inputDigest: artifact.report.inputDigest,
-            artifactDigest: artifact.report.artifactDigest, scenarioId: request.selection.scenarioId,
-            presentationId: request.selection.presentationId ?? "default", outputDirectory
+            ...identity, kind: "preview-capture-request", scenarioId: request.selection.scenarioId,
+            presentationId: request.presentationId ?? "default", outputDirectory,
+            ...Object.fromEntries(["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"]
+                .map(key => [key, effectivePresentation[key]]))
         };
         const bytes = Buffer.from(JSON.stringify(workerRequest));
         decodeWorkerRequest(bytes);
         const requestPath = path.join(artifact.root, "worker-request.json");
         await fs.writeFile(requestPath, bytes, { flag: "wx" });
         await invoke(artifact.root, artifact.report.entryPoint, ["--request", requestPath], "worker", signal);
-        const frame = await readVerifiedFrame(outputDirectory, workerRequest);
+        const frame = await readVerifiedFrame(outputDirectory, { ...workerRequest, ...effectivePresentation });
         admitted(signal);
-        return frame;
+        return Object.freeze({ ...frame, effectivePresentation });
     }
 
-    return { build, verify, render, release: cleanup };
+    return { build, verify, discover, render, release: cleanup };
 }
 
 module.exports = { createPreviewRuntime };

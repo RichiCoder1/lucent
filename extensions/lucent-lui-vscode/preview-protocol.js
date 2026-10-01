@@ -8,19 +8,24 @@ const { TextDecoder } = require("node:util");
 const MAX_MESSAGE = 65536;
 const MAX_FRAME = 33554432;
 const correlation = ["protocolVersion", "sessionId", "generation", "requestId", "projectTargetDigest",
-    "inputDigest", "artifactDigest", "scenarioId", "presentationId"];
-const requestKeys = [...correlation, "outputDirectory"];
-const resultKeys = [...correlation, "frameSequence", "fileName", "byteLength", "sha256", "width", "height",
-    "logicalWidth", "logicalHeight", "scale"];
+    "inputDigest", "artifactDigest"];
+const presentationKeys = ["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"];
+const scenarioOwnedKeys = ["culture", "uiCulture", "initialTime"];
+const commonKeys = [...correlation, "kind"];
+const catalogEntryKeys = ["id", "title", "sourceProject", "sourceDocument", "sourceComponent",
+    ...presentationKeys, ...scenarioOwnedKeys];
+const captureKeys = [...commonKeys, "scenarioId", "presentationId", "outputDirectory", ...presentationKeys];
+const resultKeys = [...commonKeys, "scenarioId", "presentationId", ...presentationKeys, ...scenarioOwnedKeys,
+    "frameSequence", "fileName", "byteLength", "sha256", "width", "height"];
 const integerKeys = new Set(["protocolVersion", "frameSequence", "byteLength", "width", "height"]);
 
-// The worker schema is deliberately flat. Tokenize complete string values so
-// duplicate escaped property names cannot be hidden by JSON.parse's last-win rule.
-function decodeFlat(bytes, keys) {
+// Catalogs add one bounded array of objects. Tokenize every object rather than
+// accepting JSON.parse's last-win handling of escaped duplicate property names.
+function decodeJson(bytes) {
     bytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, "utf8");
     if (bytes.length < 2 || bytes.length > MAX_MESSAGE) throw new Error("Invalid preview message size.");
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    const token = /\s*("(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|[{}:,])/y;
+    const token = /\s*("(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|[{}\[\]:,])/y;
     let offset = 0;
     function next() {
         token.lastIndex = offset;
@@ -29,66 +34,184 @@ function decodeFlat(bytes, keys) {
         offset = token.lastIndex;
         return match[1];
     }
-    if (next() !== "{") throw new Error("Invalid preview object.");
-    const value = Object.create(null);
-    let key = next();
-    while (key !== "}") {
-        if (!key.startsWith('"')) throw new Error("Invalid preview field.");
-        key = JSON.parse(key);
-        if (!keys.includes(key) || Object.hasOwn(value, key)) throw new Error("Unknown or duplicate preview field.");
-        if (next() !== ":") throw new Error("Invalid preview field separator.");
-        const raw = next();
+    function parse(raw, depth, field) {
+        if (depth > 4) throw new Error("Preview JSON exceeds its depth bound.");
+        if (raw === "{") {
+            const value = Object.create(null);
+            let key = next();
+            if (key === "}") return value;
+            while (true) {
+                if (!key.startsWith('"')) throw new Error("Invalid preview field.");
+                key = JSON.parse(key);
+                if (Object.hasOwn(value, key)) throw new Error("Duplicate preview field.");
+                if (next() !== ":") throw new Error("Invalid preview field separator.");
+                value[key] = parse(next(), depth + 1, key);
+                const separator = next();
+                if (separator === "}") return value;
+                if (separator !== ",") throw new Error("Invalid preview separator.");
+                key = next();
+            }
+        }
+        if (raw === "[") {
+            const value = [];
+            let item = next();
+            if (item === "]") return value;
+            while (true) {
+                if (value.length === 64) throw new Error("Preview catalog exceeds its count bound.");
+                value.push(parse(item, depth + 1));
+                const separator = next();
+                if (separator === "]") return value;
+                if (separator !== ",") throw new Error("Invalid preview separator.");
+                item = next();
+            }
+        }
         if (!raw.startsWith('"') && !/^-?\d/.test(raw)) throw new Error("Invalid preview value.");
-        if (integerKeys.has(key) && !/^-?(?:0|[1-9][0-9]*)$/.test(raw))
+        if (integerKeys.has(field) && !/^-?(?:0|[1-9][0-9]*)$/.test(raw))
             throw new Error("Invalid preview integer.");
-        value[key] = JSON.parse(raw);
-        const separator = next();
-        if (separator === "}") break;
-        if (separator !== ",") throw new Error("Invalid preview separator.");
-        key = next();
-        if (key === "}") throw new Error("Invalid trailing comma.");
+        return JSON.parse(raw);
     }
-    if (text.slice(offset).trim() || Object.keys(value).length !== keys.length)
-        throw new Error("Incomplete preview message.");
+    const first = next();
+    if (first !== "{") throw new Error("Invalid preview object.");
+    const value = parse(first, 0);
+    if (text.slice(offset).trim()) throw new Error("Trailing preview data.");
+    return value;
+}
+
+function exact(value, keys) {
+    if (!value || Array.isArray(value) || typeof value !== "object"
+        || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key)))
+        throw new Error("Unknown or missing preview field.");
+}
+
+function boundedText(value, maximum, allowEmpty = false) {
+    return typeof value === "string" && value.length <= maximum
+        && (allowEmpty || !!value.trim()) && !/[\x00-\x1f\x7f-\x9f]/.test(value);
+}
+
+function freezeTree(value) {
+    if (value && typeof value === "object") {
+        for (const child of Object.values(value)) freezeTree(child);
+        Object.freeze(value);
+    }
     return value;
 }
 
 function digest(value) { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value); }
 
 function validateCorrelation(value) {
-    if (value.protocolVersion !== 1) throw new Error("Unsupported preview protocol.");
-    for (const key of ["sessionId", "generation", "requestId", "presentationId"])
+    if (value.protocolVersion !== 2) throw new Error("Unsupported preview protocol.");
+    for (const key of ["sessionId", "generation", "requestId"])
         if (typeof value[key] !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(value[key]))
             throw new Error("Invalid preview correlation.");
     for (const key of ["projectTargetDigest", "inputDigest", "artifactDigest"])
         if (!digest(value[key])) throw new Error("Invalid preview digest.");
-    if (typeof value.scenarioId !== "string" || value.scenarioId.length > 256
-        || !value.scenarioId.trim() || /[\x00-\x1f\x7f-\x9f]/.test(value.scenarioId))
-        throw new Error("Invalid preview scenario.");
 }
 
-function decodeWorkerRequest(bytes) {
-    const value = decodeFlat(bytes, requestKeys);
-    validateCorrelation(value);
+function validateScenario(value) {
+    if (!boundedText(value.scenarioId, 256))
+        throw new Error("Invalid preview scenario.");
+    if (typeof value.presentationId !== "string" || !/^[A-Za-z0-9_.-]{1,128}$/.test(value.presentationId))
+        throw new Error("Invalid preview presentation identity.");
+}
+
+function validateOutput(value) {
     if (typeof value.outputDirectory !== "string" || value.outputDirectory.length > 4096
         || !/^[A-Za-z]:[\\/]/.test(value.outputDirectory)
         || value.outputDirectory.slice(2).includes(":") || /[\x00-\x1f\x7f-\x9f]/.test(value.outputDirectory))
         throw new Error("Invalid local preview output directory.");
+}
+
+function validatePresentation(value) {
+    for (const [key, minimum, maximum] of [["logicalWidth", 1, 8192], ["logicalHeight", 1, 8192],
+        ["scale", 0.25, 4], ["density", 0.25, 4]]) {
+        const number = value[key];
+        const rounded = Math.fround(number);
+        if (typeof number !== "number" || !Number.isFinite(number) || number < minimum || number > maximum
+            || !Number.isFinite(rounded) || rounded < minimum || rounded > maximum)
+            throw new Error("Invalid preview presentation number.");
+        // JSON's shortest float32 spelling may parse as a different double.
+        // All presentation comparisons use the worker's float32 semantics.
+        value[key] = rounded;
+    }
+    if (!["light", "dark"].includes(value.colorScheme) || !["normal", "high"].includes(value.contrast))
+        throw new Error("Invalid preview presentation appearance.");
+    const width = Math.ceil(Math.fround(Math.fround(value.logicalWidth) * Math.fround(value.scale)));
+    const height = Math.ceil(Math.fround(Math.fround(value.logicalHeight) * Math.fround(value.scale)));
+    if (width < 1 || height < 1 || width > 8192 || height > 8192 || width * height > 16777216)
+        throw new Error("Preview presentation exceeds its pixel bound.");
+    return { width, height };
+}
+
+function validateScenarioOwned(value) {
+    if (!boundedText(value.culture, 64, true) || !boundedText(value.uiCulture, 64, true))
+        throw new Error("Invalid preview culture.");
+    const time = typeof value.initialTime === "string"
+        && /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{7}\+00:00$/.exec(value.initialTime);
+    if (!time) throw new Error("Invalid preview initial time.");
+    const [year, month, day, hour, minute, second] = time.slice(1).map(Number);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]
+        || hour > 23 || minute > 59 || second > 59) throw new Error("Invalid preview initial time.");
+}
+
+function resolvePresentation(scenario, overrides = {}) {
+    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)
+        || Object.keys(overrides).some(key => !presentationKeys.includes(key)))
+        throw new Error("Unknown preview presentation override.");
+    const value = Object.fromEntries([...presentationKeys, ...scenarioOwnedKeys].map(key => [key,
+        Object.hasOwn(overrides, key) ? overrides[key] : scenario[key]]));
+    validatePresentation(value);
+    validateScenarioOwned(value);
     return Object.freeze(value);
 }
 
-function decodeWorkerResult(bytes) {
-    const value = decodeFlat(bytes, resultKeys);
+function decodeWorkerRequest(bytes) {
+    const value = decodeJson(bytes);
     validateCorrelation(value);
-    if (!digest(value.sha256) || value.frameSequence !== 1 || value.fileName !== "frame.png"
+    if (value.kind === "preview-catalog-request") exact(value, [...commonKeys, "outputDirectory"]);
+    else if (value.kind === "preview-capture-request") {
+        exact(value, captureKeys);
+        validateScenario(value);
+        validatePresentation(value);
+    } else throw new Error("Unsupported preview request kind.");
+    validateOutput(value);
+    return freezeTree(value);
+}
+
+function decodeCatalogResult(bytes) {
+    const value = decodeJson(bytes);
+    validateCorrelation(value);
+    exact(value, [...commonKeys, "scenarios"]);
+    if (value.kind !== "preview-catalog-result" || !Array.isArray(value.scenarios) || value.scenarios.length > 64)
+        throw new Error("Invalid preview catalog.");
+    const ids = new Set();
+    for (const scenario of value.scenarios) {
+        exact(scenario, catalogEntryKeys);
+        if (!boundedText(scenario.id, 256) || ids.has(scenario.id) || !boundedText(scenario.title, 256)
+            || !boundedText(scenario.sourceProject, 2048) || !boundedText(scenario.sourceDocument, 2048)
+            || !boundedText(scenario.sourceComponent, 512)) throw new Error("Invalid preview catalog entry.");
+        ids.add(scenario.id);
+        validatePresentation(scenario);
+        validateScenarioOwned(scenario);
+    }
+    return freezeTree(value);
+}
+
+function decodeWorkerResult(bytes) {
+    const value = decodeJson(bytes);
+    validateCorrelation(value);
+    exact(value, resultKeys);
+    validateScenario(value);
+    const dimensions = validatePresentation(value);
+    validateScenarioOwned(value);
+    if (value.kind !== "preview-frame-result" || !digest(value.sha256) || value.frameSequence !== 1 || value.fileName !== "frame.png"
         || !Number.isInteger(value.byteLength) || value.byteLength < 33 || value.byteLength > MAX_FRAME
         || !Number.isInteger(value.width) || value.width < 1 || value.width > 8192
         || !Number.isInteger(value.height) || value.height < 1 || value.height > 8192
-        || ![value.logicalWidth, value.logicalHeight, value.scale].every(n => Number.isFinite(n) && n > 0)
-        || Math.ceil(Math.fround(Math.fround(value.logicalWidth) * Math.fround(value.scale))) !== value.width
-        || Math.ceil(Math.fround(Math.fround(value.logicalHeight) * Math.fround(value.scale))) !== value.height)
+        || dimensions.width !== value.width || dimensions.height !== value.height)
         throw new Error("Invalid preview frame metadata.");
-    return Object.freeze(value);
+    return freezeTree(value);
 }
 
 async function readBoundedFile(file, maximum) {
@@ -129,7 +252,7 @@ async function requireOwnedFile(directory, name) {
 
 async function readVerifiedFrame(directory, expected) {
     const metadata = decodeWorkerResult(await readBoundedFile(await requireOwnedFile(directory, "result.json"), MAX_MESSAGE));
-    for (const key of correlation)
+    for (const key of [...correlation, "scenarioId", "presentationId", ...presentationKeys, ...scenarioOwnedKeys])
         if (metadata[key] !== expected[key]) throw new Error("Preview result identity differs from its launch.");
     const png = await readBoundedFile(await requireOwnedFile(directory, "frame.png"), MAX_FRAME);
     if (png.length !== metadata.byteLength || createHash("sha256").update(png).digest("hex") !== metadata.sha256)
@@ -141,4 +264,12 @@ async function readVerifiedFrame(directory, expected) {
     return Object.freeze({ ...metadata, png });
 }
 
-module.exports = { decodeWorkerRequest, decodeWorkerResult, readVerifiedFrame, readBoundedFile };
+async function readVerifiedCatalog(directory, expected) {
+    const catalog = decodeCatalogResult(await readBoundedFile(await requireOwnedFile(directory, "catalog.json"), MAX_MESSAGE));
+    for (const key of correlation)
+        if (catalog[key] !== expected[key]) throw new Error("Preview catalog identity differs from its launch.");
+    return catalog;
+}
+
+module.exports = { decodeWorkerRequest, decodeWorkerResult, decodeCatalogResult, readVerifiedFrame,
+    readVerifiedCatalog, readBoundedFile, resolvePresentation };

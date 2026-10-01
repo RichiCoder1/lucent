@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:lucent:preview-worker:1",
+  "$id": "urn:lucent:preview-worker:2",
   "$defs": {
     "digest": {
       "type": "string",
@@ -25,13 +25,20 @@
         "artifactDigest",
         "scenarioId",
         "presentationId",
-        "outputDirectory"
+        "outputDirectory",
+        "kind",
+        "logicalWidth",
+        "logicalHeight",
+        "colorScheme",
+        "contrast",
+        "density",
+        "scale"
       ],
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": 1
+          "const": 2
         },
         "sessionId": {
           "$ref": "#/$defs/id"
@@ -66,6 +73,43 @@
           "minLength": 1,
           "maxLength": 4096,
           "pattern": "^[A-Za-z]:[\\\\/][^:\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "kind": {
+          "const": "preview-capture-request"
+        },
+        "logicalWidth": {
+          "type": "number",
+          "maximum": 8192,
+          "description": "Binary32-normalized; physical extents use rounded binary32 product, max8192 each and aggregate16777216 pixels.",
+          "minimum": 1
+        },
+        "logicalHeight": {
+          "type": "number",
+          "maximum": 8192,
+          "description": "Binary32-normalized; physical extents use rounded binary32 product, max8192 each and aggregate16777216 pixels.",
+          "minimum": 1
+        },
+        "colorScheme": {
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "contrast": {
+          "enum": [
+            "normal",
+            "high"
+          ]
+        },
+        "density": {
+          "type": "number",
+          "maximum": 4,
+          "minimum": 0.25
+        },
+        "scale": {
+          "type": "number",
+          "maximum": 4,
+          "minimum": 0.25
         }
       }
     },
@@ -88,13 +132,20 @@
         "height",
         "logicalWidth",
         "logicalHeight",
-        "scale"
+        "scale",
+        "kind",
+        "colorScheme",
+        "contrast",
+        "density",
+        "culture",
+        "uiCulture",
+        "initialTime"
       ],
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": 1
+          "const": 2
         },
         "sessionId": {
           "$ref": "#/$defs/id"
@@ -148,19 +199,260 @@
           "maximum": 8192
         },
         "logicalWidth": {
-          "description": "Physical width/height must equal ceil(binary32(binary32(logicalWidth/logicalHeight) * binary32(scale))), matching the Skia viewport binary32 product. Finite positive operands and bounded physical dimensions require semantic validation.",
           "type": "number",
-          "exclusiveMinimum": 0
+          "maximum": 8192,
+          "description": "Binary32-normalized; physical extents use rounded binary32 product, max8192 each and aggregate16777216 pixels.",
+          "minimum": 1
         },
         "logicalHeight": {
-          "description": "Physical width/height must equal ceil(binary32(binary32(logicalWidth/logicalHeight) * binary32(scale))), matching the Skia viewport binary32 product. Finite positive operands and bounded physical dimensions require semantic validation.",
           "type": "number",
-          "exclusiveMinimum": 0
+          "maximum": 8192,
+          "description": "Binary32-normalized; physical extents use rounded binary32 product, max8192 each and aggregate16777216 pixels.",
+          "minimum": 1
         },
         "scale": {
-          "description": "Physical width/height must equal ceil(binary32(binary32(logicalWidth/logicalHeight) * binary32(scale))), matching the Skia viewport binary32 product. Finite positive operands and bounded physical dimensions require semantic validation.",
           "type": "number",
-          "exclusiveMinimum": 0
+          "maximum": 4,
+          "minimum": 0.25
+        },
+        "kind": {
+          "const": "preview-frame-result"
+        },
+        "colorScheme": {
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "contrast": {
+          "enum": [
+            "normal",
+            "high"
+          ]
+        },
+        "density": {
+          "type": "number",
+          "maximum": 4,
+          "minimum": 0.25
+        },
+        "culture": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "uiCulture": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+        },
+        "initialTime": {
+          "type": "string",
+          "minLength": 33,
+          "description": "Validcalendar year0001..9999; canonical UTC roundtrip, preserve ticks.",
+          "maxLength": 33,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}\\+00:00$"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "sessionId",
+        "generation",
+        "requestId",
+        "projectTargetDigest",
+        "inputDigest",
+        "artifactDigest",
+        "kind",
+        "outputDirectory"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 2
+        },
+        "sessionId": {
+          "$ref": "#/$defs/id"
+        },
+        "generation": {
+          "$ref": "#/$defs/id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "projectTargetDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifactDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "kind": {
+          "const": "preview-catalog-request"
+        },
+        "outputDirectory": {
+          "description": "Absolute local path; host validates containment and reparse policy.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[A-Za-z]:[\\\\/][^:\\u0000-\\u001f\\u007f-\\u009f]*$"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "sessionId",
+        "generation",
+        "requestId",
+        "projectTargetDigest",
+        "inputDigest",
+        "artifactDigest",
+        "kind",
+        "scenarios"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 2
+        },
+        "sessionId": {
+          "$ref": "#/$defs/id"
+        },
+        "generation": {
+          "$ref": "#/$defs/id"
+        },
+        "requestId": {
+          "$ref": "#/$defs/id"
+        },
+        "projectTargetDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inputDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "artifactDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "kind": {
+          "const": "preview-catalog-result"
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "sourceProject",
+              "sourceDocument",
+              "sourceComponent",
+              "logicalWidth",
+              "logicalHeight",
+              "scale",
+              "colorScheme",
+              "contrast",
+              "density",
+              "culture",
+              "uiCulture",
+              "initialTime"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Bounded UTF16 units; source fields are inert authored labels, not paths.",
+                "maxLength": 256,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Bounded UTF16 units; source fields are inert authored labels, not paths.",
+                "maxLength": 256,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "sourceProject": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Bounded UTF16 units; source fields are inert authored labels, not paths.",
+                "maxLength": 2048,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "sourceDocument": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Bounded UTF16 units; source fields are inert authored labels, not paths.",
+                "maxLength": 2048,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "sourceComponent": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Bounded UTF16 units; source fields are inert authored labels, not paths.",
+                "maxLength": 512,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "logicalWidth": {
+                "type": "number",
+                "maximum": 8192,
+                "description": "Binary32-normalized; physical extents use rounded binary32 product, max8192 each and aggregate16777216 pixels.",
+                "minimum": 1
+              },
+              "logicalHeight": {
+                "type": "number",
+                "maximum": 8192,
+                "description": "Binary32-normalized; physical extents use rounded binary32 product, max8192 each and aggregate16777216 pixels.",
+                "minimum": 1
+              },
+              "scale": {
+                "type": "number",
+                "maximum": 4,
+                "minimum": 0.25
+              },
+              "colorScheme": {
+                "enum": [
+                  "light",
+                  "dark"
+                ]
+              },
+              "contrast": {
+                "enum": [
+                  "normal",
+                  "high"
+                ]
+              },
+              "density": {
+                "type": "number",
+                "maximum": 4,
+                "minimum": 0.25
+              },
+              "culture": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "uiCulture": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+              },
+              "initialTime": {
+                "type": "string",
+                "minLength": 33,
+                "description": "Validcalendar year0001..9999; canonical UTC roundtrip, preserve ticks.",
+                "maxLength": 33,
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{7}\\+00:00$"
+              }
+            }
+          },
+          "maxItems": 64,
+          "description": "Registrationorder, uniqueid, no callback execution. Entire encoded object max65536 bytes."
         }
       }
     }

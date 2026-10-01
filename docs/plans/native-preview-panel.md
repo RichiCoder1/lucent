@@ -1,8 +1,8 @@
 # Native preview panel
 
 Issue [#231](https://github.com/RichiCoder1/lucent/issues/231), following the
-[orchestration boundary](native-preview-orchestration.md). This is the execution
-design, not completed delivery evidence.
+[orchestration boundary](native-preview-orchestration.md). The implementation and
+focused verification are recorded below; external distribution remains #233.
 
 ## User experience
 
@@ -59,7 +59,8 @@ The extension owns the selected configuration and current status. The webview
 uses a restrictive CSP, a fresh script nonce, no command URIs and no general
 filesystem access. Authored labels and diagnostics are text, not executable HTML.
 Incoming messages use a small action allowlist, exact fields, bounded values and
-the current panel identity. Diagnostic actions refer to extension-owned entries;
+the current panel identity. Diagnostic actions also require the current display
+revision and refer to extension-owned entries;
 the webview cannot supply an arbitrary URI to open.
 
 Frame delivery has one unacknowledged message and one replaceable pending state.
@@ -67,6 +68,10 @@ Acknowledgment includes the panel and delivery identities. Old acknowledgments
 cannot release a newer delivery. A missing acknowledgment suspends delivery
 instead of accumulating images. Renderer results still require independent byte,
 hash, dimensions and correlation checks before they reach this transport.
+Stop remains available for the current panel while newer display state is pending.
+Retained catalog choices may request a fresh build after failure; the new build
+must rediscover and verify the chosen scenario. This does not permit interaction
+with stale pixels or execution of an old artifact.
 
 Hiding the panel cancels active preview work and pauses rebuilds and frame
 delivery. Source changes can mark retained pixels stale while hidden. Becoming
@@ -94,3 +99,52 @@ VS Code's [webview lifecycle and security guidance](https://code.visualstudio.co
 and [message delivery contract](https://code.visualstudio.com/api/references/vscode-api#Webview)
 inform the host boundary. A successful `postMessage` alone does not prove the
 webview received or displayed the frame.
+
+## Implementation evidence — October 1, 2026
+
+The development panel and worker v2 implement the controls above. All 176 editor
+checks pass, including bounded transport, stale acknowledgments, hidden/closed
+panels, diagnostic generations and scenario recovery. The compiled worker suite
+passes 15 contracts and the existing scenario suite passes 18. A selected
+appearance now reaches the authored theme factory before setup, through a
+per-capture presentation; no Core theme behavior changed. Catalog discovery does
+not invoke setup, root or theme callbacks. Distinct fixture titles make the
+scenario picker usable.
+
+Worker source hashes, warning-clean builds, process exit and independent PNG
+checks are retained under `C:\Users\richa\AppData\Local\Temp\lucent-preview-worker231`.
+The production JavaScript coordinator/runtime, freshly published build and
+Windows supervisor tools, real SDK and compiled worker passed together under
+`C:\Users\richa\AppData\Local\Temp\lucent-preview231-pipeline-1fcf8226d710417585dae32a1ecb2902`.
+The requested 400-by-300 logical viewport at 1.5 scale produced a 600-by-450 PNG
+with dark/high contrast and density 0.75, four catalog entries and independently
+checked bytes. All 65 source lock files retained their original hashes and
+existence, and the successful generation storage was empty after release.
+
+Adversarial review found three lifecycle gaps: Refresh after panel close,
+execution after removing the workspace folder, and old diagnostic locations
+receiving a new generation. The fixes require an existing panel and current
+workspace membership, clear retained selection when either owner disappears,
+and clear mapped diagnostics synchronously when a generation changes. Focused
+regressions reproduce the close and stale-diagnostic defects before correction;
+the review recheck found no remaining actionable issue in those corrections.
+
+Computer Use in the already trusted onboarding fixture displayed real compiled
+light and dark cards. Display zoom changed pixels on screen without rebuilding;
+the Apply action changed viewport width, device scale and fixture density in the
+compiled result. A deliberate `CS0103` retained the previous image as stale;
+its diagnostic button opened the authored fixture at line 3, column 37. Hiding
+the preview released active generation storage. This source development client
+uses the existing official 110.1 language-server override and is not an
+authenticated new VSIX release. The walkthrough also exposed the image's
+`display` rule overriding its initial `hidden` attribute; the explicit hidden
+rule fixes the empty placeholder. The pipeline directory's `walkthrough.md`
+records final editor observations and cleanup separately from automated proof.
+The final reload confirmed the corrected empty placeholder and Ready language
+services. Stop and closing during fresh builds left no active generation
+directories. The owned editor was closed and Computer Use reset after verification.
+
+Presentation changes still compile a fresh generation and start one-shot
+workers. These checks establish behavior and ownership, not an incremental
+latency target. Unsaved buffers, persistent rendering and current-generation
+input remain #232; production native chrome, UIA and IME parity are unclaimed.
