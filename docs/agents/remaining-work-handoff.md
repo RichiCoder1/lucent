@@ -7,12 +7,14 @@ CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. Implement composition-scoped `Design.IsDesignMode`
-   [#228](https://github.com/RichiCoder1/lucent/issues/228). The Code Review Astra
-   oracle identified the existing mount environment, captured immutable context,
-   ordinary-symbol-first binding and shared executable/editor maps as the seams.
-   Runtime and compiler/editor Sol 6.1 workers have separate ownership and serialize
-   shared checkout builds. No new owner decision is pending.
+1. Finish explicit, owned preview scenarios
+   [#229](https://github.com/RichiCoder1/lucent/issues/229). The catalog and general
+   headless builder/culture seams are being implemented with separate Sol 6.1
+   ownership; serialize shared checkout builds. The prior composition-scoped
+   `Design.IsDesignMode` #228 passes runtime, compiler/editor and SDK/NativeAOT
+   checks, with no remaining adversarial finding. Its
+   [execution record](../plans/design-mode-execution.md) retains exact candidate
+   evidence and review corrections. No new owner decision is pending.
 2. Native preview [#227](https://github.com/RichiCoder1/lucent/issues/227) feasibility
    passed on official 108.1: three fresh workers, attributable real Skia text/SVG/icon
    output, and failed builds rejected before launch. The retained
@@ -44,9 +46,10 @@ folder. No account sign-in or security setting was automated.
 | Fresh-consumer onboarding #249 / #242 | Verified authenticated/local-package fallback, mapped debugging, managed/native interaction and final official 110.1 installed-editor semantics; [execution](../plans/onboarding-execution.md) distinguishes artifact versions |
 | Performance #313–319 | Delivered through 89.1, including physical resize proof; [performance execution](../plans/performance-execution.md) preserves characterization and failures separately |
 
-The latest confirmed Lucent release is `0.3.0-dev.110.1`, source `3205cbbd`.
-[CI110](https://github.com/RichiCoder1/lucent/actions/runs/36801821082) passed all jobs.
-Its complete artifact and descriptor were independently authenticated:
+The latest confirmed Lucent release is `0.3.0-dev.111.1`, source `f4bccbe1`.
+[CI111](https://github.com/RichiCoder1/lucent/actions/runs/36804636370) passed all jobs.
+The preceding 110.1 complete artifact and descriptor were independently
+authenticated for onboarding:
 
 - Artifact SHA-256: `692cdd9dab5bd131b9fb817ba7b99827e7fe4f912ec4d6812fd249d092c2ee7a`.
 - Descriptor SHA-256: `fba4138c6f0ef3b5c5906aa607166c9a9b2c0b8e2140fbc55ebb7b31e7fdc952`.

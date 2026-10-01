@@ -6,18 +6,22 @@ The owner authorized the remaining review corrections followed by the broader
 roadmap. The [handoff](agents/remaining-work-handoff.md) holds the current resume
 point and environment constraints. GitHub issue acceptance remains authoritative.
 
-The active work is composition-scoped `Design.IsDesignMode`
-[#228](https://github.com/RichiCoder1/lucent/issues/228), following the measured
+Composition-scoped `Design.IsDesignMode`
+[#228](https://github.com/RichiCoder1/lucent/issues/228) is implemented and passes
+compiler/editor, runtime and SDK/NativeAOT verification; the
+[execution record](plans/design-mode-execution.md) retains review corrections and
+candidate evidence. The active work is explicit, owned preview scenarios
+[#229](https://github.com/RichiCoder1/lucent/issues/229), following the measured
 [native preview feasibility](../tests/Probes/Preview/NativeFeasibility/REPORT.md).
 Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
 distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit
 `3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
-The latest confirmed release is `0.3.0-dev.110.1`, from `3205cbbd` after
-[CI110](https://github.com/RichiCoder1/lucent/actions/runs/36801821082) passed managed,
-package/native and publication jobs. Its complete artifact is independently
-authenticated. Supported distribution uses authenticated GitHub Packages and
+The latest confirmed release is `0.3.0-dev.111.1`, from `f4bccbe1` after
+[CI111](https://github.com/RichiCoder1/lucent/actions/runs/36804636370) passed managed,
+package/native and publication jobs. The preceding 110.1 complete artifact was
+independently authenticated for onboarding. Supported distribution uses authenticated GitHub Packages and
 verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is
 not claimed.
 

@@ -44,6 +44,13 @@ foreach ($targetPath in @($feed, $env:NUGET_PACKAGES, $artifacts)) {
 }
 Remove-Item -LiteralPath $feed, $env:NUGET_PACKAGES, $artifacts -Recurse -Force -ErrorAction Ignore
 New-Item $artifacts -ItemType Directory -Force | Out-Null
+if ($OutputRoot) {
+    # Relocated consumers retain the same repository build inputs as the default matrix.
+    foreach ($buildFile in @('Directory.Build.props', 'Directory.Build.targets')) {
+        $source = [Security.SecurityElement]::Escape((Join-Path $root $buildFile))
+        Set-Content -LiteralPath (Join-Path $proofRoot $buildFile) ('<Project><Import Project="' + $source + '" /></Project>')
+    }
+}
 $restoreConfig = Join-Path $artifacts 'restore.NuGet.config'
 '<configuration><packageSources><clear /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>' | Set-Content $restoreConfig
 try {
@@ -86,6 +93,11 @@ try {
     New-Item (Join-Path $matrix '.hidden'), (Join-Path $matrix 'bin'), (Join-Path $matrix 'obj') -ItemType Directory -Force | Out-Null
     Set-Content (Join-Path $matrix '.hidden/Hidden.lui'), (Join-Path $matrix 'bin/Bin.lui'), (Join-Path $matrix 'obj/Obj.lui'), (Join-Path $matrix 'Ignored.g.lui'), (Join-Path $matrix 'Ignored.generated.lui') 'ignored'
     $matrixProject = Join-Path $matrix 'Consumer.csproj'
+    $matrixBody = Get-Content -LiteralPath $matrixProject -Raw
+    $relativeCore = '../../../src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll'
+    if (-not $matrixBody.Contains($relativeCore)) { throw 'The SDK consumer no longer declares its expected Core assembly reference.' }
+    $absoluteCore = [Security.SecurityElement]::Escape((Join-Path $root 'src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll'))
+    Set-Content -LiteralPath $matrixProject $matrixBody.Replace($relativeCore, $absoluteCore)
     Invoke-Dotnet @('restore', $matrixProject, '--configfile', (Join-Path $matrix 'NuGet.config'), '--locked-mode')
     Invoke-Dotnet @('build', $matrixProject, '--no-restore', '-t:Rebuild', '-warnaserror')
     $before = Get-ChildItem (Join-Path $matrix 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs'
@@ -146,7 +158,7 @@ try {
     $lintProject = Join-Path $lint 'Lint.csproj'
     Invoke-Dotnet @('restore', $lintProject, '--configfile', (Join-Path $lint 'NuGet.config'))
     $packedTool = Join-Path $env:NUGET_PACKAGES 'lucent.lui.sdk/0.2.0/tools/net10.0/Lucent.Lui.Tooling.dll'
-    & (Join-Path $PSScriptRoot 'Verify-LuiLintPolicy.ps1') -Project $lintProject -Tooling $packedTool -Dotnet $dotnet
+    & (Join-Path $PSScriptRoot 'Verify-LuiLintPolicy.ps1') -Project $lintProject -Tooling $packedTool -Dotnet $dotnet -RestoreConfig (Join-Path $lint 'NuGet.config') -CoreAssembly (Join-Path $root 'src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll')
 
     $duplicate = Join-Path $artifacts 'duplicate'
     Write-Project $duplicate 'Duplicate' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.2.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDefaultLuiItems>false</EnableDefaultLuiItems><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup><ItemGroup><AdditionalFiles Include="One.lui" LucentLuiLogicalPath="same/Main.lui" /><AdditionalFiles Include="Two.lui" LucentLuiLogicalPath="same/Main.lui" /></ItemGroup></Project>'

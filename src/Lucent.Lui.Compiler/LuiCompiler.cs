@@ -1460,31 +1460,49 @@ public static partial class LuiCompiler
 
     private static LuiSpan? Translate(LuiSourceMap map, LuiSpan generated)
     {
-        var entry = map.FromGenerated(generated)
+        var entries = map.FromGenerated(generated)
             .Where(item => !item.Hidden && item.Source.Start >= 0 && item.Generated.Length != 0)
-            .OrderBy(item =>
-                item.Generated.Start <= generated.Start && item.Generated.End >= generated.End
-                    ? 0
-                    : 1
-            )
-            .ThenBy(item => item.Generated.Length)
-            .ThenBy(item => item.Kind == LuiMapKind.Expression ? 0 : 1)
-            .FirstOrDefault();
-        if (entry is null)
+            .ToArray();
+        if (entries.Length == 0)
             return null;
+        // Expanded receivers make enclosing mappings nonuniform. Translate each
+        // boundary through its smallest constituent mapping instead of scaling
+        // a partial range through the enclosing expression's length ratio.
+        var first =
+            entries
+                .Where(item =>
+                    item.Generated.Start <= generated.Start && generated.Start < item.Generated.End
+                )
+                .OrderBy(static item => item.Generated.Length)
+                .FirstOrDefault()
+            ?? entries
+                .OrderBy(static item => item.Generated.Start)
+                .ThenBy(static item => item.Generated.Length)
+                .First();
+        var endPoint = Math.Max(generated.Start, generated.End - 1);
+        var last =
+            entries
+                .Where(item => item.Generated.Start <= endPoint && endPoint < item.Generated.End)
+                .OrderBy(static item => item.Generated.Length)
+                .FirstOrDefault()
+            ?? entries
+                .OrderByDescending(static item => item.Generated.End)
+                .ThenBy(static item => item.Generated.Length)
+                .First();
         var start =
-            generated.Start <= entry.Generated.Start
-                ? entry.Source.Start
-                : entry.Source.Start
-                    + (int)(
-                        (long)(generated.Start - entry.Generated.Start)
-                        * entry.Source.Length
-                        / entry.Generated.Length
-                    );
-        var endOffset = Math.Min(generated.End, entry.Generated.End) - entry.Generated.Start;
+            first.Source.Start
+            + (
+                first.Source.Length == first.Generated.Length
+                    ? Math.Max(0, generated.Start - first.Generated.Start)
+                    : 0
+            );
         var end =
-            entry.Source.Start
-            + (int)((long)endOffset * entry.Source.Length / entry.Generated.Length);
+            generated.Length == 0 ? start
+            : last.Source.Length == last.Generated.Length
+                ? last.Source.Start
+                    + Math.Min(generated.End, last.Generated.End)
+                    - last.Generated.Start
+            : last.Source.End;
         return new LuiSpan(start, Math.Max(0, end - start));
     }
 

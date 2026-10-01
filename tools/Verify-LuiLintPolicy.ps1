@@ -1,7 +1,9 @@
 param(
     [Parameter(Mandatory)] [string] $Project,
     [Parameter(Mandatory)] [string] $Tooling,
-    [Parameter(Mandatory)] [string] $Dotnet
+    [Parameter(Mandatory)] [string] $Dotnet,
+    [string] $RestoreConfig,
+    [string] $CoreAssembly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,10 +70,16 @@ $namedProject = Join-Path $namedFixture 'NamedLintPolicy.csproj'
 $namedSource = Join-Path $namedInput 'PolicyProbe.lui'
 $namedConfiguration = Join-Path $namedInput '.editorconfig'
 $namedCompanion = Join-Path $namedFixture 'PolicyProbe.lui.cs'
+$namedCoreReference = '<PackageReference Include="Lucent.Core" Version="[' + $namedVersion + ']" />'
+if ($CoreAssembly) {
+    if (!(Test-Path -LiteralPath $CoreAssembly -PathType Leaf)) { throw 'The explicit named-lint Core assembly is missing.' }
+    $escapedCoreAssembly = [Security.SecurityElement]::Escape([IO.Path]::GetFullPath($CoreAssembly))
+    $namedCoreReference = '<Reference Include="Lucent.Core"><HintPath>' + $escapedCoreAssembly + '</HintPath></Reference>'
+}
 @"
 <Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/$namedVersion">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>14.0</LangVersion><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><LucentLuiNamedComponents>true</LucentLuiNamedComponents><TreatWarningsAsErrors>false</TreatWarningsAsErrors></PropertyGroup>
-  <ItemGroup><PackageReference Include="Lucent.Core" Version="[$namedVersion]" /></ItemGroup>
+  <ItemGroup>$namedCoreReference</ItemGroup>
 </Project>
 "@ | Set-Content -LiteralPath $namedProject
 @'
@@ -97,7 +105,7 @@ public component PolicyProbe(string[] items) {
 '@
 Set-Content -LiteralPath $namedSource -Value $namedSourceText
 Set-Content -LiteralPath $namedConfiguration "root = true`n[*.lui]`ndotnet_diagnostic.LUI5001.severity = warning"
-$namedNuGetConfig = Join-Path (Split-Path $projectDirectory -Parent) 'NuGet.config'
+$namedNuGetConfig = if ($RestoreConfig) { [IO.Path]::GetFullPath($RestoreConfig) } else { Join-Path (Split-Path $projectDirectory -Parent) 'NuGet.config' }
 Invoke-Expected @('restore', $namedProject, '--configfile', $namedNuGetConfig) 0 ''
 
 function Set-NamedLintSeverity([string] $Severity) {

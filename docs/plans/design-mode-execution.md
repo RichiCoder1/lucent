@@ -30,8 +30,10 @@ reproduced with failing tests before correction:
   explicit-type diagnostic. It never gains intrinsic editor metadata.
 - Exact receiver mappings split a conditional style expression, preventing its
   token/value conversion. Whole-expression mappings are retained alongside
-  precise receiver mappings, and translation chooses a mapping containing the
-  complete requested range.
+  precise receiver mappings. A follow-up branch containing the expanded receiver
+  exposed another incorrect proportional offset calculation; translation now
+  maps the requested start and end through their smallest constituent mappings.
+  Both conditional forms are covered by the existing regression.
 
 Generated lambda names also avoid authored `context` and `_` parameters.
 Receiver ranges are indexed, and generated capture names are cached for each
@@ -58,9 +60,21 @@ Compiler/editor logs, first failures and the source manifest are retained in
 `C:/Users/richa/AppData/Local/Temp/lucent-design228`; runtime reports are in
 `C:/Users/richa/AppData/Local/Temp/lucent228-runtime-tests`.
 
-Final package verification and review results are recorded in #228 before
-closeout. A 67-receiver compiler example completed in 138 ms on the active local
-machine; this is one characterization sample, not a speedup claim or timing gate.
+The corrected SDK matrix passes, including managed generation, mutable inputs,
+lint policy, exact NativeAOT inventory and execution of all eight expected
+consumer markers. The new consumer reports `composition-scoped design SDK proof:
+PASS`. Evidence and a source/package manifest are retained in
+`C:/Users/richa/AppData/Local/Temp/lucent228-sdk-2c792a3799a54083a2f64a61b8effff9`.
+This is a local source-built candidate, not a relabeled official package.
+
+Two earlier verifier failures are retained: moving output to C: exposed an old
+relative Core reference/build-property assumption and a named-lint helper's
+implicit restore configuration. Explicit paths now preserve the same verification
+inputs; ordinary package-based lint callers retain their existing defaults.
+
+The final adversarial follow-up found no remaining material issue. The final
+67-receiver compiler example completed in 120 ms on the active local machine;
+this is one characterization sample, not a speedup claim or timing gate.
 
 This work does not start previews or supervise user code. Static scenarios are
 the next slice, [#229](https://github.com/RichiCoder1/lucent/issues/229), followed by

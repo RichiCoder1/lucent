@@ -4095,6 +4095,17 @@ style NamedMixed {
             {
                 source,
                 source.Replace("menuOpen ?", "Design.IsDesignMode ?", StringComparison.Ordinal),
+                source
+                    .Replace(
+                        "    <Row",
+                        "    float Scale(bool value) { return value ? 1f : 0.5f; }\n    <Row",
+                        StringComparison.Ordinal
+                    )
+                    .Replace(
+                        "menuOpen ? LightNotesTheme.DenseSpacing : 1",
+                        "menuOpen ? LightNotesTheme.DenseSpacing : Scale(Design.IsDesignMode)",
+                        StringComparison.Ordinal
+                    ),
             }
         )
         {
@@ -4146,6 +4157,11 @@ style NamedMixed {
                     + "\n"
                     + result.Source
             );
+            if (candidateSource.Contains("Scale(Design.IsDesignMode)", StringComparison.Ordinal))
+                Assert(
+                    result.Source!.Contains("StyleValue.FromValue<float>(Scale("),
+                    "the complete authored Scale branch must be wrapped as a float style value"
+                );
         }
     }
 
