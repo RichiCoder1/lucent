@@ -33,6 +33,10 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
         );
     private readonly Dictionary<int, PointerState> _pointers = [];
     private readonly HashSet<Key> _pressedKeys = [];
+    private readonly Dictionary<
+        Key,
+        (ElementIdentity? Owner, PreviewFrameToken Frame)
+    > _keyOwners = [];
     private readonly PreviewScenario _scenario;
     private readonly PreviewPresentation _presentation;
     private readonly Thread _thread;
@@ -42,6 +46,11 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
     private RetainedScene? _scene;
     private PreviewRenderedFrame? _inFlight;
     private PreviewFrameToken? _currentFrame;
+    private PreviewFrameToken? _displayedFrame;
+    private FrameInputMetadata? _displayedInput;
+    private FrameInputMetadata? _inFlightInput;
+    private bool _displayedInputCompatible;
+    private long _admissionEpoch;
     private long _lastInput;
     private long _frameSequence;
     private long _loopTurns;
@@ -50,6 +59,7 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
     private bool _stopping;
     private bool _terminated;
     private Exception? _stopError;
+    private Exception? _startupError;
     private CancellationTokenRegistration _externalStop;
 
     private PreviewRenderSession(PreviewScenario scenario, PreviewWorkerRequest request)
@@ -127,6 +137,10 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
             var presented = _session!.Composition.TryAcknowledgePresentation(
                 _inFlight.SceneGeneration
             );
+            _displayedFrame = token;
+            _displayedInput = _inFlightInput?.Epoch == _admissionEpoch ? _inFlightInput : null;
+            _displayedInputCompatible = _scene is not null && CompatibleDisplayedInput(_scene);
+            _inFlightInput = null;
             _inFlight = null;
             return new PreviewFrameAcknowledgment(true, presented);
         });
@@ -161,20 +175,65 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
                     {
                         pointer.Last = command;
                         if (command.Kind == PointerCommandKind.Down)
+                        {
                             pointer.Buttons.Add(command.Button);
+                            pointer.Origins.TryAdd(command.Button, frame);
+                        }
                         if (command.Kind == PointerCommandKind.Up)
                         {
                             if (command.Button == PointerButton.None)
+                            {
                                 pointer.Buttons.Clear();
+                                pointer.Origins.Clear();
+                            }
                             else
+                            {
                                 pointer.Buttons.Remove(command.Button);
+                                pointer.Origins.Remove(command.Button);
+                            }
                         }
                         if (command.Kind == PointerCommandKind.Cancel || pointer.Buttons.Count == 0)
                             _pointers.Remove(command.PointerId);
                     }
                 }
                 return result;
-            }
+            },
+            () =>
+            {
+                if (
+                    command.Kind is not (PointerCommandKind.Up or PointerCommandKind.Cancel)
+                    || !_pointers.TryGetValue(command.PointerId, out var pointer)
+                    || command.Kind == PointerCommandKind.Up
+                        && command.Button != PointerButton.None
+                        && !pointer.Buttons.Contains(command.Button)
+                    || !pointer.Origins.ContainsValue(frame)
+                    || command.Kind == PointerCommandKind.Up
+                        && command.Button != PointerButton.None
+                        && pointer.Origins.GetValueOrDefault(command.Button) != frame
+                )
+                    return;
+                // Reconcile against current geometry, then route only to surviving capture.
+                // Losing that original owner never permits a fresh hit-test activation.
+                Project();
+                _session!.Composition.Input.DispatchCapturedPointerRelease(command);
+                if (
+                    command.Kind == PointerCommandKind.Cancel
+                    || command.Button == PointerButton.None
+                )
+                {
+                    pointer.Buttons.Clear();
+                    pointer.Origins.Clear();
+                }
+                else
+                {
+                    pointer.Buttons.Remove(command.Button);
+                    pointer.Origins.Remove(command.Button);
+                }
+                if (pointer.Buttons.Count == 0)
+                    _pointers.Remove(command.PointerId);
+            },
+            () =>
+                command.Kind == PointerCommandKind.Down && !_pointers.ContainsKey(command.PointerId)
         );
     }
 
@@ -185,7 +244,12 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
     )
     {
         command.Validate();
-        return Input(frame, sequence, () => _session!.Composition.Input.DispatchWheel(command));
+        return Input(
+            frame,
+            sequence,
+            () => _session!.Composition.Input.DispatchWheel(command),
+            acceptDisplayed: static () => true
+        );
     }
 
     internal Task<InputDispatchResult?> KeyAsync(
@@ -200,6 +264,19 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
             sequence,
             () =>
             {
+                if (command.Kind == KeyCommandKind.Up)
+                {
+                    if (!_keyOwners.TryGetValue(command.Key, out var owner))
+                        return null;
+                    if (owner.Owner != _session!.Composition.Input.FocusedElement)
+                    {
+                        _pressedKeys.Remove(command.Key);
+                        _keyOwners.Remove(command.Key);
+                        return null;
+                    }
+                    if (owner.Frame != frame)
+                        return null;
+                }
                 if (
                     command.Kind == KeyCommandKind.Down
                     && !_pressedKeys.Contains(command.Key)
@@ -212,11 +289,36 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
                 if (result.Status == InputDispatchStatus.Delivered)
                 {
                     if (command.Kind == KeyCommandKind.Down)
-                        _pressedKeys.Add(command.Key);
+                    {
+                        if (_pressedKeys.Add(command.Key))
+                            _keyOwners[command.Key] = (result.Target, frame);
+                    }
                     else
+                    {
                         _pressedKeys.Remove(command.Key);
+                        _keyOwners.Remove(command.Key);
+                    }
                 }
                 return result;
+            },
+            () =>
+            {
+                if (command.Kind != KeyCommandKind.Up || !_pressedKeys.Contains(command.Key))
+                    return;
+                var owner = _keyOwners[command.Key];
+                if (owner.Frame != frame)
+                    return;
+                Project();
+                if (owner.Owner == _session!.Composition.Input.FocusedElement)
+                    ReleaseInput(
+                        () =>
+                            _session.Composition.Input.DispatchKey(
+                                new(KeyCommandKind.Up, command.Key)
+                            ),
+                        () => owner.Owner == _session.Composition.Input.FocusedElement
+                    );
+                _pressedKeys.Remove(command.Key);
+                _keyOwners.Remove(command.Key);
             }
         );
     }
@@ -241,30 +343,50 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
         {
             if (identity != Identity)
                 return false;
+            if (_focused == focused)
+                return true;
             _focused = focused;
             if (!focused)
+            {
                 CleanupInput();
-            _dirty = true;
+                _dirty = true;
+            }
             return true;
         });
 
     private Task<InputDispatchResult?> Input(
         PreviewFrameToken frame,
         long sequence,
-        Func<InputDispatchResult> dispatch
+        Func<InputDispatchResult?> dispatch,
+        Action? releaseStale = null,
+        Func<bool>? acceptDisplayed = null
     ) =>
         Enqueue<InputDispatchResult?>(() =>
         {
             if (
-                _currentFrame is null
-                || frame != _currentFrame
+                frame.Session != Identity
+                || frame.Sequence is < 1
+                || frame.Sequence > _frameSequence
                 || sequence <= _lastInput
                 || !_focused
             )
                 return null;
             _lastInput = sequence;
+            if (
+                (_currentFrame is null || frame != _currentFrame)
+                && !(
+                    frame == _displayedFrame
+                    && _displayedInputCompatible
+                    && acceptDisplayed?.Invoke() == true
+                )
+            )
+            {
+                releaseStale?.Invoke();
+                return null;
+            }
             var result = dispatch();
-            _dirty = true;
+            if (result is not null)
+                _dirty = true;
             return result;
         });
 
@@ -323,6 +445,7 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
     private void RunOwner()
     {
         Exception? failure = null;
+        var lifetimeToken = _lifetime.Token;
         var previousCulture = CultureInfo.CurrentCulture;
         var previousUICulture = CultureInfo.CurrentUICulture;
         try
@@ -337,6 +460,11 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
             var binding = _scenario.Bind(builder, clock, _presentation, _lifetime.Token);
             ThrowIfStopping();
             builder
+                .OnDispose(context =>
+                {
+                    _startupError = context.Startup.Error;
+                    return ValueTask.CompletedTask;
+                })
                 .Build()
                 .Run(() =>
                 {
@@ -372,17 +500,30 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
                         failure ?? new ObjectDisposedException(nameof(PreviewRenderSession))
                     );
                 _inFlight = null;
+                _inFlightInput = null;
+                _displayedInput = null;
+                _displayedFrame = null;
                 while (_frames.Reader.TryRead(out _)) { }
                 _frames.Writer.TryComplete(failure);
                 _lifetime.Dispose();
                 _available.Dispose();
             }
         }
+        // Only the authoritative startup cancellation may become clean Stop. Cleanup
+        // failures remain separate or aggregated and can never match this reference.
+        if (
+            IsStopping
+            && (
+                failure is PreviewStoppedBeforeStartupException
+                || ReferenceEquals(failure, _startupError)
+                    && failure is OperationCanceledException canceled
+                    && canceled.CancellationToken == lifetimeToken
+            )
+        )
+            failure = null;
         if (failure is null)
         {
-            _ready.TrySetException(
-                new OperationCanceledException("Preview stopped before startup.")
-            );
+            _ready.TrySetCanceled();
             _completion.TrySetResult();
         }
         else
@@ -461,6 +602,12 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
                         png,
                         (int)MathF.Ceiling(viewport.Width * viewport.Scale),
                         (int)MathF.Ceiling(viewport.Height * viewport.Scale)
+                    );
+                    _inFlightInput = new(
+                        _admissionEpoch,
+                        _scene.Viewport,
+                        _scene.Input,
+                        _scene.ScrollBars
                     );
                     if (!_frames.Writer.TryWrite(_inFlight))
                         throw new InvalidOperationException("Preview frame slot is occupied.");
@@ -570,6 +717,7 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
             {
                 var previous = _scene;
                 _scene = next;
+                _displayedInputCompatible = CompatibleDisplayedInput(next);
                 previous?.Dispose();
                 return;
             }
@@ -580,6 +728,9 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
 
     private void CleanupInput()
     {
+        _admissionEpoch = checked(_admissionEpoch + 1);
+        _displayedInput = null;
+        _displayedInputCompatible = false;
         _currentFrame = null;
         _dirty = true;
         List<Exception> failures = [];
@@ -606,9 +757,14 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
             foreach (var key in _pressedKeys)
                 try
                 {
-                    ReleaseInput(() =>
-                        _session!.Composition.Input.DispatchKey(new(KeyCommandKind.Up, key))
-                    );
+                    if (_keyOwners.TryGetValue(key, out var owner))
+                        ReleaseInput(
+                            () =>
+                                _session!.Composition.Input.DispatchKey(
+                                    new(KeyCommandKind.Up, key)
+                                ),
+                            () => owner.Owner == _session!.Composition.Input.FocusedElement
+                        );
                 }
                 catch (Exception error)
                 {
@@ -629,18 +785,21 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
         {
             _pointers.Clear();
             _pressedKeys.Clear();
+            _keyOwners.Clear();
         }
         if (failures.Count != 0)
             throw new AggregateException("Preview input cleanup failed.", failures);
     }
 
-    private void ReleaseInput(Func<InputDispatchResult> release)
+    private void ReleaseInput(Func<InputDispatchResult> release, Func<bool>? stillOwned = null)
     {
         // Only synthetic cleanup releases may reconcile and retry a stale rejection.
         // External commands remain bound to the exact published frame token.
         for (var attempt = 0; attempt < 3; attempt++)
         {
             Project();
+            if (stillOwned?.Invoke() == false)
+                return;
             var result = release();
             if (result.Status == InputDispatchStatus.Delivered)
                 return;
@@ -654,11 +813,51 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
         );
     }
 
+    private bool CompatibleDisplayedInput(RetainedScene scene)
+    {
+        if (
+            _displayedInput is not { } displayed
+            || displayed.Epoch != _admissionEpoch
+            || displayed.Viewport != scene.Viewport
+            || !(
+                ReferenceEquals(displayed.Input, scene.Input)
+                || displayed.Input.SequenceEqual(scene.Input)
+            )
+            || displayed.ScrollBars.Count != scene.ScrollBars.Count
+        )
+            return false;
+        if (ReferenceEquals(displayed.ScrollBars, scene.ScrollBars))
+            return true;
+        for (var index = 0; index < displayed.ScrollBars.Count; index++)
+        {
+            var original = displayed.ScrollBars[index];
+            var current = scene.ScrollBars[index];
+            if (
+                original.Viewport != current.Viewport
+                || original.Track != current.Track
+                || original.Thumb != current.Thumb
+                || original.Maximum != current.Maximum
+                || original.CornerRadius != current.CornerRadius
+            )
+                return false;
+        }
+        return true;
+    }
+
+    private sealed record FrameInputMetadata(
+        long Epoch,
+        LayoutViewport Viewport,
+        IReadOnlyList<RetainedInputElement> Input,
+        IReadOnlyList<RetainedScrollBar> ScrollBars
+    );
+
     private void ThrowIfStopping()
     {
         if (IsStopping)
-            throw new OperationCanceledException("Preview stopped before author startup.");
+            throw new PreviewStoppedBeforeStartupException();
     }
+
+    private sealed class PreviewStoppedBeforeStartupException : OperationCanceledException { }
 
     private void PublishDiagnostics(bool disposed = false) =>
         Volatile.Write(
@@ -690,6 +889,7 @@ internal sealed class PreviewRenderSession : IAsyncDisposable, IApplicationHost
     {
         internal PointerCommand Last { get; set; } = initial;
         internal HashSet<PointerButton> Buttons { get; } = [];
+        internal Dictionary<PointerButton, PreviewFrameToken> Origins { get; } = [];
     }
 
     private sealed class Command<T>(Func<T> callback) : ICommand

@@ -9,7 +9,7 @@ using Lucent.Preview.Protocol;
 namespace Lucent.Preview.Hosting.Tests;
 
 [TestClass]
-public sealed class WorkerContracts
+public sealed partial class WorkerContracts
 {
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 

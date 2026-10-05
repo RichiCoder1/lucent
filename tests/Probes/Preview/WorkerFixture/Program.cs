@@ -7,7 +7,14 @@ using PreviewFixtures;
 // Explicit development bootstrap. No production Main or reflection discovery runs.
 var catalog = new PreviewCatalogBuilder();
 foreach (
-    var id in new[] { "card/empty", "card/fractional", "card/setup-wait", "card/cleanup-fail" }
+    var id in new[]
+    {
+        "card/empty",
+        "card/fractional",
+        "card/setup-wait",
+        "card/cleanup-fail",
+        "card/interactive",
+    }
 )
 {
     var descriptor = new PreviewScenarioDescriptor(
@@ -17,16 +24,19 @@ foreach (
             "card/empty" => "Empty card",
             "card/fractional" => "Fractional scale",
             "card/setup-wait" => "Waiting setup",
+            "card/interactive" => "Interactive card",
             _ => "Cleanup failure",
         },
         new PreviewSource(
             "Lucent.Preview.Fixtures.csproj",
-            "ScenarioCard.lui",
-            "PreviewFixtures.Components.ScenarioCard"
+            id == "card/interactive" ? "InteractiveCard.lui" : "ScenarioCard.lui",
+            id == "card/interactive"
+                ? "PreviewFixtures.Components.InteractiveCard"
+                : "PreviewFixtures.Components.ScenarioCard"
         ),
         new PreviewPresentation(
-            id == "card/fractional"
-                ? new LayoutViewport(160, 120, 1.1f)
+            id == "card/interactive" ? new LayoutViewport(320, 360, 1)
+                : id == "card/fractional" ? new LayoutViewport(160, 120, 1.1f)
                 : new LayoutViewport(320, 240, 1),
             ThemeAppearance.Light,
             static appearance =>
@@ -68,7 +78,10 @@ foreach (
                     + effective.Density.ToString(CultureInfo.InvariantCulture)
             );
         },
-        (content, _) => PreviewFixtures.Components.ScenarioCard(content)
+        (content, _) =>
+            id == "card/interactive"
+                ? PreviewFixtures.Components.InteractiveCard()
+                : PreviewFixtures.Components.ScenarioCard(content)
     );
 }
 return await PreviewWorker.RunAsync(catalog.Build(), args);

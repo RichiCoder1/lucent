@@ -4,6 +4,6 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <None Update="protocol.schema.json;Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="protocol.schema.json;live.schema.json;Fixtures/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

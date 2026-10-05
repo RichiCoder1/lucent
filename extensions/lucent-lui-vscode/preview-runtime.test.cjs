@@ -9,10 +9,16 @@ const { test } = require("node:test");
 const { createPreviewRuntime } = require("./preview-runtime");
 const { createPreviewCoordinator } = require("./preview-coordinator");
 
+// These retained tests explicitly exercise the bounded saved-frame path.
+function snapshotCoordinator(runtime) {
+    return createPreviewCoordinator({ ...runtime, openLive: undefined, isTrusted: () => true, isSupported: () => true });
+}
+
 const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ZkAAAAASUVORK5CYII=", "base64");
 
 async function fixture(t, { uncertain = false, failBuild = false, failWorker = false, logBytes = 0, sdkError,
-    retentionPolicy, onWorkerRequest, uncertainWorker, corruptEcho, catalogScenarios } = {}) {
+    retentionPolicy, onWorkerRequest, uncertainWorker, corruptEcho, catalogScenarios,
+    startSupervise, connectLiveWorker } = {}) {
     const storageDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "lucent-preview-runtime-"));
     t.after(async () => {
         assert.equal(path.dirname(storageDirectory), os.tmpdir());
@@ -87,6 +93,7 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
     const messages = [];
     const makeRuntime = () => createPreviewRuntime({ storageDirectory, supervisorPath: path.join(storageDirectory, "supervisor.exe"),
         buildToolPath: path.join(storageDirectory, "build.exe"), isTrusted: () => trusted, supervise,
+        startSupervise, connectLiveWorker,
         retentionPolicy, log: message => messages.push(message) });
     const request = generation => ({ sessionId: "session", generation: String(generation), requestId: "request-" + generation,
         selection: { projectPath: path.join(storageDirectory, "Fixture.csproj"), targetFramework: "net10.0", scenarioId: "card/empty" } });
@@ -96,7 +103,7 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
 
 test("runtime removes completed generation payloads while the admitted frame remains usable", async t => {
     const f = await fixture(t);
-    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    const coordinator = snapshotCoordinator(f.runtime);
     await coordinator.start({ projectPath: path.join(f.storageDirectory, "Fixture.csproj"), targetFramework: "net10.0", scenarioId: "card/empty" });
     assert.equal(coordinator.state.phase, "current", coordinator.state.diagnostic);
     assert.deepEqual(f.calls, ["build", "verify", "--request", "verify", "--request", "verify"]);
@@ -108,7 +115,7 @@ test("runtime removes completed generation payloads while the admitted frame rem
 
 test("unconfirmed build cleanup retains its generation and blocks later executable work", async t => {
     const f = await fixture(t, { uncertain: true });
-    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    const coordinator = snapshotCoordinator(f.runtime);
     const selection = { projectPath: path.join(f.storageDirectory, "Fixture.csproj"), targetFramework: "net10.0", scenarioId: "card/empty" };
     await coordinator.start(selection);
     await coordinator.start(selection);
@@ -229,7 +236,7 @@ test("history limits survive runtime restart and preserve unknown and external e
 
 test("a failed worker returns a live retained location after its generation is deleted", async t => {
     const f = await fixture(t, { failWorker: true });
-    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    const coordinator = snapshotCoordinator(f.runtime);
     await coordinator.start(f.request(1).selection);
     assert.equal(coordinator.state.phase, "error");
     assert.match(coordinator.state.diagnostic, /Preview worker failed \(completed, exit 19\)/);
@@ -293,7 +300,7 @@ test("runtime catalog cancellation releases confirmed generation before capture 
 
 test("unconfirmed catalog ownership quarantines its entire generation", async t => {
     const f = await fixture(t, { uncertainWorker: "preview-catalog-request" });
-    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    const coordinator = snapshotCoordinator(f.runtime);
     await coordinator.start(f.request(1).selection);
     assert.equal(coordinator.state.phase, "blocked");
     assert.equal(coordinator.state.catalog, undefined);
@@ -304,7 +311,7 @@ test("unconfirmed catalog ownership quarantines its entire generation", async t 
 
 test("capture with a differing effective echo cannot publish pixels", async t => {
     const f = await fixture(t, { corruptEcho: { density: 2 } });
-    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    const coordinator = snapshotCoordinator(f.runtime);
     await coordinator.start(f.request(1).selection);
     assert.equal(coordinator.state.phase, "error");
     assert.match(coordinator.state.diagnostic, /identity/);
@@ -316,7 +323,7 @@ test("capture with a differing effective echo cannot publish pixels", async t =>
 test("compiler mapped locations survive retained build failure after payload deletion", async t => {
     const f = await fixture(t, { failBuild: true, sdkError: request =>
         `${path.join(path.dirname(request.projectPath), "Card.lui")}(12,4): error CS0103: MissingValue is not declared [${request.projectPath}]\n` });
-    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true });
+    const coordinator = snapshotCoordinator(f.runtime);
     await coordinator.start(f.request(1).selection);
     assert.equal(coordinator.state.phase, "error");
     const [diagnostic] = coordinator.state.diagnostics;
@@ -331,4 +338,221 @@ test("compiler mapped locations survive retained build failure after payload del
     const [retained] = await history(f.storageDirectory);
     const sdkLog = retained.summary.logs.find(entry => entry.file === "sdk-publish.stdout.log");
     assert.match(await fs.readFile(path.join(retained.root, sdkLog.file), "utf8"), /CS0103: MissingValue/);
+});
+
+function deferred() {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+}
+
+async function liveFixture(t, { holdStarted = false, connectFailure } = {}) {
+    const finished = deferred();
+    const launched = deferred();
+    const read = deferred();
+    const subsequentRead = deferred();
+    const launchObserved = deferred();
+    const stopObserved = deferred();
+    const connectionObserved = deferred();
+    let readCount = 0;
+    let launch, connection, stopCalls = 0, closes = 0;
+    const f = await fixture(t, {
+        startSupervise(_program, supervisorRequest) {
+            launch = supervisorRequest;
+            launchObserved.resolve();
+            if (!holdStarted) launched.resolve({ protocolVersion: 2, kind: "preview-supervisor-started", requestId: launch.requestId });
+            return { started: launched.promise, completion: finished.promise,
+                stop() { stopCalls++; stopObserved.resolve(); return finished.promise; } };
+        },
+        async connectLiveWorker(options) {
+            connection = options;
+            connectionObserved.resolve();
+            if (connectFailure) throw connectFailure;
+            return {
+                readFrame: () => ++readCount === 1 ? read.promise : subsequentRead.promise,
+                acknowledge: async () => true, input: async () => true, focus: async () => true,
+                close(error = Object.assign(new Error("Preview cancelled."), { code: "cancelled" })) {
+                    closes++;
+                    read.reject(error);
+                    subsequentRead.reject(error);
+                }
+            };
+        }
+    });
+    void read.promise.catch(() => {});
+    void subsequentRead.promise.catch(() => {});
+    const request = f.request(1);
+    const artifact = await f.runtime.build(request);
+    await f.runtime.discover(artifact, request);
+    await f.runtime.verify(artifact);
+    return { ...f, request, artifact, finished, launched, read, launchObserved, stopObserved, connectionObserved,
+        get launch() { return launch; }, get connection() { return connection; },
+        get stopCalls() { return stopCalls; }, get closes() { return closes; } };
+}
+
+const turn = () => new Promise(resolve => setImmediate(resolve));
+
+test("live worker launch joins verified build and exact supervisor ownership before connecting", async t => {
+    const f = await liveFixture(t, { holdStarted: true });
+    const opening = f.runtime.openLive(f.artifact, f.request);
+    await f.launchObserved.promise;
+    assert.equal(f.connection, undefined);
+    assert.equal(f.launch.mode, "live");
+    assert.equal(f.launch.args[0], "--live-request");
+    assert.equal(f.launch.program, f.artifact.report.entryPoint);
+    const launch = JSON.parse(await fs.readFile(f.launch.args[1], "utf8"));
+    assert.deepEqual(Object.keys(launch).sort(), ["kind", "pipeName", "protocolVersion", "request"]);
+    assert.equal(launch.kind, "preview-live-request");
+    assert.match(launch.pipeName, /^lucent-preview-[a-f0-9]{32}$/);
+    assert.deepEqual(await fs.readdir(launch.request.outputDirectory), []);
+    for (const key of ["sessionId", "generation", "requestId"]) assert.equal(launch.request[key], f.request[key]);
+    f.launched.resolve({ protocolVersion: 2, kind: "preview-supervisor-started", requestId: f.launch.requestId });
+    const session = await opening;
+    assert.equal(f.connection.pipeName, launch.pipeName);
+    assert.deepEqual(f.connection.request, launch.request);
+    assert.equal(f.connection.scenarioTitle, "Empty");
+    const stopping = session.stop();
+    f.finished.resolve({ treeReaped: true, status: "cancelled", exitCode: 0 });
+    await stopping;
+    await f.runtime.release(f.artifact);
+});
+
+test("live generation survives concurrent freshness verification and Stop waits for confirmed reaping", async t => {
+    const f = await liveFixture(t);
+    const session = await f.runtime.openLive(f.artifact, f.request);
+    await f.runtime.verify(f.artifact);
+    await assert.rejects(f.runtime.release(f.artifact), /unowned/);
+    const reading = session.readFrame();
+    let stopped = false, readDone = false;
+    const stopping = session.stop().then(value => { stopped = true; return value; });
+    const readResult = reading.then(value => { readDone = true; return value; });
+    await turn();
+    assert.equal(stopped, false);
+    assert.equal(readDone, false);
+    assert.ok(f.stopCalls > 0);
+    assert.ok(f.closes > 0);
+    await assert.rejects(f.runtime.release(f.artifact), /unowned/);
+    f.finished.resolve({ treeReaped: true, status: "cancelled", exitCode: 0 });
+    assert.equal((await stopping).treeReaped, true);
+    assert.equal(await readResult, null);
+    await f.runtime.release(f.artifact);
+    assert.deepEqual(await fs.readdir(f.storageDirectory), []);
+});
+
+test("live startup failure preserves its cause and cannot finish before owned child cleanup", async t => {
+    const failure = new Error("Worker ready identity did not match.");
+    const f = await liveFixture(t, { connectFailure: failure });
+    let settled = false;
+    const opening = f.runtime.openLive(f.artifact, f.request).finally(() => { settled = true; });
+    void opening.catch(() => {});
+    await f.stopObserved.promise;
+    assert.equal(settled, false);
+    await assert.rejects(f.runtime.release(f.artifact), /unowned/);
+    f.finished.resolve({ treeReaped: true, status: "cancelled", exitCode: 0 });
+    await assert.rejects(opening, error => error === failure);
+    await f.runtime.release(f.artifact);
+});
+
+test("unconfirmed live termination quarantines generation even after connection failure", async t => {
+    const f = await liveFixture(t, { connectFailure: new Error("ready mismatch") });
+    const opening = f.runtime.openLive(f.artifact, f.request);
+    void opening.catch(() => {});
+    await f.stopObserved.promise;
+    f.finished.resolve({ treeReaped: false, status: "termination-failed", exitCode: null });
+    await assert.rejects(opening, { code: "termination-failed" });
+    await assert.rejects(f.runtime.release(f.artifact), /unowned/);
+    assert.ok((await fs.stat(f.artifact.root)).isDirectory());
+});
+
+test("unexpected natural live worker completion fails even with a reaped process tree", async t => {
+    const f = await liveFixture(t);
+    const session = await f.runtime.openLive(f.artifact, f.request);
+    f.finished.resolve({ treeReaped: true, status: "completed", exitCode: 0 });
+    await assert.rejects(session.completion, /exited unexpectedly/);
+    await assert.rejects(session.readFrame(), /exited unexpectedly/);
+    await f.runtime.release(f.artifact);
+});
+
+test("transport protocol failures initiate Stop and report only after confirmed reaping", async t => {
+    const f = await liveFixture(t);
+    const session = await f.runtime.openLive(f.artifact, f.request);
+    const error = Object.assign(new Error("invalid live PNG"), { code: "live-protocol" });
+    f.connection.onFailure(error);
+    assert.equal(f.connection.signal.aborted, true);
+    assert.ok(f.stopCalls > 0);
+    await assert.rejects(f.runtime.release(f.artifact), /unowned/);
+    f.finished.resolve({ treeReaped: true, status: "cancelled", exitCode: 0 });
+    await assert.rejects(session.completion, candidate => candidate === error);
+    await f.runtime.release(f.artifact);
+});
+
+test("live worker never launches an artifact whose verified identity has been changed", async t => {
+    const f = await liveFixture(t);
+    f.artifact.report.artifactDigest = "d".repeat(64);
+    await assert.rejects(f.runtime.openLive(f.artifact, f.request), /verified current artifact/);
+    assert.equal(f.launch, undefined);
+    await f.runtime.release(f.artifact);
+});
+
+test("unknown post-start supervision failure reports termination-failed and prevents replacement execution", async t => {
+    const f = await liveFixture(t);
+    await f.runtime.release(f.artifact);
+    const blocked = deferred();
+    const coordinator = createPreviewCoordinator({ ...f.runtime, isTrusted: () => true, isSupported: () => true,
+        onState(state) { if (state.phase === "blocked") blocked.resolve(state); } });
+    const starting = coordinator.start(f.request.selection);
+    await f.connectionObserved.promise;
+    f.read.resolve({ ...f.connection.request, live: true, frameSequence: 1, png: pixel,
+        effectivePresentation: f.connection.effectivePresentation });
+    assert.equal((await starting).phase, "current");
+    f.finished.reject(Object.assign(new Error("supervisor control pipe broke"), { code: "EPIPE" }));
+    const result = await blocked.promise;
+    assert.match(result.diagnostic, /cleanup is unconfirmed/);
+    const calls = [...f.calls];
+    assert.equal((await coordinator.start(f.request.selection)).phase, "blocked");
+    assert.deepEqual(f.calls, calls);
+    const generationRoot = path.dirname(f.launch.args[1]);
+    assert.ok((await fs.stat(generationRoot)).isDirectory());
+    await assert.rejects(f.runtime.release({ root: generationRoot }), /unowned/);
+});
+
+test("intentional Stop preserves cooperative and natural author cleanup failures after confirmed reaping", async t => {
+    for (const termination of ["cooperative", "natural"]) {
+        const f = await liveFixture(t);
+        const session = await f.runtime.openLive(f.artifact, f.request);
+        await fs.writeFile(path.join(f.launch.logDirectory, "stderr.log"), "Author disposal failed\n");
+        const stopping = session.stop();
+        f.finished.resolve({ treeReaped: true, status: "cancelled", exitCode: 17, termination });
+        let failure;
+        await assert.rejects(stopping, error => {
+            failure = error;
+            assert.equal(error.code, "live-cleanup-failed");
+            assert.match(error.message, /cleanup failed \(cancelled, exit 17\).*Logs:/);
+            return true;
+        });
+        const retained = await f.runtime.release(f.artifact, { failed: true, diagnostic: failure.message });
+        assert.match(retained.diagnostic, /cleanup failed.*Retained diagnostics:/);
+        assert.doesNotMatch(retained.diagnostic, /Logs:/);
+        const [bundle] = await history(f.storageDirectory);
+        const stderr = bundle.summary.logs.find(entry => entry.file.startsWith("worker-live-") && entry.file.endsWith("stderr.log"));
+        assert.equal(await fs.readFile(path.join(bundle.root, stderr.file), "utf8"), "Author disposal failed\n");
+    }
+});
+
+test("intentional forced Stop accepts confirmed reaping despite a forced child exit code", async t => {
+    const f = await liveFixture(t);
+    const session = await f.runtime.openLive(f.artifact, f.request);
+    const stopping = session.stop();
+    f.finished.resolve({ treeReaped: true, status: "cancelled", exitCode: 1, termination: "forced" });
+    assert.equal((await stopping).treeReaped, true);
+    await f.runtime.release(f.artifact);
+});
+
+test("a concurrent Stop does not hide a forced worker output-limit failure", async t => {
+    const f = await liveFixture(t);
+    const session = await f.runtime.openLive(f.artifact, f.request);
+    const stopping = session.stop();
+    f.finished.resolve({ treeReaped: true, status: "output-limit", exitCode: 1, termination: "forced" });
+    await assert.rejects(stopping, error => error.code === "live-cleanup-failed" && /output-limit/.test(error.message));
+    await f.runtime.release(f.artifact);
 });

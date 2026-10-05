@@ -136,6 +136,9 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
 
     async function action(message) {
         if (disposed || !panel || panel.visible === false) return;
+        if (message.kind === "frameDisplayed") { await coordinator?.acknowledge(message.frame); return; }
+        if (message.kind === "input") { await coordinator?.input(message.frame, message.input); return; }
+        if (message.kind === "focus") { await coordinator?.focus(message.frame, message.focused); return; }
         if (message.kind === "zoom") { zoom = message.zoom; updateView(); return; }
         if (message.kind === "stop") { await stop(); return; }
         if (message.kind === "start") { await start(); return; }
@@ -277,6 +280,7 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
         vscode.commands.registerCommand("lucentLui.startPreview", () => start().catch(error => vscode.window.showErrorMessage(error.message))),
         vscode.commands.registerCommand("lucentLui.refreshPreview", () => launch()),
         vscode.commands.registerCommand("lucentLui.stopPreview", stop),
+        vscode.commands.registerCommand("lucentLui.releasePreviewInput", () => view?.releaseInput()),
         { dispose() { disposed = true; running = false; clearWatchers(); view?.dispose(); panel?.dispose(); void coordinator?.dispose().catch(error => log(error.message)); output?.dispose(); } }
     );
     if (vscode.workspace.onDidChangeWorkspaceFolders) context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(event => {

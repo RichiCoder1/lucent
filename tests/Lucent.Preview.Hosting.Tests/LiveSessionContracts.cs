@@ -287,6 +287,350 @@ public sealed class LiveSessionContracts
     }
 
     [TestMethod]
+    public async Task StaleOwnedReleaseRoutesOnlySurvivingCaptureAndOriginalKeyOwner()
+    {
+        var fixture = new Fixture();
+        var behavior = new InputProbe();
+        var live = await StartAsync(Scenario(fixture, behavior: behavior), Request());
+        var first = await Frame(live);
+        Assert.IsTrue(await live.SetFocusAsync(live.Identity, true));
+        Assert.AreEqual(
+            InputDispatchStatus.Delivered,
+            (
+                await live.PointerAsync(
+                    first.Token,
+                    1,
+                    new(PointerCommandKind.Down, 7, 20, 20, PointerButton.Primary)
+                )
+            )!.Status
+        );
+        await live.AcknowledgeAsync(first.Token);
+        var second = await Frame(live);
+        Assert.AreEqual(
+            InputDispatchStatus.Delivered,
+            (await live.KeyAsync(second.Token, 2, new(KeyCommandKind.Down, Key.A)))!.Status
+        );
+        Assert.AreEqual(
+            InputDispatchStatus.Delivered,
+            (await live.KeyAsync(second.Token, 3, new(KeyCommandKind.Down, Key.C)))!.Status
+        );
+        Assert.AreEqual(
+            InputDispatchStatus.Delivered,
+            (
+                await live.PointerAsync(
+                    second.Token,
+                    4,
+                    new(PointerCommandKind.Down, 9, 30, 30, PointerButton.Primary)
+                )
+            )!.Status
+        );
+        await live.AcknowledgeAsync(second.Token);
+        var held = await Frame(live);
+        Assert.IsNull(
+            await live.PointerAsync(
+                first.Token with
+                {
+                    Session = first.Token.Session with { Generation = "foreign" },
+                },
+                5,
+                new(PointerCommandKind.Up, 7, 20, 20, PointerButton.Primary)
+            )
+        );
+        Assert.IsNull(
+            await live.PointerAsync(
+                held.Token with
+                {
+                    Sequence = held.Token.Sequence + 1,
+                },
+                5,
+                new(PointerCommandKind.Up, 7, 20, 20, PointerButton.Primary)
+            )
+        );
+        Assert.IsNull(
+            await live.PointerAsync(
+                first.Token,
+                5,
+                new(PointerCommandKind.Up, 8, 20, 20, PointerButton.Primary)
+            )
+        );
+        Assert.AreEqual(
+            0,
+            behavior.Cancels,
+            "Foreign, future and unowned releases cannot cancel the held pointer."
+        );
+        // A producer can publish a new frame before the consumer displays it. Release
+        // the already owned sequence through its surviving capture, never a new hit target.
+        Assert.IsNull(
+            await live.PointerAsync(
+                first.Token,
+                6,
+                new(PointerCommandKind.Up, 7, 20, 20, PointerButton.Primary)
+            )
+        );
+        Assert.IsNull(await live.KeyAsync(second.Token, 7, new(KeyCommandKind.Up, Key.A)));
+        Assert.AreEqual(0, behavior.Cancels);
+        Assert.AreEqual(1, behavior.KeyUps);
+        Assert.AreEqual(
+            1,
+            behavior.PointerUps,
+            "Compatible captured release must reach the original owner."
+        );
+        CollectionAssert.AreEquivalent(new[] { Key.C }, behavior.HeldKeys.ToArray());
+        await live.AcknowledgeAsync(held.Token);
+        _ = await Frame(live);
+        Assert.AreEqual(
+            1,
+            live.Diagnostics.ActivePointers,
+            "Another held pointer must survive scoped release."
+        );
+        Assert.AreEqual(
+            1,
+            live.Diagnostics.PressedKeys,
+            "Another held key must survive scoped release."
+        );
+        await live.StopAsync();
+        Assert.AreEqual(1, behavior.Cancels);
+        Assert.AreEqual(2, behavior.KeyUps);
+    }
+
+    [TestMethod]
+    public async Task StaleKeyReleaseCannotInvokeReplacementFocusOwner()
+    {
+        var fixture = new Fixture();
+        var original = new InputProbe();
+        var replacement = new InputProbe();
+        var live = await StartAsync(Scenario(fixture, behavior: original), Request());
+        var first = await Frame(live);
+        await live.PointerAsync(
+            first.Token,
+            1,
+            new(PointerCommandKind.Down, 7, 20, 20, PointerButton.Primary)
+        );
+        await live.AcknowledgeAsync(first.Token);
+        var focused = await Frame(live);
+        await live.KeyAsync(focused.Token, 2, new(KeyCommandKind.Down, Key.A));
+        var added = NewCompletion();
+        fixture.Scope!.Post(() =>
+        {
+            var child = fixture.Composition!.Child(fixture.Root!, "replacement-focus");
+            child.Present(fixture.Theme!, author: Style.Empty.Width(160).Height(20));
+            child.AttachBehaviors(replacement);
+            added.SetResult();
+        });
+        await added.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await live.AcknowledgeAsync(focused.Token);
+        var both = await Frame(live);
+        await live.KeyAsync(both.Token, 3, new(KeyCommandKind.Down, Key.Tab));
+        await live.AcknowledgeAsync(both.Token);
+        var changed = await Frame(live);
+        Assert.AreEqual(
+            1,
+            replacement.FocusGains,
+            "The fixture must actually replace the original focus owner."
+        );
+        Assert.IsNull(await live.KeyAsync(focused.Token, 4, new(KeyCommandKind.Up, Key.A)));
+        Assert.AreEqual(
+            0,
+            replacement.KeyUps,
+            "Stale release must not invoke the new focus owner's author callbacks."
+        );
+        await live.AcknowledgeAsync(changed.Token);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task KeyReleaseCannotInvokeFocusOwnerChangedSynchronouslyByDown(bool blur)
+    {
+        var fixture = new Fixture();
+        var original = new InputProbe();
+        var replacement = new InputProbe();
+        var live = await StartAsync(Scenario(fixture, behavior: original), Request());
+        var first = await Frame(live);
+        await live.PointerAsync(
+            first.Token,
+            1,
+            new(PointerCommandKind.Down, 7, 20, 20, PointerButton.Primary)
+        );
+        await live.AcknowledgeAsync(first.Token);
+        var focused = await Frame(live);
+        var added = NewCompletion();
+        fixture.Scope!.Post(() =>
+        {
+            var child = fixture.Composition!.Child(fixture.Root!, "replacement-focus");
+            child.Present(fixture.Theme!, author: Style.Empty.Width(160).Height(20));
+            child.AttachBehaviors(replacement);
+            added.SetResult();
+        });
+        await added.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await live.AcknowledgeAsync(focused.Token);
+        var both = await Frame(live);
+        var down = await live.KeyAsync(both.Token, 2, new(KeyCommandKind.Down, Key.Tab));
+        Assert.AreEqual(InputDispatchStatus.Delivered, down!.Status);
+        Assert.IsTrue(original.HeldKeys.Contains(Key.Tab));
+        Assert.AreEqual(
+            1,
+            replacement.FocusGains,
+            "Tab down must synchronously move focus before this frame is acknowledged."
+        );
+        if (blur)
+            await live.SetFocusAsync(live.Identity, false);
+        else
+            Assert.IsNull(await live.KeyAsync(both.Token, 3, new(KeyCommandKind.Up, Key.Tab)));
+        Assert.AreEqual(0, replacement.KeyUps, "Release must not invoke the new focus owner.");
+        Assert.AreEqual(0, original.KeyUps, "Release cannot route through a lost focus owner.");
+        await live.StopAsync();
+        Assert.AreEqual(0, replacement.KeyUps, "Stop must not replay the abandoned ownership.");
+        Assert.AreEqual(0, live.Diagnostics.PressedKeys);
+    }
+
+    [TestMethod]
+    public async Task DisplayAcknowledgedPointerDownSurvivesPendingHoverPaintWithoutLosingClick()
+    {
+        var fixture = new Fixture();
+        var live = await StartAsync(Scenario(fixture, button: true), Request());
+        var displayed = await Frame(live);
+        await live.AcknowledgeAsync(displayed.Token);
+        var hover = await live.PointerAsync(
+            displayed.Token,
+            1,
+            new(PointerCommandKind.Move, 0, 20, 20)
+        );
+        Assert.AreEqual(InputDispatchStatus.Delivered, hover!.Status);
+        var pending = await Frame(live);
+        Assert.AreEqual(displayed.Token.Sequence + 1, pending.Token.Sequence);
+        await live.SetFocusAsync(live.Identity, true);
+        var down = await live.PointerAsync(
+            displayed.Token,
+            2,
+            new(PointerCommandKind.Down, 0, 20, 20, PointerButton.Primary)
+        );
+        Assert.AreEqual(InputDispatchStatus.Delivered, down!.Status);
+        Assert.IsNull(
+            await live.PointerAsync(
+                displayed.Token,
+                3,
+                new(PointerCommandKind.Down, 0, 20, 20, PointerButton.Secondary)
+            ),
+            "Compatible old display metadata cannot start another down on an owned pointer."
+        );
+        Assert.IsNull(
+            await live.PointerAsync(
+                displayed.Token,
+                4,
+                new(PointerCommandKind.Up, 0, 20, 20, PointerButton.Primary)
+            )
+        );
+        Assert.AreEqual(
+            1,
+            fixture.TargetInvocations,
+            "The original stock button must invoke once through hover-frame backpressure."
+        );
+        await live.AcknowledgeAsync(pending.Token);
+        _ = await Frame(live);
+    }
+
+    [TestMethod]
+    public async Task CompatibleDisplayedAdmissionIsLimitedToPointerDownAndWheelAndExpiresOnNewDisplayAck()
+    {
+        var fixture = new Fixture();
+        var live = await StartAsync(Scenario(fixture, scroll: true), Request());
+        var displayed = await Frame(live);
+        await live.AcknowledgeAsync(displayed.Token);
+        await live.PointerAsync(displayed.Token, 1, new(PointerCommandKind.Move, 0, 20, 20));
+        var pending = await Frame(live);
+        Assert.IsNull(
+            await live.PointerAsync(displayed.Token, 2, new(PointerCommandKind.Move, 0, 20, 20))
+        );
+        Assert.IsNull(await live.KeyAsync(displayed.Token, 3, new(KeyCommandKind.Down, Key.Tab)));
+        Assert.IsNull(await live.TextAsync(displayed.Token, 4, new(TextInputKind.Commit, "stale")));
+        Assert.AreEqual(
+            InputDispatchStatus.Delivered,
+            (await live.WheelAsync(displayed.Token, 5, new(20, 20, 0, 30)))!.Status
+        );
+        await live.AcknowledgeAsync(pending.Token);
+        var scrolled = await Frame(live);
+        Assert.IsNull(
+            await live.WheelAsync(displayed.Token, 6, new(20, 20, 0, 30)),
+            "A superseded display acknowledgment cannot authorize a later wheel."
+        );
+        await live.AcknowledgeAsync(scrolled.Token);
+        Assert.IsNull(
+            await live.PointerAsync(
+                displayed.Token,
+                7,
+                new(PointerCommandKind.Down, 0, 20, 20, PointerButton.Primary)
+            )
+        );
+    }
+
+    [TestMethod]
+    [DataRow("geometry")]
+    [DataRow("target")]
+    [DataRow("scroll")]
+    public async Task DisplayedFrameCannotAuthorizePointerDownOrWheelAfterInputProjectionChanged(
+        string change
+    )
+    {
+        var fixture = new Fixture();
+        var live = await StartAsync(
+            Scenario(fixture, movingTarget: change == "geometry", scroll: change == "scroll"),
+            Request()
+        );
+        var displayed = await Frame(live);
+        await live.AcknowledgeAsync(displayed.Token);
+        if (change == "geometry")
+            await fixture.SetAsync(1);
+        else
+        {
+            var done = NewCompletion();
+            fixture.Scope!.Post(() =>
+            {
+                if (change == "scroll")
+                    fixture.ScrollViewport!.Offset = new(0, 40);
+                else
+                {
+                    var replacement = fixture.Composition!.Child(fixture.Root!, "new-hit-owner");
+                    replacement.Present(fixture.Theme!, author: Style.Empty.Width(40).Height(20));
+                    replacement.AttachBehaviors(new TargetProbe(fixture));
+                }
+                done.SetResult();
+            });
+            await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        var pending = await Frame(live);
+        Assert.IsNull(
+            await live.PointerAsync(
+                displayed.Token,
+                1,
+                new(PointerCommandKind.Down, 0, 20, 10, PointerButton.Primary)
+            )
+        );
+        Assert.IsNull(await live.WheelAsync(displayed.Token, 2, new(20, 10, 0, 30)));
+        Assert.AreEqual(0, fixture.TargetInvocations);
+        await live.AcknowledgeAsync(pending.Token);
+    }
+
+    [TestMethod]
+    public async Task FocusGainPreservesFreshBlurFrameForItsInitiatingPointerDown()
+    {
+        var fixture = new Fixture();
+        var live = await StartAsync(Scenario(fixture, behavior: new InputProbe()), Request());
+        var first = await Frame(live);
+        await live.SetFocusAsync(live.Identity, false);
+        await live.AcknowledgeAsync(first.Token);
+        var blurred = await Frame(live);
+        await live.AcknowledgeAsync(blurred.Token);
+        Assert.IsTrue(await live.SetFocusAsync(live.Identity, true));
+        var delivered = await live.PointerAsync(
+            blurred.Token,
+            1,
+            new(PointerCommandKind.Down, 7, 20, 20, PointerButton.Primary)
+        );
+        Assert.AreEqual(InputDispatchStatus.Delivered, delivered!.Status);
+    }
+
+    [TestMethod]
     public async Task ExplicitButtonReleaseClearsOnlyItsOwnPointerBookkeeping()
     {
         var fixture = new Fixture();
@@ -663,6 +1007,8 @@ public sealed class LiveSessionContracts
         Behavior? behavior = null,
         bool editor = false,
         bool movingTarget = false,
+        bool button = false,
+        bool scroll = false,
         Func<ThemeAppearance, Theme>? themeFactory = null
     ) =>
         new PreviewCatalogBuilder()
@@ -694,6 +1040,26 @@ public sealed class LiveSessionContracts
                     data.Composition = session.Composition;
                     data.Value = session.Scope.Signal(0, "live-paint");
                     rootReady?.Invoke(session);
+                    if (button)
+                        return Components.Button(
+                            "Increment",
+                            () => data.TargetInvocations++,
+                            Style.Empty.Width(160).Height(40)
+                        );
+                    if (scroll)
+                    {
+                        data.ScrollViewport = new(session.Scope);
+                        return Components.ScrollViewport(
+                            [
+                                Components.Text(
+                                    "Scroll content",
+                                    Style.Empty.Height(300).MainShrink(0)
+                                ),
+                            ],
+                            style: Style.Empty.Width(160).Height(80),
+                            viewport: data.ScrollViewport
+                        );
+                    }
                     if (editor)
                         return Components.TextField(
                             "seed",
@@ -800,6 +1166,7 @@ public sealed class LiveSessionContracts
         internal TimeProvider? Clock;
         internal DateTimeOffset InitialUtc;
         internal ITimer? Timer;
+        internal ViewportState? ScrollViewport;
 
         internal Task SetAsync(int value)
         {
@@ -831,6 +1198,8 @@ public sealed class LiveSessionContracts
         internal bool FailCancel;
         internal int Cancels;
         internal int KeyUps;
+        internal int PointerUps;
+        internal int FocusGains;
         internal int InputThread;
         internal SynchronizationContext? AttachedContext;
         internal SynchronizationContext? CancelContext;
@@ -851,6 +1220,11 @@ public sealed class LiveSessionContracts
                 SemanticDeclaration.Create(SemanticRole.Group, "Input owner").Build()
             );
             context.MakeFocusable();
+            context.OnFocus(route =>
+            {
+                if (route.Command.Kind == FocusCommandKind.Gained)
+                    FocusGains++;
+            });
             context.OnPointer(route =>
             {
                 InputThread = Environment.CurrentManagedThreadId;
@@ -868,6 +1242,8 @@ public sealed class LiveSessionContracts
                     if (FailCancel)
                         throw new InvalidOperationException("pointer cleanup failed");
                 }
+                if (route.Command.Kind == PointerCommandKind.Up)
+                    PointerUps++;
             });
             context.OnKey(route =>
             {

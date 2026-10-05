@@ -9,11 +9,11 @@ using SkiaSharp;
 
 namespace Lucent.Preview.Hosting;
 
-/// <summary>One-shot explicit development host; never discovers or executes a production entry point.</summary>
-public static class PreviewWorker
+/// <summary>Explicit development host for bounded capture or opt-in live sessions.</summary>
+public static partial class PreviewWorker
 {
-    /// <summary>Captures one compiled scenario from --request absolute.json, publishing success after cleanup.</summary>
-    /// <remarks>This is a one-shot process entry-point lifetime, not an in-process session API.
+    /// <summary>Dispatches --request or --live-request with an absolute local JSON launch file.</summary>
+    /// <remarks>This is a supervised process entry-point lifetime, not an in-process session API.
     /// The background parent reader ends with the process. Noncooperative author code requires
     /// the external supervisor's hard process deadline.</remarks>
     public static async Task<int> RunAsync(
@@ -28,6 +28,8 @@ public static class PreviewWorker
         if (options.Timeout <= TimeSpan.Zero || options.Timeout > TimeSpan.FromMinutes(1))
             throw new ArgumentOutOfRangeException(nameof(options));
         ArgumentNullException.ThrowIfNull(options.ParentInput);
+        if (args.Length == 2 && args[0] == "--live-request")
+            return await RunLiveAsync(catalog, args[1], options).ConfigureAwait(false);
         using var cancellation = new CancellationTokenSource(options.Timeout);
         var parentMonitor = new ParentMonitor(options.ParentInput, cancellation);
         parentMonitor.Start();

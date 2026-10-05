@@ -24,13 +24,13 @@ roadmap files, issues, release claims or runtime contracts were changed here.
 Implementation subsequently reported the Stop/settings fix in local `132fc85a`.
 Treat that audit finding as baseline history and recheck before implementing it
 again. Implementation also reported that unsaved-source compiler checks have not
-passed stock-path/configuration fidelity. The Next slice remains a proposal;
-unsaved support is not delivered or proven by this design. Later Implementation
-updates report the existing explicit-fixture panel controls checked and a retained
-live host under review. Compiler adapter parity remains unresolved (including
-suppressed warning behavior and generated checksums). A possible saved-source-first
-delivery is awaiting the owner's answer; this design does not assume that sequencing
-decision or substitute this mockup for those implementation checks.
+passed stock-path/configuration fidelity. Unsaved support is not delivered or
+proven by this design. The October 5 implementation joins the retained live host,
+supervised transport and editor input; its execution record owns verification.
+Compiler adapter parity remains unresolved (including suppressed warning behavior
+and generated checksums). The owner accepted saved-source interaction first, with
+unsaved fidelity retained in #330. This mockup does not substitute for
+implementation checks.
 
 ## Product outcome and boundaries
 
@@ -44,7 +44,7 @@ Project execution, frame freshness and keyboard ownership remain explicit.
 | Delivery | Established or proposed capability |
 | --- | --- |
 | Existing #231 | Actual compiled Skia PNG, registered scenarios, presentation controls, mapped diagnostics, saved-file rebuilds, bounded delivery and process cleanup. Image is noninteractive. |
-| Proposed next #232 | Supported unsaved C#/.lui snapshots, persistent rendering, current-generation pointer/wheel/key/committed-text input, each gated on implementation proof. Source changes still rebuild/restart and reset state. |
+| Implemented #232 | Saved-source persistent rendering and bounded pointer/wheel/key/committed-text input; see the [execution record](../../plans/native-preview-interactive.md) for automated and actual-editor proof. Source changes still rebuild/restart and reset state. Unsaved snapshots are tracked separately in #330. |
 | Proposed authoring/tooling slice | Active-file association, follow/pin, typed automatic defaults, optional `.lui` preview declarations and generated development host. Reuses existing catalogs underneath. |
 | #233 | Compatible packaged tools, generated-host setup and representative external-consumer proof for ordinary app and library projects. |
 | Later #243 | Runtime inspection, read-only element details and verified element source origins. Hide these controls until supported. |
@@ -217,7 +217,7 @@ states without weakening backend invariants.
 | No target | “Open a .lui component to preview” | Do not redirect to an unrelated global catalog. Retain a prior target when non-component files take focus. |
 | Updating / rendering | Requested change in status; previous frame keeps its provenance | Revoke input immediately. Superseding selections are allowed while running. Stop works even with an unacknowledged frame. |
 | Current image #231 | “Ready · saved source”; persistent image-only help | No input. Unsaved source is not included; never imply editor-buffer freshness. |
-| Current interactive #232 | “Ready · editor snapshot” only after actual supported overlays are accepted | Eligible for deliberate input capture; not automatically capturing. |
+| Current interactive #232 | “Ready · saved source”; “editor snapshot” is reserved for future verified unsaved support under #330 | Eligible for deliberate input capture; not automatically capturing. |
 | Build/preview failure | First useful error plus Open source when mapped; previous frame if any | Retry and Output; expandable remaining diagnostics. No stale input. |
 | Display failure | “The preview could not be displayed” | Host-owned display reconnect/recovery. Accepted worker pixels alone do not prove visible current content. |
 | Stopping / stopped | Cleanup progress, then stopped; retained image read-only | Stage controls only once safely stopped. Explicit Start required. |
@@ -325,13 +325,13 @@ is the explicit switch back to app behavior.
 | A | Compact chrome, presentation disclosure, explicit saved-source label, meaningful empty/error states, one reset affordance | Existing panel HTML/view code; keep CSP and allowlisted actions. |
 | B | Accepted component/variant provenance, whole-form validation, stable drafts/DOM, Show Output, component-scoped variant picker | Panel snapshot and controller actions. Map actual effective worker data; do not synthesize it from selection. |
 | C | Sticky stopped intent, confirmed stopping state, display-loss recovery | Existing coordinator/controller lifecycle. Requires focused tests; not a cosmetic patch. |
-| D | Fit mode and supported-input currentness/capture UX | Frontend view model plus #232 live owner, immutable overlays and input protocol. Prove ownership before enabling controls. |
+| D | Fit mode and supported-input currentness/capture UX | Frontend view model plus #232 live owner, verified saved-source identities and input protocol. Unsaved overlays remain #330. |
 | E | Active-file follow/pin, automatic typed defaults, optional data/variant authoring, generated host and packaged consumer path | New compiler/tooling slice alongside #232/#233; detailed increments in component-preview-authoring.md. No project parsing or activation inference in webview. |
 | F | Inspect mode/details/source navigation | #243 identities, runtime tree/hit-test/source-origin support. |
 
 Closed #231 is a capability baseline; this table does not reopen or mutate tickets.
 Implementation can place small panel refinements alongside #232/#233 without
-blocking overlay/session feasibility on cosmetic changes. Increment E is essential
+blocking session correctness on cosmetic changes. Increment E is essential
 to the final editor experience and must be tracked as substantive authoring work,
 not silently dropped because the existing explicit-fixture path works. The audit maps all
 existing action routes. Additional view actions require bounded host validation,
@@ -379,8 +379,8 @@ design, not a replacement for native input, lifecycle or accessibility proof.
 - [VS Code keyboard accessibility](https://code.visualstudio.com/docs/configure/accessibility/accessibility#_tab-navigation):
   workbench focus commands and Tab Moves Focus inform the proposed capture boundary.
 
-The component-first product direction is settled. The separate saved-source-first
-versus compiler-adapter sequencing question remains pending. Shortcut qualification,
+The component-first product direction and saved-source-first delivery are settled.
+Unsaved compilation remains the separate #330 investigation. Shortcut qualification,
 overlay fidelity, source-origin validation, typed activation, preview-profile
 exclusion, display readiness and lifecycle completion remain engineering proof
 obligations; they do not pass by product choice.

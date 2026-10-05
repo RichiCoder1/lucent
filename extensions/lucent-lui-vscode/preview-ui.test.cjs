@@ -7,7 +7,7 @@ const os = require("node:os");
 const { test } = require("node:test");
 const { createPreviewCommands } = require("./preview-ui");
 
-function fixture({ release = async () => {}, inputReport, failure, renderFailure, folderPath } = {}) {
+function fixture({ release = async () => {}, inputReport, failure, renderFailure, folderPath, openLive } = {}) {
     const commands = new Map();
     const timers = new Map();
     const watchers = [];
@@ -84,7 +84,7 @@ function fixture({ release = async () => {}, inputReport, failure, renderFailure
                 effectivePresentation: { logicalWidth: 320, logicalHeight: 240, scale: 1, colorScheme: "light", contrast: "normal", density: 1,
                     culture: "", uiCulture: "", initialTime: "2024-01-01T00:00:00.0000000+00:00", ...request.selection.presentation },
                 png: Buffer.from("image"), logicalWidth: 320 };
-            }, release
+            }, release, openLive: openLive ? (_artifact, request, signal) => openLive(request, signal) : undefined
             };
         }
     });
@@ -96,6 +96,43 @@ function fixture({ release = async () => {}, inputReport, failure, renderFailure
         async runTimers() { for (const callback of timers.values()) callback(); timers.clear(); await new Promise(resolve => setImmediate(resolve)); },
         close() { closed(); } };
 }
+
+test("panel display and input callbacks reach the retained live owner without rebuilding", async t => {
+    const calls = [];
+    let finish;
+    const completion = new Promise(resolve => { finish = resolve; });
+    const f = fixture({ openLive: async request => {
+        let read = false;
+        const frame = Object.freeze({ ...request, scenarioId: request.selection.scenarioId, frameSequence: 1, live: true,
+            effectivePresentation: { logicalWidth: 320, logicalHeight: 240, scale: 1, colorScheme: "light", contrast: "normal", density: 1,
+                culture: "", uiCulture: "", initialTime: "2024-01-01T00:00:00.0000000+00:00" }, png: Buffer.from("image") });
+        return {
+            completion,
+            readFrame(signal) {
+                if (!read) { read = true; return Promise.resolve(frame); }
+                return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+            },
+            async acknowledge(value) { assert.equal(value, frame); calls.push("display"); return true; },
+            async input(value, event) { assert.equal(value, frame); calls.push(event); return true; },
+            async focus(value) { calls.push(["focus", value]); return true; },
+            stop() { finish({ treeReaped: true }); return completion; }
+        };
+    } });
+    t.after(() => f.commands.get("lucentLui.stopPreview")());
+    await f.commands.get("lucentLui.startPreview")();
+    const frame = f.view.state.frame;
+    assert.equal(f.view.state.interactive, true);
+    await f.action({ kind: "frameDisplayed", frame });
+    await f.action({ kind: "focus", frame, focused: true });
+    await f.action({ kind: "input", frame, input: { type: "text", text: "Hello" } });
+    await f.action({ kind: "focus", frame, focused: false });
+    assert.deepEqual(calls, ["display", ["focus", true], { type: "text", text: "Hello" }, ["focus", false]]);
+    assert.equal(f.builds.length, 1);
+    await f.commands.get("lucentLui.stopPreview")();
+    await f.action({ kind: "input", frame, input: { type: "text", text: "stale" } });
+    assert.equal(calls.length, 4);
+    assert.equal(f.view.state.interactive, false);
+});
 
 test("preview registration is inert and trust or remote boundaries prevent execution", async () => {
     const f = fixture();

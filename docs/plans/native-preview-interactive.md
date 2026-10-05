@@ -1,9 +1,18 @@
 # Unsaved and interactive native preview
 
 Execution of [#232](https://github.com/RichiCoder1/lucent/issues/232), following
-the [saved-file panel](native-preview-panel.md). The four implementation slices
+the [saved-file panel](native-preview-panel.md). The implementation slices
 are recorded in the [roadmap](../ROADMAP.md#finish-232-in-reviewable-slices).
 This record separates feasibility evidence from delivered interactive behavior.
+
+## Accepted delivery scope
+
+On October 4 the owner accepted saved-source interactive preview first. #232
+now owns the retained host, supervised live session and editor interaction.
+[#330](https://github.com/RichiCoder1/lucent/issues/330) separately preserves the
+unsaved compiler-fidelity investigation and its original acceptance. It does
+not block saved-source #232 or package delivery #233. No failed compiler adapter
+is integrated; preview never saves a buffer on the user's behalf.
 
 ## Original-path compilation: staged stock inputs fail fidelity
 
@@ -31,7 +40,7 @@ the failed path/configuration contract makes expansion to that next proof
 unnecessary for rejecting this substitution approach. Mapped diagnostics alone
 cannot establish original source identity.
 
-Unsaved preview remains disabled. The next decision is a bounded compiler adapter
+Unsaved preview remains disabled. The separate #330 investigation needs a bounded compiler adapter
 design that preserves authoritative SDK arguments and original-path content in
 both preparation and final compilation. A broad `MSBuildWorkspace.Emit` path or
 reflection into compiler internals is not an accepted replacement. Public API
@@ -100,9 +109,9 @@ EOF are independent of frame delivery, and output budgets remain enforced.
 Unconfirmed cleanup retains quarantine. The editor adapter exposes started,
 completion and Stop separately; its bounded adapter still waits for completion.
 
-This process boundary alone does not implement a live renderer, named-pipe
-worker protocol, frame acknowledgments, input forwarding or unsaved builds.
-Those remain incomplete under #232.
+That process-boundary checkpoint preceded the integrated renderer, named-pipe
+worker protocol, frame acknowledgments and input forwarding recorded below.
+Unsaved compilation remains separate under #330.
 
 The supervisor slice passes 13 native contracts and 11 JavaScript process
 contracts; the complete editor suite passes 183. The warning-clean native build
@@ -160,7 +169,8 @@ compiler adapter. The exact report and retained logs are located by
 Do not integrate the adapter, disable SDK analyzers or globally lower warning
 severity. The recommendation is to continue saved-source interactive preview
 while deciding whether unsaved support warrants a maintained compiler frontend.
-The owner has been asked to choose that scope; #232 remains open meanwhile.
+The owner accepted that saved-source delivery sequence. #330 retains the compiler
+investigation; the integrated live transport and editor proof follow below.
 
 ## Internal live host implementation
 
@@ -203,9 +213,9 @@ recheck resolves all six findings against the frozen hashes; it does not claim
 new execution or transport verification. It is recorded separately in the
 [review record](../../advisor-plans/reviews/2026-10-04-live-preview-host-review.md).
 
-This host does not yet provide the live worker protocol, editor input forwarding,
-active-file discovery or unsaved compilation. It is an independently checked
-building block, not completion of #232.
+That host checkpoint preceded the live worker protocol and editor input
+forwarding described below. Active-file discovery and unsaved compilation remain
+separate work.
 
 ## Design review correction
 
@@ -215,3 +225,70 @@ first reproduces that defect, then verifies that settings remain editable while
 stopped and are used only by an explicit restart. Hide/show also preserves Stop.
 The full controller suite passes 11 contracts. Broader presentation improvements
 belong to the native preview design handoff; they are not implied by this fix.
+
+## Saved-source live integration
+
+The October 5 implementation joins verified SDK artifacts to the retained host
+through a current-user named pipe. The public worker entry accepts a live request
+with bounded strict JSON metadata, matching session/build/presentation identities
+and hash-checked PNG payloads. One image may await actual webview display; pending
+state coalesces without collecting images. Parent Stop and process supervision
+remain independent of that frame traffic. Reaping, author cleanup success and
+readiness are separate outcomes; failed cleanup retains diagnostics, while
+unknown process ownership blocks replacement and directory release.
+
+The editor forwards bounded pointer, wheel, key and committed-text events.
+Pointer releases retain their original Down owner through paint updates. Core's
+capture-only release path cannot hit another element after the original owner
+disappears. Key releases cannot activate a replacement focus owner. For a press
+or wheel event racing hover paint, native admission accepts only the last
+display-acknowledged frame with identical ordered input records, viewport and
+scrollbar geometry. New geometry or targets reject it; key/text/move admission
+stays tied to the current frame. Only acknowledged/current input metadata is
+retained, and focus loss invalidates that compatibility. No old scene is restored.
+
+Actual editor testing exposed two first-click failures: showing the Leave button
+shifted the image, and hover could publish a frame before the following press.
+Toolbar/caption layout now stays fixed across entry/exit. The external regression
+first reproduced the missing counter activation, then passed after the bounded
+compatibility correction, asserting the complete counter sequence is exactly
+`[1]`. It also changes compiled `.lui` state through text input and proves
+cooperative Stop with an unacknowledged final image. Its fixture identity values
+are explicit transport-test values, not SDK build attestation; the actual editor
+journey owns the verified-build integration proof.
+
+Verification includes 239 editor contracts, 53 Hosting contracts, 17 Core input
+contracts, a compiled Core API metadata preflight, warning-clean affected builds
+and pinned C#/.lui formatting. The five initial integration review findings,
+verifier-failure precedence, cleanup cancellation classification and the hover
+regression retain their independent failing evidence. Current local evidence is
+located by `artifacts/preview232-native-worker-evidence.md`,
+`artifacts/preview232-live-integration-location.txt`,
+`artifacts/preview232-live-editor-final.log` and
+`artifacts/preview232-editor-walkthrough.md`.
+
+Final review also corrected startup cancellation and key ownership. A Stop during
+setup exits successfully only after clean author cleanup. An authored cleanup
+`OperationCanceledException`, including one carrying the same cancellation token,
+remains a failure. Current-frame and synthetic key releases both retain the
+original focused owner rather than activating a replacement after Tab navigation.
+
+The final VS Code development-host walkthrough verified text changing both the
+field and compiled component state, Shift+Tab navigation and Space activation.
+The corrected pointer candidate already proved first-click activation at 100%
+and 50% zoom without shifting the canvas, wheel scrolling, Shift+Escape and F6
+escape. A saved whitespace change in the isolated project made the old frame
+read-only, rebuilt through the real SDK, and reset counter/text in the accepted
+replacement. Stop removed the generation directory. The isolated editor was
+closed and the Computer Use session ended. Retained build reports and verifier
+logs distinguish this source-linked development proof from packaged delivery.
+Code Review's final scoped source recheck found no remaining actionable issue;
+it reused the independently executed, hashed reports rather than claiming a
+second test run.
+
+This delivery remains managed, in-tree development tooling. Native chrome, UIA,
+IME/preedit and automatic synchronization with VS Code's Tab Moves Focus toggle
+are not certified. The visible Leave control, local Shift+Escape handler and
+host command release interaction synchronously; F6 remains host-owned. Component
+association/default activation/authored variants belong to #327–329; package-only
+consumer delivery belongs to #233; unsaved compiler fidelity remains #330.

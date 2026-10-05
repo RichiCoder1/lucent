@@ -10,6 +10,28 @@ const text = (value, max) => typeof value === "string" && value.length <= max &&
 const id = value => text(value, 256) && value.trim().length > 0 && !/[\u0000-\u001f\u007f]/.test(value);
 const extent = value => Number.isFinite(value) && value >= 1 && value <= 8192;
 const factor = value => Number.isFinite(value) && value >= 0.25 && value <= 4;
+const inputKeys = new Set(["F10", "ContextMenu", "Tab", "Enter", "Space", "Escape", "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete", "A", "C", "F", "N", "S", "V", "X", "Y", "Z", "F4"]);
+const runIdentityKeys = ["sessionId", "generation", "requestId", "projectTargetDigest", "inputDigest", "artifactDigest", "scenarioId", "presentationId"];
+const sameRun = (left, right) => left?.live === true && right?.live === true
+    && runIdentityKeys.every(key => typeof left[key] === "string" && left[key] === right[key]);
+function validInput(value) {
+    const coordinate = number => Number.isFinite(number) && Math.abs(number) <= 65536;
+    const modifiers = number => Number.isInteger(number) && number >= 0 && number <= 15;
+    switch (value?.type) {
+        case "pointer": return own(value, ["type", "action", "pointerId", "x", "y", "button", "modifiers"])
+            && ["move", "down", "up", "cancel"].includes(value.action) && Number.isInteger(value.pointerId) && value.pointerId >= 0 && value.pointerId <= 15
+            && coordinate(value.x) && coordinate(value.y) && modifiers(value.modifiers) && ["none", "primary", "secondary", "middle"].includes(value.button)
+            && (value.action !== "down" || value.button !== "none") && (!["move", "cancel"].includes(value.action) || value.button === "none");
+        case "wheel": return own(value, ["type", "x", "y", "deltaX", "deltaY", "modifiers"])
+            && coordinate(value.x) && coordinate(value.y) && modifiers(value.modifiers)
+            && Number.isFinite(value.deltaX) && Math.abs(value.deltaX) <= 4096 && Number.isFinite(value.deltaY) && Math.abs(value.deltaY) <= 4096;
+        case "key": return own(value, ["type", "action", "key", "modifiers", "repeat"])
+            && ["down", "up"].includes(value.action) && inputKeys.has(value.key) && modifiers(value.modifiers)
+            && typeof value.repeat === "boolean" && (value.action !== "up" || !value.repeat);
+        case "text": return own(value, ["type", "text"]) && text(value.text, 4096) && value.text.length > 0;
+        default: return false;
+    }
+}
 
 function presentation(value, exact = false) {
     if (!value || exact && !own(value, presentationKeys)
@@ -76,6 +98,13 @@ function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {
     let pending;
     let flight;
     let timer;
+    let displayed;
+    let focused;
+    let inputReleased = false;
+    const frameCapabilities = new WeakMap();
+    const acknowledgedFrames = new WeakSet();
+    const pointerOwners = new Map();
+    const keyOwners = new Map();
     const listeners = [];
     function callback(fn, value) {
         try { Promise.resolve(fn(value)).catch(() => {}); } catch { /* The controller owns diagnostics. */ }
@@ -85,7 +114,26 @@ function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {
         timer = undefined;
         flight = undefined;
     }
-    function suspend() { clearFlight(); pending = undefined; ready = false; }
+    function releaseFocus() {
+        const owner = focused;
+        focused = undefined;
+        pointerOwners.clear(); keyOwners.clear();
+        if (owner) { inputReleased = true; callback(onAction, { kind: "focus", frame: owner.frame, focused: false }); }
+    }
+    function postRelease(capability) {
+        if (!visible || !capability) return;
+        try { Promise.resolve(panel.webview.postMessage({ version: 1, panelId, kind: "release", frameCapability: capability })).catch(() => {}); }
+        catch { /* Native ownership was revoked before this best-effort display notification. */ }
+    }
+    function releaseInput() {
+        if (disposed) return false;
+        const capability = focused?.view.frame?.capability ?? displayed?.view.frame?.capability;
+        inputReleased = true;
+        releaseFocus();
+        postRelease(capability);
+        return Boolean(capability);
+    }
+    function suspend() { releaseFocus(); displayed = undefined; clearFlight(); pending = undefined; ready = false; }
     function handshake() {
         suspend();
         panelId = randomUUID();
@@ -119,6 +167,12 @@ function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {
         }
         if (message.kind === "ack" && own(message, ["version", "panelId", "kind", "deliveryId"])) {
             if (flight?.deliveryId !== message.deliveryId) return;
+            const accepted = flight;
+            displayed = accepted;
+            if (accepted.frame?.live === true && !acknowledgedFrames.has(accepted.frame)) {
+                acknowledgedFrames.add(accepted.frame);
+                callback(onAction, { kind: "frameDisplayed", frame: accepted.frame });
+            }
             clearFlight();
             flush();
             return;
@@ -127,7 +181,52 @@ function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {
         // Stop addresses this panel's owner, not a frame or indexed capability.
         // It must remain usable while a newer display update is awaiting delivery.
         if (message.kind === "stop" && own(message, base) && typeof message.deliveryId === "string") {
+            releaseFocus();
             callback(onAction, { kind: "stop" });
+            return;
+        }
+        const interactionBase = [...base, "frameCapability"];
+        // Focus loss must release the active owner even while a newer delivery is pending.
+        if (message.kind === "focus" && own(message, [...interactionBase, "focused"]) && message.focused === false
+            && focused?.view.frame?.capability === message.frameCapability) { releaseFocus(); return; }
+        if (message.kind === "input" || message.kind === "focus") {
+            const event = message.input;
+            // Only an admitted down owns the old frame capability used for its release.
+            // Native dispatch routes these releases solely to retained capture/focus.
+            if (message.kind === "input" && own(message, [...interactionBase, "input"]) && validInput(event)
+                && (event.type === "pointer" && ["up", "cancel"].includes(event.action) || event.type === "key" && event.action === "up")) {
+                const owner = event.type === "pointer" ? pointerOwners.get(event.pointerId) : keyOwners.get(event.key);
+                if (owner && ready && latest?.view.interactive && !inputReleased && sameRun(owner.entry.frame, latest.frame)
+                    && owner.entry.deliveryId === message.deliveryId && owner.entry.view.frame.capability === message.frameCapability
+                    && (event.type !== "pointer" || event.action === "cancel" || event.button === "none" || event.button === owner.button)) {
+                    if (event.type === "pointer") pointerOwners.delete(event.pointerId); else keyOwners.delete(event.key);
+                    callback(onAction, { kind: "input", frame: owner.entry.frame, input: event });
+                }
+                return;
+            }
+            const pendingDisplayAction = message.kind === "focus" && message.focused === true
+                || message.kind === "input" && (event?.type === "wheel" || event?.type === "pointer" && event.action === "down");
+            // Native validates exact input geometry before a press/wheel against the last ACK.
+            // A pending produced frame must not prematurely revoke that actual display capability.
+            const currentDisplay = displayed?.frame === latest?.frame;
+            const pendingDisplay = pendingDisplayAction && sameRun(displayed?.frame, latest?.frame);
+            if (!ready || !latest || !displayed || !(currentDisplay || pendingDisplay) || displayed.deliveryId !== message.deliveryId
+                || displayed.view.frame?.capability !== message.frameCapability || !latest.view.interactive) {
+                return;
+            }
+            if (message.kind === "input" && !inputReleased && own(message, [...interactionBase, "input"]) && validInput(message.input)) {
+                if (event.type === "pointer" && event.action === "down") {
+                    if (pointerOwners.has(event.pointerId)) return;
+                    pointerOwners.set(event.pointerId, { entry: displayed, button: event.button });
+                }
+                if (event.type === "key" && event.action === "down" && !keyOwners.has(event.key)) keyOwners.set(event.key, { entry: displayed });
+                callback(onAction, { kind: "input", frame: displayed.frame, input: message.input });
+            }
+            else if (message.kind === "focus" && own(message, [...interactionBase, "focused"]) && message.focused === true) {
+                focused = displayed;
+                inputReleased = false;
+                callback(onAction, { kind: "focus", frame: displayed.frame, focused: true });
+            }
             return;
         }
         if (!ready || !latest || message.deliveryId !== latest.deliveryId) return;
@@ -174,19 +273,28 @@ function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {
     handshake();
     return { update(view) {
         if (disposed) return;
-        latest = { deliveryId: String(++revision), view: snapshot(view) };
+        const safe = snapshot(view);
+        const frame = safe.frame ? view.state.frame : undefined;
+        if (frame) {
+            if (!frameCapabilities.has(frame)) frameCapabilities.set(frame, randomUUID());
+            safe.frame.capability = frameCapabilities.get(frame);
+        }
+        safe.interactive = Boolean(frame?.live === true && view.state.interactive === true && safe.phase === "current" && !safe.stale);
+        if (!safe.interactive) releaseFocus();
+        else if (focused && !sameRun(focused.frame, frame)) releaseInput();
+        latest = { deliveryId: String(++revision), view: safe, frame };
         if (visible && ready) { pending = latest; flush(); }
-    }, dispose };
+    }, releaseInput, dispose };
 }
 
 function html(panelId, nonce) {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none';">
 <title>Lucent Preview</title><style nonce="${nonce}">
-body{font:var(--vscode-font-size,13px) var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}button,input,select{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));padding:4px 8px;border-radius:2px;min-height:30px;box-sizing:border-box}button{cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{background:var(--vscode-button-secondaryHoverBackground)}button:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}button:disabled,input:disabled,select:disabled{opacity:.55;cursor:default}.toolbar{display:flex;gap:6px;align-items:center;padding:8px;border-bottom:1px solid var(--vscode-panel-border);flex-shrink:0;flex-wrap:wrap}#pickScenario{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar label{display:flex;align-items:center;gap:4px}.toolbar select{max-width:92px}#scenario{display:none}#status{margin:8px 12px;font-weight:600}#diagnostic,#draftError{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--vscode-errorForeground);margin:0 12px}#diagnostics{display:flex;flex-direction:column;align-items:start;gap:6px;margin:8px 12px;max-height:20vh;overflow:auto}#diagnostics button{max-width:100%;text-align:left;overflow-wrap:anywhere}#canvas{overflow:auto;min-height:64px;flex:1;display:flex;align-items:safe center;justify-content:safe center}#image{display:block;pointer-events:none;user-select:none;flex-shrink:0}#image[hidden],[hidden]{display:none!important}#caption{color:var(--vscode-descriptionForeground);margin:8px 12px;font-size:11px;overflow-wrap:anywhere}#empty{padding:16px;color:var(--vscode-descriptionForeground)}#presentation{border-bottom:1px solid var(--vscode-panel-border);padding:12px;margin:0;max-height:55vh;overflow:auto}fieldset{border:0;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}fieldset label{display:flex;flex-direction:column;gap:4px}fieldset input,fieldset select{width:100%;min-width:0}.sheetActions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.help{margin:8px 0;color:var(--vscode-descriptionForeground)}#apply{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}::selection{background:var(--vscode-editor-selectionBackground)}input{caret-color:var(--vscode-foreground)}@media(max-width:700px){#pickScenario{flex-basis:100%;text-align:left}}@media(max-width:480px){fieldset{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar{gap:4px}#settings{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}</style></head>
-<body data-panel-id="${panelId}"><div class="toolbar"><button id="pickScenario" type="button">Choose scenario</button><select id="scenario" aria-label="Preview scenario" hidden></select><button id="settings" type="button" aria-expanded="false" aria-controls="presentation">Presentation</button><label>Zoom<select id="zoom" aria-label="Display zoom"><option value="fit">Fit</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option><option value="4">400%</option></select></label><button id="appearance" type="button" title="Change requested appearance; restarts with fresh state while running">Light</button><button id="reset" type="button" title="Same scenario and presentation; rebuilds with fresh state">Reset scenario</button><button id="start" type="button">Start preview</button><button id="stop" type="button">Stop</button><button id="output" type="button">Show preview output</button></div>
+body{font:var(--vscode-font-size,13px) var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}button,input,select{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));padding:4px 8px;border-radius:2px;min-height:30px;box-sizing:border-box}button{cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{background:var(--vscode-button-secondaryHoverBackground)}button:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}button:disabled,input:disabled,select:disabled{opacity:.55;cursor:default}.toolbar{display:flex;gap:6px;align-items:center;padding:8px;border-bottom:1px solid var(--vscode-panel-border);flex-shrink:0;flex-wrap:wrap}#pickScenario{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar label{display:flex;align-items:center;gap:4px}.toolbar select{max-width:92px}#scenario{display:none}#status{margin:8px 12px;font-weight:600}#diagnostic,#draftError{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--vscode-errorForeground);margin:0 12px}#diagnostics{display:flex;flex-direction:column;align-items:start;gap:6px;margin:8px 12px;max-height:20vh;overflow:auto}#diagnostics button{max-width:100%;text-align:left;overflow-wrap:anywhere}#canvas{position:relative;touch-action:none;overflow:auto;min-height:64px;flex:1;display:flex;align-items:safe center;justify-content:safe center}#image{display:block;pointer-events:auto;user-select:none;flex-shrink:0}#textInput{position:absolute;left:0;bottom:0;width:1px;height:1px;min-height:0;padding:0;border:0;opacity:0;resize:none}#canvas:focus-within{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}#image[hidden],[hidden]{display:none!important}#caption,#inputHelp{color:var(--vscode-descriptionForeground);margin:8px 12px;font-size:11px;overflow-wrap:anywhere}#empty{padding:16px;color:var(--vscode-descriptionForeground)}#presentation{border-bottom:1px solid var(--vscode-panel-border);padding:12px;margin:0;max-height:55vh;overflow:auto}fieldset{border:0;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}fieldset label{display:flex;flex-direction:column;gap:4px}fieldset input,fieldset select{width:100%;min-width:0}.sheetActions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.help{margin:8px 0;color:var(--vscode-descriptionForeground)}#apply{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}::selection{background:var(--vscode-editor-selectionBackground)}input{caret-color:var(--vscode-foreground)}@media(max-width:700px){#pickScenario{flex-basis:100%;text-align:left}}@media(max-width:480px){fieldset{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar{gap:4px}#settings{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}</style></head>
+<body data-panel-id="${panelId}"><div class="toolbar"><button id="pickScenario" type="button">Choose scenario</button><select id="scenario" aria-label="Preview scenario" hidden></select><button id="settings" type="button" aria-expanded="false" aria-controls="presentation">Presentation</button><label>Zoom<select id="zoom" aria-label="Display zoom"><option value="fit">Fit</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option><option value="4">400%</option></select></label><button id="appearance" type="button" title="Change requested appearance; restarts with fresh state while running">Light</button><button id="reset" type="button" title="Same scenario and presentation; rebuilds with fresh state">Reset scenario</button><button id="start" type="button">Start preview</button><button id="stop" type="button">Stop</button><button id="leave" type="button" disabled>Leave preview</button><button id="output" type="button">Show preview output</button></div>
 <form id="presentation" hidden aria-label="Presentation settings"><fieldset id="controls" disabled><label>Logical width<input id="logicalWidth" type="number" min="1" max="8192" step="any" required></label><label>Logical height<input id="logicalHeight" type="number" min="1" max="8192" step="any" required></label><label>Device scale<input id="scale" type="number" min="0.25" max="4" step="any" required></label><label>Appearance<select id="colorScheme"><option value="light">Light</option><option value="dark">Dark</option></select></label><label>Contrast<select id="contrast"><option value="normal">Normal</option><option value="high">High</option></select></label><label>Fixture density<input id="density" type="number" min="0.25" max="4" step="any" required></label></fieldset><p class="help">Apply restarts with fresh state while running. While stopped, settings wait for Start. Choosing another scenario discards this draft.</p><div id="draftError" role="alert"></div><div class="sheetActions"><button id="apply" type="submit">Apply &amp; restart</button><button id="defaults" type="button">Scenario defaults</button><button id="cancel" type="button">Cancel</button></div></form>
-<div id="status" role="status" aria-live="polite">Waiting for preview</div><div id="diagnostic" role="alert"></div><div id="diagnostics" aria-label="Source diagnostics"></div><div id="canvas"><div id="empty">No accepted image yet</div><img id="image" alt="Compiled component preview" hidden draggable="false"></div><p id="caption">Images are noninteractive. Display zoom does not change renderer scale.</p><script nonce="${nonce}">(${webviewMain.toString()})();</script></body></html>`;
+<div id="status" role="status" aria-live="polite">Waiting for preview</div><div id="diagnostic" role="alert"></div><div id="diagnostics" aria-label="Source diagnostics"></div><div id="canvas" tabindex="0" aria-label="Live component preview. Enter or Space to interact" aria-describedby="caption inputHelp"><textarea id="textInput" tabindex="-1" aria-label="Preview text input" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea><div id="empty">No accepted image yet</div><img id="image" alt="Compiled component preview" hidden draggable="false"></div><p id="caption">Start a live preview to interact. Display zoom does not change renderer scale.</p><p id="inputHelp" hidden>While interacting, Tab moves between component controls. Press Shift+Escape to leave interaction; F6 moves to another editor area. VS Code’s Tab Moves Focus toggle is not synchronized with preview interaction in this release.</p><script nonce="${nonce}">(${webviewMain.toString()})();</script></body></html>`;
 }
 
 function webviewMain() {
@@ -200,26 +308,177 @@ function webviewMain() {
     let displayZoom = "fit";
     let draftDirty = false;
     let draftScenario;
+    let displayedView;
+    let focusedFrame;
+    let composing = false;
+    const pointers = new Map();
+    const pressedKeys = new Map();
     const keys = ["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"];
     const fillDraft = chosen => { for (const key of keys) element(key).value = chosen?.[key] ?? ""; draftDirty = false; element("draftError").textContent = ""; };
     const closeSheet = () => { element("presentation").hidden = true; element("appearance").disabled = !requested; element("settings").setAttribute?.("aria-expanded", "false"); fillDraft(requested); element("settings").focus?.(); };
     const sizeImage = () => {
         if (!currentView?.frame) return;
-        const frame = currentView.frame;
+        const frame = displayedView?.frame ?? currentView.frame;
         const canvas = element("canvas");
         const zoom = displayZoom === "fit" ? Math.min(1, (canvas.clientWidth || frame.logicalWidth) / frame.logicalWidth,
             (canvas.clientHeight || frame.logicalHeight) / frame.logicalHeight) : Number(displayZoom);
         element("image").style.width = `${frame.logicalWidth * zoom}px`;
         element("image").style.height = `${frame.logicalHeight * zoom}px`;
         const shown = frame.presentation;
-        element("caption").textContent = `${frame.scenarioTitle || frame.scenarioId || "Accepted frame"} · ${frame.logicalWidth} × ${frame.logicalHeight} · render scale ${frame.scale}${shown ? " · " + shown.colorScheme + " · " + shown.contrast + " contrast · density " + shown.density : ""}${frame.generation ? " · generation " + frame.generation : ""} · display ${Math.round(zoom * 100)}%${currentView.stale ? " · previous image, out of date" : ""}. Image is noninteractive.`;
+        element("caption").textContent = `${frame.scenarioTitle || frame.scenarioId || "Accepted frame"} · ${frame.logicalWidth} × ${frame.logicalHeight} · render scale ${frame.scale}${shown ? " · " + shown.colorScheme + " · " + shown.contrast + " contrast · density " + shown.density : ""}${frame.generation ? " · generation " + frame.generation : ""} · display ${Math.round(zoom * 100)}%${currentView.stale ? " · previous image, out of date" : ""}. ${currentView.interactive ? "Click preview, or focus it and press Enter/Space, to interact. Shift+Escape or Leave preview exits. " + "Committed text is supported; IME composition is unavailable." : "Image is read-only until the live preview is current."}`;
     };
     const send = (action, identity = deliveryId) => { if (identity) api.postMessage({ version: 1, panelId, deliveryId: identity, ...action }); };
     const ready = () => api.postMessage({ version: 1, panelId, kind: "ready" });
+    const interactive = () => currentView?.interactive === true && displayedView?.deliveryId === deliveryId;
+    const displayedEligible = () => currentView?.interactive === true && displayedView?.frame
+        && displayedView.frame.generation === currentView.frame?.generation && displayedView.frame.scenarioId === currentView.frame?.scenarioId;
+    const input = (value, owner) => {
+        const pendingDisplayInput = value.type === "wheel" || value.type === "pointer" && value.action === "down";
+        const admitted = owner ? currentView?.interactive && focusedFrame && owner.frame.generation === currentView.frame?.generation
+            && owner.frame.scenarioId === currentView.frame?.scenarioId : pendingDisplayInput ? displayedEligible() : interactive();
+        if (!admitted) return false;
+        const entry = owner ?? displayedView;
+        send({ kind: "input", frameCapability: entry.frame.capability, input: value }, entry.deliveryId);
+        return true;
+    };
+    const modifiers = event => (event.shiftKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.altKey ? 4 : 0) | (event.metaKey ? 8 : 0);
+    const surface = element("canvas");
+    const editor = element("textInput");
+    const resetInteraction = () => {
+        const captured = [...pointers]; pointers.clear();
+        for (const [pointerId, pointer] of captured) {
+            input({ type: "pointer", action: "cancel", pointerId: pointer.slot, x: pointer.x, y: pointer.y, button: "none", modifiers: 0 }, pointer.owner);
+            surface.releasePointerCapture?.(pointerId);
+        }
+        pressedKeys.clear(); editor.value = ""; composing = false;
+        if (focusedFrame) send({ kind: "focus", frameCapability: focusedFrame.frame.capability, focused: false }, focusedFrame.deliveryId);
+        focusedFrame = undefined;
+        editor.blur?.();
+        element("leave").disabled = true;
+        sizeImage();
+    };
+    const focusPreview = (pendingDisplay = false) => {
+        if (pendingDisplay ? !displayedEligible() : !interactive()) return;
+        editor.focus?.({ preventScroll: true });
+        if (!focusedFrame) {
+            focusedFrame = displayedView;
+            send({ kind: "focus", frameCapability: displayedView.frame.capability, focused: true }, displayedView.deliveryId);
+            element("leave").disabled = false; sizeImage();
+        }
+    };
+    const leavePreview = () => { resetInteraction(); surface.focus?.({ preventScroll: true }); };
+    element("leave").addEventListener("click", leavePreview);
+    surface.addEventListener("keydown", event => {
+        if (document.activeElement === surface && ["Enter", " "].includes(event.key) && interactive()) {
+            focusPreview(); event.preventDefault();
+        }
+    });
+    const point = (event, captured = false) => {
+        const rect = element("image").getBoundingClientRect?.();
+        if (!rect || !(rect.width > 0 && rect.height > 0) || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+        const frame = displayedView?.frame;
+        if (!frame) return;
+        const x = (event.clientX - rect.left) * frame.logicalWidth / rect.width;
+        const y = (event.clientY - rect.top) * frame.logicalHeight / rect.height;
+        if (!captured && (x < 0 || y < 0 || x >= frame.logicalWidth || y >= frame.logicalHeight)) return;
+        if (Math.abs(x) > 65536 || Math.abs(y) > 65536) return;
+        return { x, y };
+    };
+    for (const action of ["down", "move", "up", "cancel"]) surface.addEventListener("pointer" + action, event => {
+        const captured = pointers.get(event.pointerId);
+        if (action === "down" && captured) return;
+        // Entering interaction must deliver its first click before hover can produce a new frame.
+        if (action === "move" && !focusedFrame) return;
+        const release = captured && (action === "up" || action === "cancel");
+        if ((action === "down" ? !displayedEligible() : !interactive()) && !release) return;
+        const position = action === "cancel" && captured ? { x: captured.x, y: captured.y } : point(event, Boolean(captured));
+        if (!position) return;
+        let slot = captured?.slot ?? 0;
+        if (!captured) {
+            const used = new Set([...pointers.values()].map(pointer => pointer.slot));
+            while (used.has(slot) && slot < 16) slot++;
+            if (slot >= 16) return;
+        }
+        const button = action === "down" || action === "up" ? ["primary", "middle", "secondary"][event.button] : "none";
+        if (!button || (action === "up" || action === "cancel") && !captured) return;
+        if (action === "up" && button !== captured.button) return;
+        if (action === "down") focusPreview(true);
+        if (!input({ type: "pointer", action, pointerId: slot, ...position, button, modifiers: modifiers(event) }, release ? captured.owner : undefined)) return;
+        if (action === "down") {
+            if (!captured) pointers.set(event.pointerId, { slot, ...position, owner: displayedView, button });
+            surface.setPointerCapture?.(event.pointerId);
+        } else if (action === "up" || action === "cancel") {
+            pointers.delete(event.pointerId); surface.releasePointerCapture?.(event.pointerId);
+        } else if (captured) Object.assign(captured, position);
+        event.preventDefault();
+    });
+    surface.addEventListener("lostpointercapture", event => {
+        const pointer = pointers.get(event.pointerId);
+        if (!pointer) return;
+        pointers.delete(event.pointerId);
+        input({ type: "pointer", action: "cancel", pointerId: pointer.slot, x: pointer.x, y: pointer.y, button: "none", modifiers: 0 }, pointer.owner);
+    });
+    surface.addEventListener("wheel", event => {
+        if (!displayedEligible()) return;
+        const position = point(event); if (!position) return;
+        const rect = element("image").getBoundingClientRect();
+        const frame = displayedView.frame;
+        const deltaX = event.deltaX * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.width : 1) * frame.logicalWidth / rect.width;
+        const deltaY = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1) * frame.logicalHeight / rect.height;
+        if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) || Math.abs(deltaX) > 4096 || Math.abs(deltaY) > 4096) return;
+        if (input({ type: "wheel", ...position, deltaX, deltaY, modifiers: modifiers(event) })) event.preventDefault();
+    }, { passive: false });
+    const keyMap = { ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", " ": "Space", F10: "F10", ContextMenu: "ContextMenu", Tab: "Tab", Enter: "Enter", Escape: "Escape", Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown", Backspace: "Backspace", Delete: "Delete", F4: "F4" };
+    for (const action of ["down", "up"]) editor.addEventListener("key" + action, event => {
+        const physicalKey = event.code || (event.key.length === 1 ? event.key.toUpperCase() : event.key);
+        const held = pressedKeys.get(physicalKey);
+        if (action === "up" && held) {
+            if (input({ type: "key", action, key: held.key, modifiers: modifiers(event), repeat: false }, held.owner)) {
+                pressedKeys.delete(physicalKey);
+                if (held.key !== "Space" && held.key !== "Escape") event.preventDefault();
+            }
+            return;
+        }
+        if (!interactive() || action === "up") return;
+        if (composing || event.isComposing) return;
+        if (event.key === "Escape" && event.shiftKey) {
+            if (action === "down") leavePreview();
+            event.preventDefault(); return;
+        }
+        if (event.key === "F6" || event.altKey && ["ArrowLeft", "ArrowRight", "F4"].includes(event.key)
+            || (event.ctrlKey || event.metaKey) && ["Tab", "PageUp", "PageDown"].includes(event.key)
+            || (event.ctrlKey || event.metaKey) && event.shiftKey && ["p", "n"].includes(event.key.toLowerCase())) return;
+        // Browser paste supplies the committed text; a second native paste command would duplicate it.
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return;
+        const key = keyMap[event.key] || (event.ctrlKey || event.metaKey ? /^[acfnsvxyz]$/i.test(event.key) && event.key.toUpperCase() : undefined);
+        if (!key || !held && pressedKeys.size >= 26) return;
+        if (input({ type: "key", action, key, modifiers: modifiers(event), repeat: action === "down" && event.repeat === true })) {
+            if (!held) pressedKeys.set(physicalKey, { key, owner: displayedView });
+            // A textarea receives Space's committed text; its default does not scroll the page.
+            if (key !== "Space" && key !== "Escape") event.preventDefault();
+        }
+    });
+    editor.addEventListener("beforeinput", event => {
+        if (!interactive() || composing || event.isComposing || !["insertText", "insertFromPaste"].includes(event.inputType)
+            || typeof event.data !== "string" || !event.data.length || event.data.length > 4096 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(event.data)) return;
+        if (input({ type: "text", text: event.data })) { event.preventDefault(); editor.value = ""; }
+    });
+    editor.addEventListener("paste", event => {
+        if (!interactive() || composing) return;
+        const value = event.clipboardData?.getData("text/plain");
+        if (typeof value === "string" && value.length > 0 && value.length <= 4096
+            && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value) && input({ type: "text", text: value })) {
+            event.preventDefault(); editor.value = "";
+        }
+    });
+    editor.addEventListener("compositionstart", () => { composing = true; });
+    editor.addEventListener("compositionend", () => { composing = false; editor.value = ""; });
+    editor.addEventListener("blur", resetInteraction);
+    window.addEventListener("blur", resetInteraction);
     const labels = { idle: "Ready", discovering: "Loading scenarios", building: "Building preview", rendering: "Rendering preview", current: "Ready · saved source", stale: "Previous image · out of date", stopping: "Stopping preview · waiting for cleanup", stopped: "Stopped · changes apply on Start", suspended: "Preview paused while hidden", blocked: "Cleanup needs attention", untrusted: "Workspace trust required", error: "Preview unavailable" };
     element("scenario").addEventListener("change", () => send({ kind: "select", scenarioId: element("scenario").value }));
     element("zoom").addEventListener("change", () => send({ kind: "zoom", zoom: element("zoom").value === "fit" ? "fit" : Number(element("zoom").value) }));
-    for (const kind of ["reset", "start", "stop", "output", "pickScenario"]) element(kind).addEventListener("click", () => send({ kind }));
+    for (const kind of ["reset", "start", "stop", "output", "pickScenario"]) element(kind).addEventListener("click", () => { resetInteraction(); send({ kind }); });
     element("settings").addEventListener("click", () => {
         if (element("presentation").hidden === false) { closeSheet(); return; }
         fillDraft(requested); element("presentation").hidden = false; element("appearance").disabled = true;
@@ -251,10 +510,17 @@ function webviewMain() {
     });
     window.addEventListener("message", event => {
         const message = event.data;
+        if (message?.version === 1 && message.panelId === panelId && message.kind === "release") {
+            if (focusedFrame?.frame.capability === message.frameCapability
+                || !focusedFrame && displayedView?.frame.capability === message.frameCapability) leavePreview();
+            return;
+        }
         if (message?.version !== 1 || message.panelId !== panelId || message.kind !== "view" || typeof message.deliveryId !== "string") return;
         deliveryId = message.deliveryId;
         const view = message.view;
+        if (!view.interactive || currentView?.frame?.generation !== view.frame?.generation || currentView?.frame?.scenarioId !== view.frame?.scenarioId) resetInteraction();
         currentView = view;
+        element("inputHelp").hidden = !view.interactive;
         displayZoom = view.zoom;
         element("status").textContent = (labels[view.phase] || "Preview") + (view.stale && view.phase !== "stale" ? " · previous image is out of date" : "") + (view.catalogStale ? " · catalog out of date" : "");
         element("diagnostic").textContent = view.diagnostic;
@@ -294,10 +560,20 @@ function webviewMain() {
             button.addEventListener("click", () => send({ kind: "diagnostic", index: item.index }, message.deliveryId)); diagnostics.appendChild(button);
         }
         const image = element("image");
-        const ack = () => api.postMessage({ version: 1, panelId, kind: "ack", deliveryId: message.deliveryId });
+        const ack = () => {
+            if (deliveryId !== message.deliveryId) return;
+            if (view.frame && (image.naturalWidth !== view.frame.width || image.naturalHeight !== view.frame.height)) {
+                resetInteraction();
+                element("diagnostic").textContent = "The accepted image dimensions could not be verified.";
+                return;
+            }
+            displayedView = view.frame ? { deliveryId: message.deliveryId, frame: view.frame } : undefined;
+            sizeImage();
+            api.postMessage({ version: 1, panelId, kind: "ack", deliveryId: message.deliveryId });
+        };
         if (view.frame) {
             image.onload = ack;
-            image.onerror = () => { element("diagnostic").textContent = "The accepted image could not be displayed."; };
+            image.onerror = () => { resetInteraction(); element("diagnostic").textContent = "The accepted image could not be displayed."; };
             image.hidden = false; element("empty").hidden = true;
             sizeImage();
             image.style.opacity = view.stale ? "0.6" : "1";
@@ -308,9 +584,9 @@ function webviewMain() {
                 ack();
             } else image.src = source;
         } else { image.onload = null; image.onerror = null; image.removeAttribute("src"); image.hidden = true; element("empty").hidden = false;
-            element("caption").textContent = "Images are noninteractive. Display zoom does not change renderer scale."; ack(); }
+            element("caption").textContent = "Start a live preview to interact. Display zoom does not change renderer scale."; ack(); }
     });
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) ready(); });
+    document.addEventListener("visibilitychange", () => { if (document.hidden) resetInteraction(); else ready(); });
     ready();
 }
 

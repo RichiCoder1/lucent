@@ -1,47 +1,44 @@
 # Current work and handoff
 
-Updated October 4, 2026. The owner resumed native preview and requested roadmap
+Updated October 5, 2026. The owner resumed native preview and requested roadmap
 reconciliation, with completed chunks committed and pushed as needed.
 GitHub acceptance and the [roadmap](../ROADMAP.md) govern scope. Recheck live source,
 CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. [CI118](https://github.com/RichiCoder1/lucent/actions/runs/37257901829)
-   passed managed, package verification and publication for source `ef8a13a7`,
-   publishing `0.3.0-dev.118.1` with supervisor v2 and panel refinements.
+1. [CI119](https://github.com/RichiCoder1/lucent/actions/runs/37260288758)
+   passed all jobs for source `5e0e784b`, publishing `0.3.0-dev.119.1` with
+   supervisor v2, panel refinements and the reviewed internal live host.
    Earlier CI117 published `c6b6482e`, which only
    corrects the diagnostic-navigation test's Windows canonical-path expectation.
    CI116 failed that assertion in both lanes and skipped publication; the
    faithfully reproduced short-path failure and the corrected 176/176 editor
    run are recorded under `artifacts/preview116-alias-location.json`. Keep that
    local evidence separate from the subsequently successful CI publication.
-2. Continue [#232](https://github.com/RichiCoder1/lucent/issues/232). Source
-   `c6b6482e` precedes unsaved/interactive support. The
+2. The saved-source [#232](https://github.com/RichiCoder1/lucent/issues/232)
+   implementation is verified and ready for issue closeout: retained host,
+   supervised live pipe and editor input. The
    [interactive execution record](../plans/native-preview-interactive.md) records
    the failed original-path stock Csc substitution proof, successful retained
    paint-resource measurement, and supervisor v2 native/editor verification.
    The public compiler-adapter experiment also fails zero-overlay stock parity:
    suppressions are lost at public Emit and generated source checksums differ.
-   Unsaved preview remains disabled; the owner has been asked whether to deliver
-   saved-source interaction first or invest in a maintained compiler frontend.
-   The internal live renderer passes 30 focused contracts after six adversarial
-   review corrections and a scoped source recheck. Integrate its transport next;
-   it does not yet provide a live worker pipe or editor input. Supervisor/panel
-   refinements through `ef8a13a7` are published in official 118.1.
-   Design/roadmap changes are in `8b4f5770`; the reviewed internal host is in
-   `a4ce09e1`. CI118 does not cover those subsequent commits.
-   Use the four slices in the
-   [roadmap](../ROADMAP.md#finish-232-in-reviewable-slices): original-path SDK
-   overlays; a persistent preview host/renderer proof; supervised live-session
-   integration; then current-generation input and actual-editor acceptance.
-   The first two can proceed independently. Both preparation and final compilation
-   must consume the same unsaved contents without changing source/configuration
-   identity or saving buffers. A path-mapping workaround is not that proof.
-   If no supported compiler hook preserves the contract, record the result and
-   settle the compiler-adapter design or scope before expanding implementation.
-   The source strategy decision does not block independent saved-source host
-   correctness and cleanup work. Do not silently narrow #232's acceptance.
+   The owner accepted saved-source interaction first. Unsaved preview remains
+   disabled and its original acceptance is preserved in separate investigation
+   [#330](https://github.com/RichiCoder1/lucent/issues/330), which does not block
+   #232 or #233. No maintained compiler frontend has been authorized.
+   The execution record owns current test counts, actual-editor observations and
+   preserved failures. It includes hover-racing clicks, original capture/key
+   ownership, synchronous editor escape and Stop under frame backpressure.
+   Design/roadmap changes are in `8b4f5770`; the earlier reviewed internal host
+   is in `a4ce09e1`, published in 119.1. Do not repeat that feasibility work.
+   The accepted scope split is reflected in #223,
+   #224 and #232; #330 retains the failed compiler probes and future proof bar.
+   Final affected checks pass: 239 editor, 53 Hosting and 17 Core input contracts.
+   The actual editor verifies zoom, text, keyboard, scrolling, escape and saved
+   rebuild/reset; Stop removes its generation. Computer Use has ended.
+   Code Review's final scoped recheck has no remaining actionable finding.
 3. Keep live readiness and cleanup separate: a verified build/vector plus the
    started/ready records permit live frames; confirmed tree reaping permits
    replacement and directory deletion. Stop must survive frame backpressure,
@@ -54,8 +51,10 @@ CI and issue state before continuing from this snapshot.
    operation deadlines; live mode needs a bounded worker handshake and shutdown,
    without periodically expiring a healthy session. Supervisor-started is emitted
    only after job ownership; worker-ready arrives separately through its channel.
-4. Complete package/consumer delivery [#233](https://github.com/RichiCoder1/lucent/issues/233)
-   after #232, then diagnostics #243 and transfer #244. The
+4. Continue component association/Follow/Pin #327 and typed automatic activation
+   #328, then authored data/variant design #329. Complete package/consumer delivery
+   [#233](https://github.com/RichiCoder1/lucent/issues/233) after those and #232,
+   then diagnostics #243 and transfer #244. The
    [roadmap sequence](../ROADMAP.md#remaining-road-to-10) records actual child
    prerequisites and Notes #10 adoption. Hot Reload #234 and WASM #238 are
    separate feasibility investigations after #233; neither implementation nor
@@ -72,8 +71,8 @@ The HTML and captured images are design references, not compiled runtime proof.
 File association is #327; typed activation is #328; proposed development-only
 grammar/profile work is #329, blocked by #328 and labeled needs-triage. They are
 linked under #224 and added to Project 4. #233's native dependency edges include
-all three as well as #232. The compiler source-strategy decision remains pending;
-none of these tickets claims unsaved fidelity is solved.
+all three as well as #232. Saved-source delivery comes first; none of these tickets
+claims unsaved fidelity is solved. That separate investigation is #330.
 Code Review independently rechecked the design, roadmap, handoff and live issue
 relationships at `a4ce09e1`: no sequencing or ownership correction was needed.
 
@@ -85,8 +84,9 @@ are applied and read back from GitHub:
 - #223 now orders preview → diagnostics → transfer, preserves completed
   foundations as history and keeps Hot Reload/WASM conditional. Absent local
   plan links point to the retained parent designs and research instead.
-- #224 checks off closed #227–231, leaving #232/#233 open. #232 now carries its
-  four implementation slices without duplicate acceptance tickets.
+- #224 retains completed #227–231 and the saved-source #232 execution record.
+  #233 and component-first #327–329 remain distinct work. #232 carries three
+  implementation slices without duplicate acceptance tickets.
 - #255's description and native blocked-by edges now name #232, #253 and #254.
   Inspection reuses the live session without adding a reverse dependency.
 - Scenario/orchestration prose now assigns mapped diagnostics to #231 and runtime
@@ -119,8 +119,8 @@ folder. No account sign-in or security setting was automated.
 | Fresh-consumer onboarding #249 / #242 | Verified authenticated/local-package fallback, mapped debugging, managed/native interaction and final official 110.1 installed-editor semantics; [execution](../plans/onboarding-execution.md) distinguishes artifact versions |
 | Performance #313–319 | Delivered through 89.1, including physical resize proof; [performance execution](../plans/performance-execution.md) preserves characterization and failures separately |
 
-The latest confirmed Lucent release is `0.3.0-dev.118.1`, source `ef8a13a7`.
-[CI118](https://github.com/RichiCoder1/lucent/actions/runs/37257901829) passed all jobs.
+The latest confirmed Lucent release is `0.3.0-dev.119.1`, source `5e0e784b`.
+[CI119](https://github.com/RichiCoder1/lucent/actions/runs/37260288758) passed all jobs.
 CI113–116 did not produce a newer release. CI116 at `77f1c69d` failed the same
 canonical-versus-8.3-path assertion in both lanes, with publication skipped.
 The test-only correction `c6b6482e` has a passing local short-path regression

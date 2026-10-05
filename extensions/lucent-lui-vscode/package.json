@@ -45,6 +45,7 @@
     "preview-protocol.js",
     "preview-process.js",
     "preview-runtime.js",
+    "preview-live.js",
     "preview-ui.js",
     "preview-panel.js",
     "preview-diagnostics.js",
@@ -82,6 +83,9 @@
     }, {
       "command": "lucentLui.stopPreview",
       "title": "Lucent: Stop Native Preview"
+    }, {
+      "command": "lucentLui.releasePreviewInput",
+      "title": "Lucent: Leave Preview Interaction"
     }, {
       "command": "lucentLui.rename",
       "title": "Lucent: Rename Cross-Language Symbol"
@@ -121,6 +125,11 @@
     }, {
       "command": "lucentLui.openGettingStarted",
       "title": "Lucent: Open Getting Started"
+    }],
+    "keybindings": [{
+      "command": "lucentLui.releasePreviewInput",
+      "key": "shift+escape",
+      "when": "activeWebviewPanelId == 'lucent.preview'"
     }],
     "walkthroughs": [{
       "id": "gettingStarted",

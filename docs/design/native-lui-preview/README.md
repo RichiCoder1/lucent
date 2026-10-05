@@ -24,9 +24,8 @@ For the initial refinement, implement the guide's A–C items only where the act
 host contract supports them. Do not expose Interact, unsaved-source freshness or
 Inspect simply because the HTML can simulate them. Implementation has separately
 reported a Stop/settings fix; avoid duplicating it. Unsaved-source fidelity remains
-unproven at handoff. The component-first product direction is settled; the owner
-decision on saved-source-first delivery versus compiler-adapter investment is
-still pending, as recorded in the authoring contract.
+unproven at handoff. The owner accepted saved-source interactive delivery first
+on October 4; unsaved compiler fidelity remains a separate #330 investigation.
 
 The core copy set is this README, `index.html`, `implementation-guide.md`,
 `component-preview-authoring.md`,

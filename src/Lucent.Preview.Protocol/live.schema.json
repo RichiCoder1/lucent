@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lucent:preview-live-worker:2",
+  "description": "Packets have a uint32 little-endian JSON length (2..65536). A frame packet is followed by byteLength raw PNG bytes. Duplicate fields are forbidden. All identities must exactly match the launch. A single frame awaits actual display ACK; input/focus IDs share one strictly increasing counter. Dimensions must match the launch presentation.",
+  "$defs": {
+    "sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sessionId", "generation", "requestId", "projectTargetDigest", "inputDigest", "artifactDigest", "scenarioId", "presentationId"],
+      "properties": {
+        "sessionId": { "$ref": "protocol.schema.json#/$defs/id" },
+        "generation": { "$ref": "protocol.schema.json#/$defs/id" },
+        "requestId": { "$ref": "protocol.schema.json#/$defs/id" },
+        "projectTargetDigest": { "$ref": "protocol.schema.json#/$defs/digest" },
+        "inputDigest": { "$ref": "protocol.schema.json#/$defs/digest" },
+        "artifactDigest": { "$ref": "protocol.schema.json#/$defs/digest" },
+        "scenarioId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "presentationId": { "$ref": "protocol.schema.json#/$defs/id" }
+      }
+    },
+    "coordinate": { "type": "number", "minimum": -65536, "maximum": 65536 },
+    "delta": { "type": "number", "minimum": -4096, "maximum": 4096 },
+    "modifiers": { "type": "integer", "minimum": 0, "maximum": 15 },
+    "event": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "action", "pointerId", "x", "y", "button", "modifiers"],
+          "properties": {
+            "type": { "const": "pointer" }, "action": { "enum": ["move", "down", "up", "cancel"] },
+            "pointerId": { "type": "integer", "minimum": 0, "maximum": 15 },
+            "x": { "$ref": "#/$defs/coordinate" }, "y": { "$ref": "#/$defs/coordinate" },
+            "button": { "enum": ["none", "primary", "secondary", "middle"] }, "modifiers": { "$ref": "#/$defs/modifiers" }
+          },
+          "allOf": [
+            { "if": { "properties": { "action": { "const": "down" } } }, "then": { "properties": { "button": { "enum": ["primary", "secondary", "middle"] } } } },
+            { "if": { "properties": { "action": { "enum": ["move", "cancel"] } } }, "then": { "properties": { "button": { "const": "none" } } } }
+          ]
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "x", "y", "deltaX", "deltaY", "modifiers"],
+          "properties": {
+            "type": { "const": "wheel" }, "x": { "$ref": "#/$defs/coordinate" }, "y": { "$ref": "#/$defs/coordinate" },
+            "deltaX": { "$ref": "#/$defs/delta" }, "deltaY": { "$ref": "#/$defs/delta" }, "modifiers": { "$ref": "#/$defs/modifiers" }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "action", "key", "modifiers", "repeat"],
+          "properties": {
+            "type": { "const": "key" }, "action": { "enum": ["down", "up"] },
+            "key": { "enum": ["F10", "ContextMenu", "Tab", "Enter", "Space", "Escape", "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete", "A", "C", "F", "N", "S", "V", "X", "Y", "Z", "F4"] },
+            "modifiers": { "$ref": "#/$defs/modifiers" }, "repeat": { "type": "boolean" }
+          },
+          "if": { "properties": { "action": { "const": "up" } } }, "then": { "properties": { "repeat": { "const": false } } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["type", "text"],
+          "properties": { "type": { "const": "text" }, "text": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Committed text only; bound measured in UTF16 units." } }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "kind", "pipeName", "request"],
+      "properties": {
+        "protocolVersion": { "const": 2 }, "kind": { "const": "preview-live-request" },
+        "pipeName": { "type": "string", "pattern": "^lucent-preview-[0-9a-f]{32}$" },
+        "request": { "$ref": "protocol.schema.json#/oneOf/0" }
+      }
+    },
+    {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "kind", "identity"],
+      "properties": { "protocolVersion": { "const": 2 }, "kind": { "const": "preview-live-ready" }, "identity": { "$ref": "#/$defs/identity" } }
+    },
+    {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "kind", "identity", "frameSequence", "byteLength", "sha256", "width", "height"],
+      "properties": {
+        "protocolVersion": { "const": 2 }, "kind": { "const": "preview-live-frame" }, "identity": { "$ref": "#/$defs/identity" },
+        "frameSequence": { "$ref": "#/$defs/sequence" }, "byteLength": { "type": "integer", "minimum": 33, "maximum": 33554432 },
+        "sha256": { "$ref": "protocol.schema.json#/$defs/digest" }, "width": { "type": "integer", "minimum": 1, "maximum": 8192 }, "height": { "type": "integer", "minimum": 1, "maximum": 8192 }
+      }
+    },
+    {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "kind", "identity", "frameSequence"],
+      "properties": { "protocolVersion": { "const": 2 }, "kind": { "const": "preview-live-ack" }, "identity": { "$ref": "#/$defs/identity" }, "frameSequence": { "$ref": "#/$defs/sequence" } }
+    },
+    {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "kind", "identity", "inputSequence", "focused"],
+      "properties": { "protocolVersion": { "const": 2 }, "kind": { "const": "preview-live-focus" }, "identity": { "$ref": "#/$defs/identity" }, "inputSequence": { "$ref": "#/$defs/sequence" }, "focused": { "type": "boolean" } }
+    },
+    {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "kind", "identity", "frameSequence", "inputSequence", "event"],
+      "properties": { "protocolVersion": { "const": 2 }, "kind": { "const": "preview-live-input" }, "identity": { "$ref": "#/$defs/identity" }, "frameSequence": { "$ref": "#/$defs/sequence" }, "inputSequence": { "$ref": "#/$defs/sequence" }, "event": { "$ref": "#/$defs/event" } }
+    }
+  ]
+}

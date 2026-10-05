@@ -24,19 +24,24 @@ frames. Its [execution record](plans/native-preview-orchestration.md) retains
 automated and actual editor evidence, including the source-lock isolation fixes.
 The bounded [preview panel #231](plans/native-preview-panel.md) adds scenario and
 presentation controls, mapped diagnostics, acknowledged frame delivery and hidden
-panel suspension, verified in the real development editor. Next is unsaved and
-interactive preview #232, followed by external delivery #233. #227–231 are closed;
-#232's [October 4 feasibility work](plans/native-preview-interactive.md) rejects
+panel suspension, verified in the real development editor. Saved-source
+interactive preview #232 now adds the retained live worker, bounded input and
+actual-editor interaction. Its [execution record](plans/native-preview-interactive.md)
+separates automated, desktop and failed feasibility evidence. Component-first
+authoring #327–329 precedes external delivery #233. #227–231 are closed;
+#232's October 4 feasibility work rejects
 physical staged-source substitution because it loses original compiler paths
 and nested analyzer settings. A public compiler-adapter experiment also fails
 stock emission parity: diagnostic suppressions and generated checksums differ.
-Unsaved preview remains disabled pending an explicit scope decision. Retained rendering reduces paint
+The owner accepted saved-source interaction first; unsaved compiler fidelity is
+tracked independently in [#330](https://github.com/RichiCoder1/lucent/issues/330)
+and remains disabled. Retained rendering reduces paint
 allocations in the measured fixture, while PNG encoding remains the larger cost.
 Supervisor v2 separates bounded/live ownership and passes its native/editor
-checks. The internal persistent host passes 30 focused contracts after six
-adversarial corrections and a scoped source recheck; live protocol/editor
-integration remains in progress.
-This partial implementation does not close #232.
+checks. The integrated host and editor preserve exact gesture owners, admit
+hover-racing presses only against unchanged input geometry, and keep Stop
+independent of display backpressure. Native chrome, UIA and IME parity remain
+outside this interactive image preview.
 
 The [native preview design](design/native-lui-preview/README.md) now prioritizes
 the active `.lui` component: Follow editor by default, explicit Pin, automatic
@@ -54,12 +59,12 @@ distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit
 `3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
-At this October 4 checkpoint, the latest confirmed release is
-`0.3.0-dev.118.1`, from `ef8a13a7` after
-[CI118](https://github.com/RichiCoder1/lucent/actions/runs/37257901829) passed managed,
-package/native and publication jobs. This includes supervisor v2 and panel
-refinements; the subsequent internal live host has focused local verification
-and adversarial review but is not part of that release. The preceding 110.1 complete artifact was
+The preceding confirmed release is
+`0.3.0-dev.119.1`, from `5e0e784b` after
+[CI119](https://github.com/RichiCoder1/lucent/actions/runs/37260288758) passed all jobs.
+This includes supervisor v2, panel refinements and the reviewed internal live
+host. The saved-source interactive implementation follows that release; recheck
+the handoff and CI for its publication status. The preceding 110.1 complete artifact was
 independently authenticated for onboarding. Supported distribution uses authenticated GitHub Packages and
 verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is
 not claimed. #231 is implemented at `77f1c69d`; its failed CI116 did not publish.
@@ -104,7 +109,7 @@ streams or interrupt the preview work already in flight.
 
 | Order | Bounded outcome | Technical sequence |
 | --- | --- | --- |
-| 1. [Native preview #224](https://github.com/RichiCoder1/lucent/issues/224) | Component-first activation and optional authored variants, consistent unsaved C#/.lui, interactive compiled frames, owned cleanup, then documented package-only consumption | #232 after completed #231; #327 association and #328 typed activation can proceed independently; #329 follows #328; #233 integrates #232/#327–329. Unsaved sequencing remains an owner decision after failed compiler probes |
+| 1. [Native preview #224](https://github.com/RichiCoder1/lucent/issues/224) | Component-first activation and optional authored variants, saved-source interactive compiled frames, owned cleanup, then documented package-only consumption | Continue #327 association and #328 typed activation from the saved-source #232 foundation; #329 follows #328; #233 integrates #232/#327–329. Unsaved compiler fidelity is deferred to the separate #330 investigation |
 | 2. [Developer diagnostics #243](https://github.com/RichiCoder1/lucent/issues/243) | Read-only committed snapshots, redaction, provenance/source origins, inspector and bounded frame diagnostics | #250 first; #251 and #252 can follow independently; #253 needs both; #254 needs #252; #255 integrates #253/#254 with preview |
 | 3. [Transfer #244](https://github.com/RichiCoder1/lucent/issues/244) | Typed clipboard/drag transactions, Windows copy/link interoperability, bounded rich import and the two app consumers | #256 proves the native seam before #257; #258/#259/#261 follow #257; #260 follows drag routing, #262 follows clipboard and parser proof; #263 verifies the integrated framework |
 | Conditional follow-ons | Hot Reload acceleration and a narrow browser preview target | #234 and #238 each follow #233; their reports decide whether #235–237 and #239–241 proceed. WASM has no Hot Reload prerequisite |
@@ -125,41 +130,35 @@ a rich-text editor are not implicit requirements.
 
 ### Finish #232 in reviewable slices
 
-Keep one acceptance owner, with four implementation slices rather than another
-broad framework refactor:
+The owner accepted saved-source delivery first on October 4. #330 preserves the
+original-path unsaved compilation contract and failed feasibility evidence;
+it does not block #232 or #233. Preview never saves or executes dirty buffers.
+The following three slices define #232's implemented saved-source contract;
+the [execution record](plans/native-preview-interactive.md#saved-source-live-integration)
+owns its evidence. Do not repeat these foundations when starting #327–329:
 
-1. **Authoritative unsaved builds.** Prove original-path C#/.lui content overlays
-   in both SDK preparation and final compilation. Preserve nested configuration,
-   analyzer/generator path observations, linked project items and diagnostics.
-   Track actual consumed overlay bytes separately from saved-disk freshness.
-   A frozen two-document vector must compile together without saving buffers;
-   failed or superseded builds never execute. Path mapping or `#line` alone is
-   insufficient. If no supported compiler integration preserves this contract,
-   record the failed proof and choose an explicit compiler-adapter design or
-   scope change before expanding implementation.
-2. **Persistent host and renderer.** Prove a small preview host and persistent Skia
+1. **Persistent host and renderer.** Prove a small preview host and persistent Skia
    surface using the existing application lifecycle. Measure the retained
    resources before extracting any shared offscreen abstraction. Prove both
    input and application invalidation cause frames in the same worker, with
    explicit clock/idle behavior; keeping the testing host alive alone does not
    establish a continuously pumped preview.
-3. **Supervised live session.** Join the frozen document vector to the persistent
+2. **Supervised live session.** Join the verified saved-source build to the persistent
    host through a bounded session protocol. A verified build/vector, supervisor
    started record and matching worker readiness permit live frames; only
    confirmed process-tree termination permits replacement or directory deletion.
    Keep stop independent of frame traffic, tie bounded production to display
    acknowledgment and reject obsolete builds or input. Uncertain cleanup retains
    quarantine. Do not enable unsaved refresh before the compiler proof passes.
-4. **Editor interaction and integration.** Map pointer/wheel/key/committed text
+3. **Editor interaction and integration.** Map pointer/wheel/key/committed text
    to the displayed frame,
    account for zoom/letterboxing/scale, and release owned input on focus loss or
    restart. Coalesce replaceable work without losing input edges. Rebuild/restart
    resets state. Prove representative actual-editor behavior and resource limits;
    keep detailed behavior matrices with their existing test owners.
 
-The first two proofs can proceed independently; the third consumes both and the
-fourth establishes the complete interactive contract. #233
-then owns tool/worker distribution, representative package consumers, recovery
+The host, supervised lifetime and editor interaction now form the foundation.
+#233 owns tool/worker distribution, representative package consumers, recovery
 and measured support limits. Explicitly list supported workspace/host placements;
 remote support must be demonstrated or excluded, not inferred from a webview.
 Native chrome, popups, UIA and IME parity, runtime inspection, Hot Reload and
@@ -173,7 +172,7 @@ program. Preserve attractive stock controls and the independent Notes consumer;
 do not add another control catalogue or platform port merely to close 1.0.
 This is a proposed release boundary, not a claim that the owner has frozen 1.0.
 
-No new product decision blocks the current #232 proofs. Before declaring 1.0,
+No new product decision blocks component association/default activation. Before declaring 1.0,
 record the remaining release choices under #223:
 
 - Which public C#/.lui, SDK/tooling and persisted-schema contracts become stable,

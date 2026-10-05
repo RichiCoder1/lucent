@@ -6,6 +6,98 @@ namespace Lucent.Core.Tests;
 public sealed class InputContracts
 {
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void CapturedReleaseSurvivesNewSceneAndNeverHitsReplacement(bool replaceOwner)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "captured-release");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("captured-release"));
+        Present(composition.Root, theme, 100, 100, true);
+        var owner = composition.Child(composition.Root, "owner");
+        var width = graph.Signal(100f, "captured-owner-width");
+        owner.Present(
+            theme,
+            author: Style
+                .Empty.Bind(LayoutProperties.Width, () => width.Value)
+                .Height(100)
+                .Axis(LayoutAxis.Column)
+                .Clip(true)
+        );
+        var ownerUps = 0;
+        var replacementUps = 0;
+        owner.AttachBehaviors(
+            new Probe(
+                "owner",
+                BehaviorOwnership.Action | BehaviorOwnership.Semantics,
+                pointer: route =>
+                {
+                    if (route.Command.Kind == PointerCommandKind.Down)
+                        route.Capture();
+                    if (route.Command.Kind == PointerCommandKind.Up)
+                        ownerUps++;
+                }
+            )
+        );
+        var router = composition.Input;
+        using var first = SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper());
+        Assert(router.SetScene(first), "Initial capture scene was rejected.");
+        Assert(
+            router
+                .DispatchPointer(new(PointerCommandKind.Down, 1, 5, 5, PointerButton.Primary))
+                .Status == InputDispatchStatus.Delivered,
+            "Initial capture was not delivered."
+        );
+        if (replaceOwner)
+        {
+            owner.Dispose();
+            var replacement = composition.Child(composition.Root, "replacement");
+            Present(replacement, theme, 100, 100, true);
+            replacement.AttachBehaviors(
+                new Probe(
+                    "replacement",
+                    BehaviorOwnership.Action | BehaviorOwnership.Semantics,
+                    pointer: route =>
+                    {
+                        if (route.Command.Kind == PointerCommandKind.Up)
+                            replacementUps++;
+                    }
+                )
+            );
+        }
+        else
+            width.Value = 80;
+        using var next = SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper());
+        Assert(router.SetScene(next), "Current release geometry was rejected.");
+        var released = router.DispatchCapturedPointerRelease(
+            new(PointerCommandKind.Up, 1, 5, 5, PointerButton.Primary)
+        );
+        Assert(
+            released.Status
+                == (replaceOwner ? InputDispatchStatus.Rejected : InputDispatchStatus.Delivered),
+            "Captured release did not distinguish surviving ownership from replacement."
+        );
+        Assert(
+            ownerUps == (replaceOwner ? 0 : 1) && replacementUps == 0,
+            "Captured release lost its original owner or invoked a replacement hit target."
+        );
+        Assert(
+            router
+                .DispatchCapturedPointerRelease(
+                    new(PointerCommandKind.Up, 2, 5, 5, PointerButton.Primary)
+                )
+                .Rejection == InputRejection.NoTarget
+                && replacementUps == 0,
+            "An unowned release performed fresh hit testing."
+        );
+        Expect<ArgumentException>(() =>
+            router.DispatchCapturedPointerRelease(
+                new(PointerCommandKind.Down, 3, 5, 5, PointerButton.Primary)
+            )
+        );
+    }
+
+    [TestMethod]
     public void RoutingFocusCaptureAndAvailability()
     {
         var graph = new ReactiveGraph();

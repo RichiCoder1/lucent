@@ -1,14 +1,15 @@
 # Development native preview
 
 The VS Code extension can build an explicit development project and display a PNG
-rendered by Lucent's real Skia renderer. Each saved generation uses a fresh worker;
-its scenario finishes cleanup before the image becomes current. The preview does
+rendered by Lucent's real Skia renderer. Each saved generation uses a fresh worker
+with a retained live rendering session. A matching readiness handshake and verified
+build admit frames; confirmed process cleanup permits replacement. The preview does
 not call the shipping application's entry point or run inside the language server.
 
 This first delivery supports local Windows desktop workspaces and managed .NET
 development projects. The preview libraries and tools are in-tree, non-packable
-development dependencies. External package delivery, inspection and continuous
-interaction have separate roadmap work.
+development dependencies. External package delivery, automatic component activation,
+inspection and unsaved compilation have separate roadmap work.
 
 ## Try the compiled fixture
 
@@ -25,7 +26,7 @@ workspace settings, configure the checked-in worker fixture:
 {
   "lucentLui.preview": {
     "projectPath": "tests/Probes/Preview/WorkerFixture/WorkerFixture.csproj",
-    "scenarioId": "card/empty",
+    "scenarioId": "card/interactive",
     "targetFramework": "net10.0",
     "toolsDirectory": "C:/Temp/lucent-preview-tools"
   }
@@ -56,8 +57,27 @@ and generation, including when newer requested settings have not produced a fram
 No setting or application source is rewritten by these controls.
 
 Hidden panels stop executable work and resume when visible again, unless explicitly
-stopped. Images remain noninteractive, including when current. A stale frame is
-dimmed and labeled. Frame delivery allows one unacknowledged image and one latest
+stopped. Current live frames accept pointer, wheel, keyboard and committed text.
+Click the image or press Enter on its focus stop to interact. Tab and Shift+Tab
+then move between component controls; ordinary Escape reaches the component.
+Shift+Escape, **Leave preview**, or **Lucent: Leave Preview Interaction** releases
+interaction without waiting for component code. Focus alone does not reenter it.
+F6/Shift+F6 and editor navigation chords remain host-owned. Under supported default
+bindings, the next Tab after leaving moves through editor controls.
+
+VS Code's **Tab Moves Focus** toggle is not synchronized with preview interaction
+in this release; its default setting is not a reliable live toggle value. Custom
+host keybindings and full IME/preedit behavior are not certified. Browser paste
+forwards bounded plain committed text; native clipboard integration is separate.
+
+A stale generation is dimmed, labeled and read-only. Input refers to the actually
+displayed frame. A pointer press or wheel event may survive a newer pending image
+only when native validation confirms unchanged input targets, geometry, clips,
+viewport and scrollbar geometry. Keyboard and text input require the current
+frame. If a release races a newer frame, it may complete only
+the original surviving pointer capture or key owner. Removed or changed owners
+lose the gesture; stale presses never hit-test new geometry. Frame delivery
+allows one unacknowledged image and one latest
 pending state; an unresponsive webview suspends delivery instead of collecting
 images. Hiding and showing the panel creates a fresh delivery session.
 
@@ -79,8 +99,9 @@ return await PreviewWorker.RunAsync(catalog, args);
 
 The development executable owns the catalog. It need not start a window or invoke
 production startup. `PreviewWorkerOptions.PrepareImagesAsync` is an explicit,
-cancellable readiness callback for scenarios that need image preparation before
-capture; it is not an arbitrary render delay. See the checked-in
+cancellable readiness callback for bounded one-shot capture; it is not a live
+readiness contract and is rejected in live mode. Live image loading uses normal
+owned application invalidation. See the checked-in
 [worker fixture](../tests/Probes/Preview/WorkerFixture/Program.cs).
 
 Configure the development `.csproj`, target framework and ordinal scenario ID in
@@ -94,8 +115,9 @@ The build tool uses the selected SDK, an evaluated project graph and isolated
 outputs. It records declared sources, imports, assets, references, restore state,
 consumed compiler inputs and the resulting executable files. It reevaluates glob
 membership and verifies input and artifact hashes before execution and again
-before accepting pixels. External source globs are watched for newly added files,
-alongside the previously known inputs.
+before admitting the first live frame. Subsequent frames reuse the same verified
+build; saved-input changes invalidate the session. External source globs are
+watched for newly added files, alongside the previously known inputs.
 
 Existing dependency locks are copied into each generation before restore. The
 authored files remain unchanged, and their locked-mode policy still applies:
@@ -116,7 +138,7 @@ does not imply that managed cleanup callbacks completed.
 
 The **Lucent Preview** output channel reports actionable failures and the location
 of retained generation evidence under the extension's global storage. Confirmed
-successful or superseded generations are removed after their pixels are copied.
+stopped or superseded generations are removed after their process trees are reaped.
 Confirmed failures retain compact diagnostic history with count and byte bounds;
 uncertain termination directories are quarantined and never automatically pruned.
 

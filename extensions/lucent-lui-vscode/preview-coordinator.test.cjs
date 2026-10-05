@@ -4,6 +4,235 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { createPreviewCoordinator } = require("./preview-coordinator");
 
+function liveFixture(overrides = {}) {
+    const sessions = [];
+    const f = fixture({
+        ...overrides,
+        openLive: async (_artifact, request) => {
+            const queue = [];
+            let waiting;
+            let finish;
+            let fail;
+            const completion = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+            completion.catch(() => {});
+            const enteredStop = deferred();
+            const calls = [];
+            const session = {
+                request, completion, calls, enteredStop, automaticStop: true,
+                emit(sequence) {
+                    const frame = Object.freeze({ ...frameFor(request), frameSequence: sequence });
+                    if (waiting) waiting(frame); else queue.push(frame);
+                    return frame;
+                },
+                readFrame(signal) {
+                    if (signal.aborted) return Promise.reject(Object.assign(new Error("cancelled"), { code: "cancelled" }));
+                    if (queue.length) return Promise.resolve(queue.shift());
+                    return new Promise((resolve, reject) => {
+                        const abort = () => { waiting = undefined; reject(Object.assign(new Error("cancelled"), { code: "cancelled" })); };
+                        waiting = frame => { waiting = undefined; signal.removeEventListener("abort", abort); resolve(frame); };
+                        signal.addEventListener("abort", abort, { once: true });
+                    });
+                },
+                async acknowledge(frame) { calls.push(["ack", frame]); return true; },
+                async input(frame, event) { calls.push(["input", frame, event]); return true; },
+                async focus(focused) { calls.push(["focus", focused]); return true; },
+                stop() { enteredStop.resolve(); if (session.automaticStop) finish({ treeReaped: true }); return completion; },
+                reaped: () => finish({ treeReaped: true }),
+                uncertain: () => fail(Object.assign(new Error("tree cleanup unknown"), { code: "termination-failed" }))
+            };
+            sessions.push(session);
+            session.emit(1);
+            return session;
+        }
+    });
+    return { ...f, sessions };
+}
+
+async function until(predicate) {
+    for (let i = 0; i < 30; i++) {
+        if (predicate()) return;
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.fail("Expected coordinator transition did not occur.");
+}
+
+test("live Start resolves on the first frame while its artifact stays owned until Stop", async t => {
+    const f = liveFixture();
+    t.after(() => f.coordinator.dispose());
+    await f.coordinator.start({ scenarioId: "empty" });
+    assert.equal(f.coordinator.state.phase, "current");
+    assert.equal(f.coordinator.state.interactive, true);
+    assert.equal(f.coordinator.state.frame.frameSequence, 1);
+    assert.equal(f.events.includes("release:1"), false);
+    assert.deepEqual(f.events, ["build:1", "verify:1", "discover:1", "verify:1", "verify:1"]);
+    await f.coordinator.stop();
+    assert.equal(f.coordinator.state.phase, "stopped");
+    assert.equal(f.coordinator.state.interactive, false);
+    assert.equal(f.events.at(-1), "release:1");
+});
+
+test("live input uses an exact displayed frame and cleanup survives a newly pending frame", async t => {
+    const f = liveFixture();
+    t.after(() => f.coordinator.dispose());
+    await f.coordinator.start({ scenarioId: "empty" });
+    const session = f.sessions[0];
+    const first = f.coordinator.state.frame;
+    const event = { type: "text", text: "hello" };
+    assert.equal(await f.coordinator.input(first, event), false);
+    assert.equal(await f.coordinator.acknowledge({ ...first }), false);
+    assert.equal(await f.coordinator.acknowledge(first), true);
+    assert.equal(await f.coordinator.acknowledge(first), false);
+    assert.equal(await f.coordinator.focus(first, true), true);
+    assert.equal(await f.coordinator.input(first, event), true);
+    const next = session.emit(2);
+    await until(() => f.coordinator.state.frame === next);
+    assert.equal(await f.coordinator.input(first, event), false);
+    assert.equal(await f.coordinator.input(next, event), false);
+    const press = { type: "pointer", action: "down", pointerId: 0, x: 10, y: 20, button: "primary", modifiers: 0 };
+    const wheel = { type: "wheel", x: 10, y: 20, deltaX: 0, deltaY: 30, modifiers: 0 };
+    assert.equal(await f.coordinator.focus({ ...first }, true), false);
+    assert.equal(await f.coordinator.focus(first, true), true);
+    assert.equal(await f.coordinator.input({ ...first }, press), false);
+    assert.equal(await f.coordinator.input(first, press), true, "native decides whether pending pixels changed input geometry");
+    assert.equal(await f.coordinator.input(first, wheel), true);
+    assert.equal(await f.coordinator.focus(first, false), true);
+    assert.equal(await f.coordinator.focus({ ...first, generation: "old" }, false), false);
+    assert.equal(await f.coordinator.acknowledge(next), true);
+    assert.equal(await f.coordinator.input(first, press), false, "a newer display ACK retires the previous fresh-input capability");
+    assert.equal(await f.coordinator.input(first, wheel), false);
+    assert.equal(await f.coordinator.focus(first, true), false);
+    assert.equal(await f.coordinator.input(next, event), true);
+    assert.deepEqual(session.calls.map(call => call[0]), ["ack", "focus", "input", "focus", "input", "input", "focus", "ack", "input"]);
+    assert.equal(f.events.filter(event => event.startsWith("verify:")).length, 3, "autonomous frames do not invoke the SDK");
+});
+
+test("live replacement waits for confirmed reaping and rejects obsolete frame capabilities", async t => {
+    const f = liveFixture();
+    t.after(() => { const stopped = f.coordinator.dispose(); for (const session of f.sessions) session.reaped(); return stopped; });
+    await f.coordinator.start({ scenarioId: "first" });
+    const old = f.coordinator.state.frame;
+    const session = f.sessions[0];
+    session.automaticStop = false;
+    const replacement = f.coordinator.start({ scenarioId: "second" });
+    await session.enteredStop.promise;
+    assert.equal(f.events.includes("build:2"), false);
+    assert.equal(f.events.includes("release:1"), false);
+    assert.equal(await f.coordinator.focus(old, false), false);
+    session.reaped();
+    await replacement;
+    assert.ok(f.events.indexOf("release:1") < f.events.indexOf("build:2"));
+    assert.equal(f.coordinator.state.frame.scenarioId, "second");
+    assert.equal(await f.coordinator.input(old, { type: "text", text: "wrong" }), false);
+});
+
+test("uncertain live cleanup blocks replacement and preserves the generation", async () => {
+    const f = liveFixture();
+    await f.coordinator.start({ scenarioId: "first" });
+    const session = f.sessions[0];
+    session.automaticStop = false;
+    const replacement = f.coordinator.start({ scenarioId: "second" });
+    await session.enteredStop.promise;
+    session.uncertain();
+    await replacement;
+    await f.coordinator.dispose();
+    assert.equal(f.coordinator.state.phase, "blocked");
+    assert.equal(f.coordinator.state.interactive, false);
+    assert.equal(f.events.includes("build:2"), false);
+    assert.equal(f.events.includes("release:1"), false);
+});
+
+test("a failed final saved-input check stops the live host without admitting pixels", async t => {
+    let checks = 0;
+    const f = liveFixture({ verify: async () => ++checks < 3 });
+    t.after(() => f.coordinator.dispose());
+    await f.coordinator.start({ scenarioId: "empty" });
+    assert.equal(f.coordinator.state.phase, "error");
+    assert.equal(f.coordinator.state.frame, undefined);
+    assert.equal(f.coordinator.state.interactive, false);
+    assert.match(f.coordinator.state.diagnostic, /before frame admission/);
+    assert.equal(f.events.at(-1), "release:1");
+});
+
+test("worker completion during final saved-input verification cannot publish an interactive frame", async t => {
+    let checks = 0;
+    const verifying = deferred();
+    const verified = deferred();
+    const f = liveFixture({ verify: async () => {
+        if (++checks === 3) { verifying.resolve(); await verified.promise; }
+        return true;
+    } });
+    t.after(() => { verified.resolve(); return f.coordinator.dispose(); });
+    const start = f.coordinator.start({ scenarioId: "empty" });
+    await verifying.promise;
+    f.sessions[0].reaped();
+    await new Promise(resolve => setImmediate(resolve));
+    verified.resolve();
+    await start;
+    assert.equal(f.coordinator.state.phase, "error");
+    assert.equal(f.coordinator.state.frame, undefined);
+    assert.equal(f.states.some(state => state.interactive), false);
+    assert.match(f.coordinator.state.diagnostic, /exited unexpectedly/);
+    assert.equal(f.events.at(-1), "release:1");
+});
+
+test("uncertain verification cleanup outranks an earlier live worker exit", async t => {
+    let checks = 0;
+    const verifying = deferred();
+    const verificationFailed = deferred();
+    const f = liveFixture({ verify: async () => {
+        if (++checks === 3) {
+            verifying.resolve();
+            await verificationFailed.promise;
+            throw Object.assign(new Error("Verifier tree cleanup unknown"), { code: "termination-failed" });
+        }
+        return true;
+    } });
+    t.after(() => { verificationFailed.resolve(); return f.coordinator.dispose(); });
+    const start = f.coordinator.start({ scenarioId: "empty" });
+    await verifying.promise;
+    f.sessions[0].reaped();
+    await new Promise(resolve => setImmediate(resolve));
+    const replacement = f.coordinator.start({ scenarioId: "replacement" });
+    verificationFailed.resolve();
+    await Promise.all([start, replacement]);
+    assert.equal(f.coordinator.state.phase, "blocked");
+    assert.match(f.coordinator.state.diagnostic, /Verifier tree cleanup unknown/);
+    assert.equal(f.events.includes("release:1"), false);
+    assert.equal(f.events.includes("build:2"), false);
+});
+
+test("a live input transport failure stops ownership and retains its diagnostic", async t => {
+    const f = liveFixture();
+    t.after(() => f.coordinator.dispose());
+    await f.coordinator.start({ scenarioId: "empty" });
+    const frame = f.coordinator.state.frame;
+    await f.coordinator.acknowledge(frame);
+    f.sessions[0].input = async () => { throw new Error("input socket failed"); };
+    await assert.rejects(f.coordinator.input(frame, { type: "text", text: "x" }), /input socket failed/);
+    await until(() => f.events.includes("release:1"));
+    assert.equal(f.coordinator.state.phase, "stale");
+    assert.equal(f.coordinator.state.interactive, false);
+    assert.match(f.coordinator.state.diagnostic, /input socket failed/);
+});
+
+test("Stop reports a reaped worker's cleanup failure and preserves failure logs", async t => {
+    const releases = [];
+    const f = liveFixture({ release: async (_artifact, options) => {
+        releases.push(options);
+        return { diagnosticDirectory: "retained-fixture", diagnostic: "author cleanup failed; retained-fixture" };
+    } });
+    t.after(() => f.coordinator.dispose());
+    await f.coordinator.start({ scenarioId: "empty" });
+    const session = f.sessions[0];
+    session.stop = async () => { session.reaped(); throw new Error("author cleanup failed"); };
+    await f.coordinator.stop();
+    assert.equal(f.coordinator.state.phase, "stopped");
+    assert.equal(f.coordinator.state.interactive, false);
+    assert.match(f.coordinator.state.diagnostic, /author cleanup failed; retained-fixture/);
+    assert.equal(releases.length, 1);
+    assert.equal(releases[0].failed, true);
+});
+
 const defaults = Object.freeze({ logicalWidth: 160, logicalHeight: 120, scale: 1, colorScheme: "light",
     contrast: "normal", density: 1, culture: "", uiCulture: "", initialTime: "1970-01-01T00:00:00.0000000+00:00" });
 

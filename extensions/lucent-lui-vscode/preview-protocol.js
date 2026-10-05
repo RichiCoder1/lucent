@@ -25,7 +25,7 @@ function decodeJson(bytes) {
     bytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, "utf8");
     if (bytes.length < 2 || bytes.length > MAX_MESSAGE) throw new Error("Invalid preview message size.");
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    const token = /\s*("(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|[{}\[\]:,])/y;
+    const token = /\s*("(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|[{}\[\]:,])/y;
     let offset = 0;
     function next() {
         token.lastIndex = offset;
@@ -65,7 +65,7 @@ function decodeJson(bytes) {
                 item = next();
             }
         }
-        if (!raw.startsWith('"') && !/^-?\d/.test(raw)) throw new Error("Invalid preview value.");
+        if (!raw.startsWith('"') && !/^-?\d/.test(raw) && raw !== "true" && raw !== "false") throw new Error("Invalid preview value.");
         if (integerKeys.has(field) && !/^-?(?:0|[1-9][0-9]*)$/.test(raw))
             throw new Error("Invalid preview integer.");
         return JSON.parse(raw);
@@ -272,4 +272,5 @@ async function readVerifiedCatalog(directory, expected) {
 }
 
 module.exports = { decodeWorkerRequest, decodeWorkerResult, decodeCatalogResult, readVerifiedFrame,
-    readVerifiedCatalog, readBoundedFile, resolvePresentation };
+    readVerifiedCatalog, readBoundedFile, resolvePresentation, decodeJson, exact,
+    validateCorrelation, validateScenario, validatePresentation, MAX_MESSAGE, MAX_FRAME };

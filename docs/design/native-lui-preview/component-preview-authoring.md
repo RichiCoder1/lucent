@@ -260,9 +260,9 @@ active-document association, follow/pin, truthful source coverage, and filtering
 existing entries to the current component. Those changes can use the existing
 saved-image path and need not wait for the new declaration grammar. They are a
 useful partial delivery; zero-registration activation still requires increment 2.
-Implementation has asked the owner whether to prioritize saved-source live/file
-preview while keeping unsaved support open. That sequencing decision is pending;
-this document does not treat it as approved or relax the unsaved fidelity gate.
+The owner accepted saved-source live/file preview first on October 4. #330 keeps
+unsaved compiler fidelity open without blocking #232/#233. The eventual unsaved
+fidelity gate is unchanged; the initial edit loop is explicitly **On save**.
 
 ## Additional acceptance scenarios
 

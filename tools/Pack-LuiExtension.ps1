@@ -112,6 +112,7 @@ try {
         'preview-protocol.js',
         'preview-process.js',
         'preview-runtime.js',
+        'preview-live.js',
         'preview-ui.js',
         'preview-panel.js',
         'preview-diagnostics.js',

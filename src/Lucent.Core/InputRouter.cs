@@ -251,7 +251,23 @@ public sealed partial class InputRouter
     }
 
     /// <summary>Hit-tests and routes a portable pointer command through the installed retained scene.</summary>
-    public InputDispatchResult DispatchPointer(PointerCommand command)
+    public InputDispatchResult DispatchPointer(PointerCommand command) =>
+        DispatchPointerCore(command, capturedOnly: false);
+
+    /// <summary>Routes an up or cancel only to its surviving capture in the current scene, with no hit-test fallback.</summary>
+    /// <remarks>Hosts must install current geometry first. Scene reconciliation revokes capture when its owner or structural path changes.</remarks>
+    public InputDispatchResult DispatchCapturedPointerRelease(PointerCommand command)
+    {
+        command.Validate();
+        if (command.Kind is not (PointerCommandKind.Up or PointerCommandKind.Cancel))
+            throw new ArgumentException(
+                "Captured release accepts up or cancel only.",
+                nameof(command)
+            );
+        return DispatchPointerCore(command, capturedOnly: true);
+    }
+
+    private InputDispatchResult DispatchPointerCore(PointerCommand command, bool capturedOnly)
     {
         Enter();
         try
@@ -262,7 +278,7 @@ public sealed partial class InputRouter
                 return Reject(rejection, "Pointer/" + command.Kind, errors);
             if (command.Kind == PointerCommandKind.Down)
                 SetModality(InputModality.Pointer, errors);
-            var scrollbar = HitScrollBar(command.X, command.Y);
+            var scrollbar = capturedOnly ? null : HitScrollBar(command.X, command.Y);
             var scrollbarCapture = _scrollBarDrags.ContainsKey(command.PointerId);
             var hadCapture = _captures.ContainsKey(command.PointerId);
             RetainedScrollBar? capturedScrollBar = null;
@@ -286,21 +302,24 @@ public sealed partial class InputRouter
                 else
                     Release(command.PointerId, PointerCaptureLossReason.SceneChanged, errors);
             }
-            target ??=
-                scrollbarCapture ? _scrollBarDrags[command.PointerId].Viewport
-                : scrollbar is { } bar && !hadCapture ? bar.Viewport
-                : Hit(command.X, command.Y);
-            UpdateHover(
-                command.Kind == PointerCommandKind.Cancel ? null
-                    : scrollbar is { } hoveredBar ? hoveredBar.Viewport
-                    : Hit(command.X, command.Y),
-                command.X,
-                command.Y,
-                errors
-            );
-            UpdateScrollBarHover(
-                command.Kind == PointerCommandKind.Cancel ? null : scrollbar?.Viewport
-            );
+            if (!capturedOnly)
+            {
+                target ??=
+                    scrollbarCapture ? _scrollBarDrags[command.PointerId].Viewport
+                    : scrollbar is { } bar && !hadCapture ? bar.Viewport
+                    : Hit(command.X, command.Y);
+                UpdateHover(
+                    command.Kind == PointerCommandKind.Cancel ? null
+                        : scrollbar is { } hoveredBar ? hoveredBar.Viewport
+                        : Hit(command.X, command.Y),
+                    command.X,
+                    command.Y,
+                    errors
+                );
+                UpdateScrollBarHover(
+                    command.Kind == PointerCommandKind.Cancel ? null : scrollbar?.Viewport
+                );
+            }
             if (target is null)
             {
                 if (command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)

@@ -1,0 +1,49 @@
+namespace PreviewFixtures;
+
+style InteractivePreviewLayout {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Uniform(16);
+    Spacing: 12;
+    CrossAlignment: LayoutAlignment.Stretch;
+    Background: Color.Parse("#ffffff");
+    TextColor: Color.Parse("#102030");
+}
+
+public component InteractiveCard() {
+    int count = 0;
+    string draft = "seed";
+
+    void Increment() {
+        count += 1;
+        System.Console.Error.WriteLine("Fixture live counter: " + count);
+    }
+
+    void Changed(string value) {
+        draft = value;
+        System.Console.Error.WriteLine("Fixture live text: " + value);
+    }
+
+    <Layout style={InteractivePreviewLayout}>
+        <Button onInvoke={Increment} name="preview-live.increment" style={Style.Empty.Height(40)}>
+            Increment preview
+        </Button>
+        <Text name="preview-live.count" style={Style.Empty.Height(24)}>{"Count: " + count}</Text>
+        <TextField
+            initialValue="seed"
+            onChange={Changed}
+            label="Live draft"
+            name="preview-live.editor"
+            style={Style.Empty.Height(40)}
+        />
+        <Text name="preview-live.draft" style={Style.Empty.Height(24)}>{"Draft: " + draft}</Text>
+        <ScrollViewport label="Live wheel target" style={Style.Empty.Height(100)}>
+            <Column style={Style.Empty.Height(300).Spacing(24).MainShrink(0)}>
+                <Text>Wheel first row</Text>
+                <Text>Wheel second row</Text>
+                <Text>Wheel third row</Text>
+                <Text>Wheel fourth row</Text>
+                <Text>Wheel final row</Text>
+            </Column>
+        </ScrollViewport>
+    </Layout>
+}

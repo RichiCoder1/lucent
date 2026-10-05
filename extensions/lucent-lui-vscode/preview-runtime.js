@@ -4,7 +4,8 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
-const { runSupervised } = require("./preview-process");
+const { runSupervised, startSupervised } = require("./preview-process");
+const { connectLive } = require("./preview-live");
 const { decodeWorkerRequest, readVerifiedFrame, readVerifiedCatalog, readBoundedFile,
     resolvePresentation } = require("./preview-protocol");
 const { parseCompilerDiagnostics } = require("./preview-diagnostics");
@@ -17,13 +18,16 @@ function inside(root, candidate) {
 function cancelled() { return Object.assign(new Error("Preview cancelled."), { code: "cancelled" }); }
 
 function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory, isTrusted,
-    supervise = runSupervised, onInputs = () => {}, log = () => {},
+    supervise = runSupervised, startSupervise = startSupervised, connectLiveWorker = connectLive,
+    onInputs = () => {}, log = () => {},
     retentionPolicy = { maxFailures: 3, maxBytes: 16 * 1024 * 1024 } }) {
     if (!Number.isInteger(retentionPolicy.maxFailures) || retentionPolicy.maxFailures < 1 || retentionPolicy.maxFailures > 16
         || !Number.isInteger(retentionPolicy.maxBytes) || retentionPolicy.maxBytes < 8192 || retentionPolicy.maxBytes > 64 * 1024 * 1024)
         throw new Error("Unsupported preview diagnostic retention policy.");
     const quarantined = new Set();
     const pending = new Set();
+    const livePending = new Set();
+    const verified = new WeakMap();
     const owned = new Set();
     const phaseDirectories = new Map();
     const historyDirectory = path.join(storageDirectory, "diagnostics");
@@ -77,7 +81,7 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
         const root = path.resolve(artifact.root);
         const store = path.resolve(storageDirectory);
         if (!samePath(path.dirname(root), store) || !path.basename(root).startsWith("generation-")
-            || !owned.has(root) || pending.has(root) || quarantined.has(root))
+            || !owned.has(root) || pending.has(root) || livePending.has(root) || quarantined.has(root))
             throw new Error("Refusing to clean an unowned preview directory.");
         const [rootInfo, storeInfo, realRoot, realStore] = await Promise.all([
             fs.lstat(root), fs.lstat(store), fs.realpath(root), fs.realpath(store)
@@ -290,9 +294,13 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
         const logs = await invoke(artifact.root, buildToolPath, ["verify", "--report", artifact.reportPath], "verify", signal);
         const result = JSON.parse((await readBoundedFile(path.join(logs, "stdout.log"), 65536)).toString("utf8"));
         const report = artifact.report;
-        return result.protocolVersion === 1 && result.kind === "preview-build-verification" && result.status === "fresh"
+        const fresh = result.protocolVersion === 1 && result.kind === "preview-build-verification" && result.status === "fresh"
             && ["sessionId", "generation", "requestId"].every(key => result[key] === report.request[key])
             && ["projectTargetDigest", "inputDigest", "artifactDigest"].every(key => result[key] === report[key]);
+        if (fresh) verified.set(artifact, JSON.stringify([report.entryPoint, report.request,
+            report.projectTargetDigest, report.inputDigest, report.artifactDigest]));
+        else verified.delete(artifact);
+        return fresh;
     }
 
     function workerIdentity(artifact, request) {
@@ -347,7 +355,141 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
         return Object.freeze({ ...frame, effectivePresentation });
     }
 
-    return { build, verify, discover, render, release: cleanup };
+    async function openLive(artifact, request, signal) {
+        admitted(signal);
+        await ownedRoot(artifact);
+        const report = artifact.report;
+        if (verified.get(artifact) !== JSON.stringify([report.entryPoint, report.request,
+            report.projectTargetDigest, report.inputDigest, report.artifactDigest]))
+            throw new Error("A verified current artifact is required for live preview.");
+        const identity = workerIdentity(artifact, request);
+        const scenario = artifact.catalog?.scenarios.find(entry => entry.id === request.selection.scenarioId);
+        if (!scenario) throw new Error("The selected preview scenario is not registered in the current catalog.");
+        const effectivePresentation = resolvePresentation(scenario, request.selection.presentation);
+        const outputDirectory = path.join(artifact.root, "live-" + randomUUID());
+        await fs.mkdir(outputDirectory);
+        const workerRequest = { ...identity, kind: "preview-capture-request", scenarioId: scenario.id,
+            presentationId: request.presentationId ?? "default", outputDirectory,
+            ...Object.fromEntries(["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"]
+                .map(key => [key, effectivePresentation[key]])) };
+        decodeWorkerRequest(Buffer.from(JSON.stringify(workerRequest)));
+        const pipeName = "lucent-preview-" + randomUUID().replaceAll("-", "");
+        const requestPath = path.join(artifact.root, "live-request-" + randomUUID() + ".json");
+        await fs.writeFile(requestPath, JSON.stringify({ protocolVersion: 2, kind: "preview-live-request",
+            pipeName, request: workerRequest }), { flag: "wx" });
+        const logDirectory = path.join(artifact.root, "worker-live-" + randomUUID());
+        await fs.mkdir(logDirectory);
+        const directories = phaseDirectories.get(artifact.root) ?? [];
+        directories.push(logDirectory);
+        phaseDirectories.set(artifact.root, directories);
+        admitted(signal);
+        livePending.add(artifact.root);
+        const connectionAbort = new AbortController();
+        let supervised, transport, stopping = false, terminalError, wasStarted = false, completion;
+        const fail = error => {
+            terminalError ??= error;
+            connectionAbort.abort();
+            transport?.close(error);
+            try { void supervised?.stop()?.catch(() => {}); }
+            catch (stopError) { log("Preview live supervisor stop failed", stopError); }
+        };
+        const stop = () => {
+            stopping = true;
+            connectionAbort.abort();
+            transport?.close();
+            try { void supervised?.stop()?.catch(() => {}); }
+            catch (error) { fail(error); }
+            return completion;
+        };
+        signal?.addEventListener("abort", stop, { once: true });
+        try {
+            const supervisorRequestId = randomUUID();
+            supervised = startSupervise(supervisorPath, {
+                protocolVersion: 2, kind: "preview-supervisor-request", mode: "live", requestId: supervisorRequestId,
+                program: report.entryPoint, args: ["--live-request", requestPath],
+                workingDirectory: path.dirname(report.entryPoint), logDirectory,
+                timeoutMs: 60000, graceMs: 1500, maxOutputBytes: 1024 * 1024,
+                environment: { MSBUILDDISABLENODEREUSE: "1", DOTNET_CLI_USE_MSBUILD_SERVER: "0" }
+            }, { signal });
+            completion = supervised.completion.then(result => {
+                if (!result.treeReaped || result.status === "termination-failed") {
+                    quarantined.add(artifact.root);
+                    throw Object.assign(new Error(`Preview cleanup is unconfirmed. Logs: ${logDirectory}`), { code: "termination-failed" });
+                }
+                if (!stopping) {
+                    terminalError ??= new Error(`Preview live worker exited unexpectedly (${result.status}, exit ${result.exitCode}). Logs: ${logDirectory}`);
+                } else if (!(["completed", "cancelled"].includes(result.status))
+                    || result.exitCode !== null && result.exitCode !== 0
+                        && !(result.termination === "forced" && result.status === "cancelled")) {
+                    terminalError ??= Object.assign(new Error(
+                        `Preview live worker cleanup failed (${result.status}, exit ${result.exitCode}). Logs: ${logDirectory}`),
+                    { code: "live-cleanup-failed" });
+                }
+                connectionAbort.abort();
+                transport?.close(terminalError ?? cancelled());
+                if (terminalError) throw terminalError;
+                return result;
+            }, error => {
+                if (error.code === "termination-failed" || wasStarted
+                    || !["cancelled", "launch-failed", "ENOENT"].includes(error.code)) {
+                    quarantined.add(artifact.root);
+                    if (error.code !== "termination-failed") error = Object.assign(
+                        new Error(`Preview live cleanup is unconfirmed. Logs: ${logDirectory}`, { cause: error }),
+                        { code: "termination-failed" });
+                }
+                connectionAbort.abort();
+                transport?.close(error);
+                throw error;
+            }).finally(() => {
+                livePending.delete(artifact.root);
+                signal?.removeEventListener("abort", stop);
+            });
+            void completion.catch(() => {});
+            if (signal?.aborted) stop();
+            const started = await supervised.started;
+            if (started.protocolVersion !== 2 || started.kind !== "preview-supervisor-started"
+                || started.requestId !== supervisorRequestId || Object.keys(started).length !== 3)
+                throw new Error("Preview live supervisor ownership was not established.");
+            wasStarted = true;
+            admitted(signal);
+            transport = await connectLiveWorker({ pipeName, request: workerRequest,
+                effectivePresentation, scenarioTitle: scenario.title, signal: connectionAbort.signal, onFailure: fail });
+            admitted(signal);
+            if (connectionAbort.signal.aborted) { transport.close(); await completion; throw cancelled(); }
+            return {
+                async readFrame(readSignal) {
+                    if (readSignal?.aborted) throw cancelled();
+                    try { return await transport.readFrame(readSignal); }
+                    catch (error) {
+                        if (readSignal?.aborted) throw cancelled();
+                        if (stopping) { await completion; return null; }
+                        throw error;
+                    }
+                },
+                acknowledge(frame) { admitted(signal); return transport.acknowledge(frame); },
+                input(frame, event) { admitted(signal); return transport.input(frame, event); },
+                focus(focused) { admitted(signal); return transport.focus(focused); },
+                completion, stop
+            };
+        } catch (error) {
+            if (!completion) {
+                quarantined.add(artifact.root);
+                livePending.delete(artifact.root);
+                signal?.removeEventListener("abort", stop);
+                throw Object.assign(new Error(`Preview live cleanup is unconfirmed. Logs: ${logDirectory}`, { cause: error }),
+                    { code: "termination-failed" });
+            }
+            if (!signal?.aborted && !stopping && !terminalError) terminalError = error;
+            stop();
+            try { await completion; }
+            catch (cleanupError) {
+                if (cleanupError.code === "termination-failed" || quarantined.has(artifact.root)) throw cleanupError;
+            }
+            throw terminalError ?? error;
+        }
+    }
+
+    return { build, verify, discover, render, openLive, release: cleanup };
 }
 
 module.exports = { createPreviewRuntime };
