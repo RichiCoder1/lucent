@@ -267,7 +267,7 @@ test("diagnostic navigation uses retained source data, bounds locations, and rej
     await f.commands.get("lucentLui.startPreview")();
     await f.action({ kind: "diagnostic", index: 0 });
     assert.equal(f.opened.length, 1);
-    assert.equal(f.opened[0].file.toLowerCase(), inside.toLowerCase());
+    assert.equal(f.opened[0].file.toLowerCase(), (await fs.realpath(inside)).toLowerCase());
     assert.deepEqual({ ...f.opened[0].selection }, { line: 1, column: 2, endLine: 1, endColumn: 2 });
     await f.action({ kind: "diagnostic", index: 1 });
     assert.match(f.errors.at(-1), /outside authored source roots/);
