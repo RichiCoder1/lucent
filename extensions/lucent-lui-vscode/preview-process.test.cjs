@@ -75,11 +75,34 @@ test("live handle confirms ownership independently and has no execution deadline
     assert.equal(f.writes.filter(write => write === "stop\n").length, 1);
     assert.equal([...clock.pending.values()][0].ms, request.graceMs + 15000);
     f.record({ ...result, status: "cancelled", termination: "cooperative" });
-    await Promise.resolve();
+    f.child.stdout.end();
+    await new Promise(resolve => setImmediate(resolve));
     assert.equal(completed, false, "Final JSON alone is insufficient before owner exit.");
+    assert.equal(f.child.killed, undefined, "EOF after valid final evidence is normal.");
     f.child.emit("close", 0);
     assert.equal((await stopping).treeReaped, true);
     assert.equal(clock.pending.size, 0);
+});
+
+test("live protocol EOF without a final record rejects immediately and keeps cleanup uncertain", async () => {
+    const f = childFixture();
+    const clock = fakeClock();
+    const handle = startSupervised("supervisor", { ...request, mode: "live" }, { spawn: () => f.child, clock });
+    let outcome;
+    const observed = handle.completion.then(() => { outcome = "accepted"; }, error => { outcome = error.code; });
+    f.record(started);
+    await handle.started;
+    f.child.stdout.end();
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+        assert.equal(outcome, "termination-failed", "A closed protocol cannot leave a live owner pending forever.");
+        assert.equal(f.child.killed, true);
+        assert.equal(clock.pending.size, 0);
+    } finally {
+        f.child.emit("close", 0);
+        await observed;
+    }
+    await assert.rejects(handle.stop(), error => error.code === "termination-failed");
 });
 
 test("stop before started keeps its cleanup deadline and cannot be reset by later ownership", async () => {

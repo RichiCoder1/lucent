@@ -316,3 +316,24 @@ test("Refresh cannot restart invisible or removed-workspace work", async () => {
     assert.ok(removed.watchers.every(watcher => watcher.disposed));
     removed.close();
 });
+
+
+test("stopped settings remain pending and Start resumes them without rebuilding for display changes", async () => {
+    const f = fixture();
+    await f.commands.get("lucentLui.startPreview")();
+    await f.action({ kind: "stop" });
+    await f.action({ kind: "select", scenarioId: "card/changed" });
+    const presentation = { logicalWidth: 640, logicalHeight: 480, scale: 1.25, colorScheme: "dark", contrast: "high", density: 2 };
+    await f.action({ kind: "presentation", presentation });
+    await f.action({ kind: "zoom", zoom: "fit" });
+    await f.action({ kind: "reset" });
+    assert.equal(f.builds.length, 1);
+    assert.equal(f.view.running, false);
+    assert.equal(f.view.zoom, "fit");
+    await f.action({ kind: "start" });
+    assert.equal(f.builds.length, 2);
+    assert.equal(f.builds[1].selection.scenarioId, "card/changed");
+    assert.deepEqual(f.builds[1].selection.presentation, presentation);
+    assert.equal(f.view.running, true);
+    f.close();
+});

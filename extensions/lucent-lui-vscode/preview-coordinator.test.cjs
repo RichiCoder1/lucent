@@ -322,3 +322,33 @@ test("mapped diagnostics stay immutable and are cleared synchronously when their
     assert.deepEqual(f.coordinator.state.diagnostics, []);
     await stopped;
 });
+
+
+test("Stopping remains observable until owned cleanup completes", async () => {
+    const cleaning = deferred(); const cleaned = deferred();
+    const f = fixture({ release: async () => { cleaning.resolve(); await cleaned.promise; } });
+    const running = f.coordinator.start({ scenarioId: "empty" });
+    await cleaning.promise;
+    const stopping = f.coordinator.stop();
+    assert.equal(f.coordinator.state.phase, "stopping");
+    cleaned.resolve();
+    await Promise.all([running, stopping]);
+    assert.equal(f.coordinator.state.phase, "stopped");
+    assert.equal(f.coordinator.state.frame, undefined);
+});
+
+test("accepted frame retains its title and presentation when a newer catalog fails capture", async () => {
+    let changed = false;
+    const f = fixture({
+        discover: async (_artifact, request) => ({ sessionId: request.sessionId, generation: request.generation,
+            scenarios: [{ id: "empty", title: changed ? "New title" : "Original title", ...defaults, colorScheme: changed ? "dark" : "light" }] }),
+        render: async (_artifact, request) => { if (changed) throw new Error("Failed capture"); return frameFor(request); }
+    });
+    await f.coordinator.start({ scenarioId: "empty" });
+    changed = true;
+    await f.coordinator.refresh();
+    assert.equal(f.coordinator.state.catalog.scenarios[0].title, "New title");
+    assert.equal(f.coordinator.state.frame.scenarioTitle, "Original title");
+    assert.equal(f.coordinator.state.frame.effectivePresentation.colorScheme, "light");
+    assert.equal(f.coordinator.state.phase, "stale");
+});

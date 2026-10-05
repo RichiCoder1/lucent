@@ -122,6 +122,14 @@ function startSupervised(supervisorPath, request, { signal, spawn = childProcess
     });
     child.stdout.on("error", () => uncertain("The preview supervisor output channel failed."));
     child.stderr.on("error", () => uncertain("The preview supervisor diagnostic channel failed."));
+    child.stdout.on("end", () => {
+        if (settled) return;
+        try {
+            pending += decoder.decode();
+            if (!finalRecord || pending.length)
+                uncertain("The preview supervisor protocol ended without final termination evidence.");
+        } catch { uncertain("The preview supervisor protocol ended with incomplete data."); }
+    });
     child.stdout.on("data", chunk => {
         if (settled) return;
         const bytes = Buffer.from(chunk);

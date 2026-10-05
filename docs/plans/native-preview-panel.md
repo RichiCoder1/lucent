@@ -152,3 +152,28 @@ Presentation changes still compile a fresh generation and start one-shot
 workers. These checks establish behavior and ownership, not an incremental
 latency target. Unsaved buffers, persistent rendering and current-generation
 input remain #232; production native chrome, UIA and IME parity are unclaimed.
+
+## Panel refinement — October 4, 2026
+
+The saved-source panel adds VS Code's scenario Quick Pick, compact presentation
+controls, a draft settings sheet, explicit Start/Stop states and display-only Fit.
+Draft Apply/Cancel/defaults stay separate from the accepted frame. The caption
+continues to identify that image's scenario, presentation and generation while
+replacement work is pending. Stop waits for cleanup, and settings staged while
+stopped do not start execution until Start is chosen.
+
+All 189 editor checks pass. A Computer Use walkthrough in the isolated, already
+trusted development editor verified real compiled 320-by-240 and 400-by-240
+frames, Fit at an approximately 365-pixel-wide panel, invalid zero-width feedback,
+stopped settings staging, explicit restart, the scenario Quick Pick and Output
+command. The old image remained labeled with its own dimensions until replacement.
+Stop during a fresh build displayed Stopping before Stopped and left no active
+generation directories. The owned editor was closed and Computer Use reset.
+This fixture uses the source extension and explicit registered scenarios; its
+unrelated older onboarding language-server override reported stale restore and
+was not treated as current onboarding verification.
+
+The product direction is active-file-first component preview with optional
+variants and Pin. These bounded panel checks do not deliver that discovery flow,
+unsaved updates, persistent interaction or the proposed inspector. The design
+handoff is being revised around that direction before broader integration.

@@ -3,7 +3,7 @@
 const { randomBytes, randomUUID } = require("node:crypto");
 
 const presentationKeys = ["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"];
-const phases = new Set(["idle", "discovering", "building", "rendering", "current", "stale", "stopped", "suspended", "blocked", "untrusted", "error"]);
+const phases = new Set(["idle", "discovering", "building", "rendering", "current", "stale", "stopping", "stopped", "suspended", "blocked", "untrusted", "error"]);
 const own = (value, keys) => value !== null && typeof value === "object" && !Array.isArray(value)
     && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const text = (value, max) => typeof value === "string" && value.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
@@ -54,11 +54,15 @@ function snapshot(view) {
         && Math.ceil(Math.fround(Math.fround(frame.logicalWidth) * Math.fround(frame.scale))) === frame.width
         && Math.ceil(Math.fround(Math.fround(frame.logicalHeight) * Math.fround(frame.scale))) === frame.height) {
         image = { png: frame.png.toString("base64"), logicalWidth: frame.logicalWidth, logicalHeight: frame.logicalHeight,
-            scale: frame.scale, width: frame.width, height: frame.height };
+            scale: frame.scale, width: frame.width, height: frame.height,
+            scenarioId: id(frame.scenarioId) ? frame.scenarioId : undefined, scenarioTitle: displayText(frame.scenarioTitle, 256),
+            presentation: presentation(frame.effectivePresentation),
+            generation: typeof frame.generation === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(frame.generation) ? frame.generation : undefined };
     }
     return { phase: phases.has(state.phase) ? state.phase : "error", generation: typeof state.generation === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(state.generation) ? state.generation : "0",
         stale: state.stale === true, catalogStale: state.catalogStale === true, diagnostic: displayText(state.diagnostic),
-        diagnostics, scenarios, selection: { scenarioId, presentation: chosen }, zoom: factor(view?.zoom) ? view.zoom : 1, frame: image };
+        diagnostics, scenarios, selection: { scenarioId, presentation: chosen }, zoom: view?.zoom === "fit" ? "fit" : factor(view?.zoom) ? view.zoom : 1,
+        running: view?.running === true, frame: image };
 }
 
 function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {}, onClose = () => {},
@@ -140,13 +144,13 @@ function createPreviewPanel({ panel, onAction = () => {}, onVisibility = () => {
                 break;
             }
             case "zoom":
-                if (own(message, [...base, "zoom"]) && factor(message.zoom)) action = { kind: "zoom", zoom: message.zoom };
+                if (own(message, [...base, "zoom"]) && (message.zoom === "fit" || factor(message.zoom))) action = { kind: "zoom", zoom: message.zoom };
                 break;
             case "diagnostic":
                 if (own(message, [...base, "index"]) && Number.isSafeInteger(message.index)
                     && latest.view.diagnostics.some(item => item.index === message.index)) action = { kind: "diagnostic", index: message.index };
                 break;
-            case "reset": case "refresh": case "stop":
+            case "start": case "pickScenario": case "output": case "reset": case "refresh": case "stop":
                 if (own(message, base)) action = { kind: message.kind };
                 break;
         }
@@ -179,9 +183,9 @@ function html(panelId, nonce) {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none';">
 <title>Lucent Preview</title><style nonce="${nonce}">
-body{font:var(--vscode-font-size) var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);padding:12px;margin:0}button,input,select{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));padding:4px 6px;border-radius:2px}button{cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}button:disabled,input:disabled,select:disabled{opacity:.55;cursor:default}.toolbar,form{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px}label{display:flex;flex-direction:column;gap:4px}input[type=number]{width:76px}#status{margin:12px 0;font-weight:600}#diagnostic{white-space:pre-wrap;color:var(--vscode-errorForeground)}#diagnostics{display:flex;flex-direction:column;align-items:start;gap:6px;margin:12px 0}#canvas{overflow:auto;border:1px solid var(--vscode-panel-border);min-height:64px}#image{display:block;pointer-events:none;user-select:none}#image[hidden]{display:none}#caption{color:var(--vscode-descriptionForeground);margin:8px 0}fieldset{display:contents}#empty{padding:16px;color:var(--vscode-descriptionForeground)}</style></head>
-<body data-panel-id="${panelId}"><div class="toolbar"><label>Scenario<select id="scenario" aria-label="Preview scenario"></select></label><label>Display zoom<input id="zoom" type="number" min="0.25" max="4" step="0.25" value="1"></label><button id="reset" type="button">Reset</button><button id="refresh" type="button">Refresh</button><button id="stop" type="button">Stop</button></div>
-<form id="presentation"><fieldset id="controls" disabled><label>Logical width<input id="logicalWidth" type="number" min="1" max="8192" step="any" required></label><label>Logical height<input id="logicalHeight" type="number" min="1" max="8192" step="any" required></label><label>Device scale<input id="scale" type="number" min="0.25" max="4" step="any" required></label><label>Appearance<select id="colorScheme"><option value="light">Light</option><option value="dark">Dark</option></select></label><label>Contrast<select id="contrast"><option value="normal">Normal</option><option value="high">High</option></select></label><label>Fixture density<input id="density" type="number" min="0.25" max="4" step="any" required></label><button type="submit">Apply presentation</button></fieldset></form>
+body{font:var(--vscode-font-size,13px) var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden}button,input,select{font:inherit;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));padding:4px 8px;border-radius:2px;min-height:30px;box-sizing:border-box}button{cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:hover{background:var(--vscode-button-secondaryHoverBackground)}button:focus-visible,input:focus-visible,select:focus-visible{outline:1px solid var(--vscode-focusBorder);outline-offset:2px}button:disabled,input:disabled,select:disabled{opacity:.55;cursor:default}.toolbar{display:flex;gap:6px;align-items:center;padding:8px;border-bottom:1px solid var(--vscode-panel-border);flex-shrink:0;flex-wrap:wrap}#pickScenario{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.toolbar label{display:flex;align-items:center;gap:4px}.toolbar select{max-width:92px}#scenario{display:none}#status{margin:8px 12px;font-weight:600}#diagnostic,#draftError{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--vscode-errorForeground);margin:0 12px}#diagnostics{display:flex;flex-direction:column;align-items:start;gap:6px;margin:8px 12px;max-height:20vh;overflow:auto}#diagnostics button{max-width:100%;text-align:left;overflow-wrap:anywhere}#canvas{overflow:auto;min-height:64px;flex:1;display:flex;align-items:safe center;justify-content:safe center}#image{display:block;pointer-events:none;user-select:none;flex-shrink:0}#image[hidden],[hidden]{display:none!important}#caption{color:var(--vscode-descriptionForeground);margin:8px 12px;font-size:11px;overflow-wrap:anywhere}#empty{padding:16px;color:var(--vscode-descriptionForeground)}#presentation{border-bottom:1px solid var(--vscode-panel-border);padding:12px;margin:0;max-height:55vh;overflow:auto}fieldset{border:0;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}fieldset label{display:flex;flex-direction:column;gap:4px}fieldset input,fieldset select{width:100%;min-width:0}.sheetActions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.help{margin:8px 0;color:var(--vscode-descriptionForeground)}#apply{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}::selection{background:var(--vscode-editor-selectionBackground)}input{caret-color:var(--vscode-foreground)}@media(max-width:700px){#pickScenario{flex-basis:100%;text-align:left}}@media(max-width:480px){fieldset{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar{gap:4px}#settings{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}</style></head>
+<body data-panel-id="${panelId}"><div class="toolbar"><button id="pickScenario" type="button">Choose scenario</button><select id="scenario" aria-label="Preview scenario" hidden></select><button id="settings" type="button" aria-expanded="false" aria-controls="presentation">Presentation</button><label>Zoom<select id="zoom" aria-label="Display zoom"><option value="fit">Fit</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option><option value="4">400%</option></select></label><button id="appearance" type="button" title="Change requested appearance; restarts with fresh state while running">Light</button><button id="reset" type="button" title="Same scenario and presentation; rebuilds with fresh state">Reset scenario</button><button id="start" type="button">Start preview</button><button id="stop" type="button">Stop</button><button id="output" type="button">Show preview output</button></div>
+<form id="presentation" hidden aria-label="Presentation settings"><fieldset id="controls" disabled><label>Logical width<input id="logicalWidth" type="number" min="1" max="8192" step="any" required></label><label>Logical height<input id="logicalHeight" type="number" min="1" max="8192" step="any" required></label><label>Device scale<input id="scale" type="number" min="0.25" max="4" step="any" required></label><label>Appearance<select id="colorScheme"><option value="light">Light</option><option value="dark">Dark</option></select></label><label>Contrast<select id="contrast"><option value="normal">Normal</option><option value="high">High</option></select></label><label>Fixture density<input id="density" type="number" min="0.25" max="4" step="any" required></label></fieldset><p class="help">Apply restarts with fresh state while running. While stopped, settings wait for Start. Choosing another scenario discards this draft.</p><div id="draftError" role="alert"></div><div class="sheetActions"><button id="apply" type="submit">Apply &amp; restart</button><button id="defaults" type="button">Scenario defaults</button><button id="cancel" type="button">Cancel</button></div></form>
 <div id="status" role="status" aria-live="polite">Waiting for preview</div><div id="diagnostic" role="alert"></div><div id="diagnostics" aria-label="Source diagnostics"></div><div id="canvas"><div id="empty">No accepted image yet</div><img id="image" alt="Compiled component preview" hidden draggable="false"></div><p id="caption">Images are noninteractive. Display zoom does not change renderer scale.</p><script nonce="${nonce}">(${webviewMain.toString()})();</script></body></html>`;
 }
 
@@ -191,24 +195,67 @@ function webviewMain() {
     const element = id => document.getElementById(id);
     let deliveryId;
     let presentationIdentity;
+    let requested;
+    let currentView;
+    let displayZoom = "fit";
+    let draftDirty = false;
+    let draftScenario;
+    const keys = ["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"];
+    const fillDraft = chosen => { for (const key of keys) element(key).value = chosen?.[key] ?? ""; draftDirty = false; element("draftError").textContent = ""; };
+    const closeSheet = () => { element("presentation").hidden = true; element("appearance").disabled = !requested; element("settings").setAttribute?.("aria-expanded", "false"); fillDraft(requested); element("settings").focus?.(); };
+    const sizeImage = () => {
+        if (!currentView?.frame) return;
+        const frame = currentView.frame;
+        const canvas = element("canvas");
+        const zoom = displayZoom === "fit" ? Math.min(1, (canvas.clientWidth || frame.logicalWidth) / frame.logicalWidth,
+            (canvas.clientHeight || frame.logicalHeight) / frame.logicalHeight) : Number(displayZoom);
+        element("image").style.width = `${frame.logicalWidth * zoom}px`;
+        element("image").style.height = `${frame.logicalHeight * zoom}px`;
+        const shown = frame.presentation;
+        element("caption").textContent = `${frame.scenarioTitle || frame.scenarioId || "Accepted frame"} · ${frame.logicalWidth} × ${frame.logicalHeight} · render scale ${frame.scale}${shown ? " · " + shown.colorScheme + " · " + shown.contrast + " contrast · density " + shown.density : ""}${frame.generation ? " · generation " + frame.generation : ""} · display ${Math.round(zoom * 100)}%${currentView.stale ? " · previous image, out of date" : ""}. Image is noninteractive.`;
+    };
     const send = (action, identity = deliveryId) => { if (identity) api.postMessage({ version: 1, panelId, deliveryId: identity, ...action }); };
     const ready = () => api.postMessage({ version: 1, panelId, kind: "ready" });
-    const labels = { idle: "Ready", discovering: "Loading scenarios", building: "Building preview", rendering: "Rendering preview", current: "Up to date", stale: "Previous image · out of date", stopped: "Preview stopped", suspended: "Preview paused while hidden", blocked: "Cleanup needs attention", untrusted: "Workspace trust required", error: "Preview unavailable" };
+    const labels = { idle: "Ready", discovering: "Loading scenarios", building: "Building preview", rendering: "Rendering preview", current: "Ready · saved source", stale: "Previous image · out of date", stopping: "Stopping preview · waiting for cleanup", stopped: "Stopped · changes apply on Start", suspended: "Preview paused while hidden", blocked: "Cleanup needs attention", untrusted: "Workspace trust required", error: "Preview unavailable" };
     element("scenario").addEventListener("change", () => send({ kind: "select", scenarioId: element("scenario").value }));
-    element("zoom").addEventListener("change", () => send({ kind: "zoom", zoom: Number(element("zoom").value) }));
-    for (const kind of ["reset", "refresh", "stop"]) element(kind).addEventListener("click", () => send({ kind }));
+    element("zoom").addEventListener("change", () => send({ kind: "zoom", zoom: element("zoom").value === "fit" ? "fit" : Number(element("zoom").value) }));
+    for (const kind of ["reset", "start", "stop", "output", "pickScenario"]) element(kind).addEventListener("click", () => send({ kind }));
+    element("settings").addEventListener("click", () => {
+        if (element("presentation").hidden === false) { closeSheet(); return; }
+        fillDraft(requested); element("presentation").hidden = false; element("appearance").disabled = true;
+        element("settings").setAttribute?.("aria-expanded", "true"); element("logicalWidth").focus?.();
+    });
+    element("cancel").addEventListener("click", closeSheet);
+    element("appearance").addEventListener("click", () => { if (requested && element("presentation").hidden !== false) send({ kind: "presentation", presentation: { ...requested, colorScheme: requested.colorScheme === "light" ? "dark" : "light" } }); });
+    for (const key of keys) element(key).addEventListener("input", () => { draftDirty = true; });
+    element("defaults").addEventListener("click", () => fillDraft(currentView?.scenarios.find(item => item.id === currentView.selection.scenarioId)));
+    document.addEventListener("keydown", event => { if (event.key === "Escape" && element("presentation").hidden === false) { event.preventDefault(); closeSheet(); } });
+    window.addEventListener("resize", sizeImage);
+    if (typeof ResizeObserver !== "undefined") new ResizeObserver(sizeImage).observe(element("canvas"));
     element("presentation").addEventListener("submit", event => {
         event.preventDefault();
         const presentation = {};
         for (const key of ["logicalWidth", "logicalHeight", "scale", "density"]) presentation[key] = Number(element(key).value);
         for (const key of ["colorScheme", "contrast"]) presentation[key] = element(key).value;
+        const extent = value => Number.isFinite(value) && value >= 1 && value <= 8192;
+        const factor = value => Number.isFinite(value) && value >= 0.25 && value <= 4;
+        const width = Math.ceil(Math.fround(Math.fround(presentation.logicalWidth) * Math.fround(presentation.scale)));
+        const height = Math.ceil(Math.fround(Math.fround(presentation.logicalHeight) * Math.fround(presentation.scale)));
+        if (!extent(presentation.logicalWidth) || !extent(presentation.logicalHeight) || !factor(presentation.scale) || !factor(presentation.density)
+            || !["light", "dark"].includes(presentation.colorScheme) || !["normal", "high"].includes(presentation.contrast)
+            || width > 8192 || height > 8192 || width * height > 16777216) {
+            element("draftError").textContent = "Use logical sizes 1–8192 and scale/density 0.25–4. Rendered dimensions must stay within 8192 pixels and 16,777,216 total pixels."; return;
+        }
         send({ kind: "presentation", presentation });
+        closeSheet();
     });
     window.addEventListener("message", event => {
         const message = event.data;
         if (message?.version !== 1 || message.panelId !== panelId || message.kind !== "view" || typeof message.deliveryId !== "string") return;
         deliveryId = message.deliveryId;
         const view = message.view;
+        currentView = view;
+        displayZoom = view.zoom;
         element("status").textContent = (labels[view.phase] || "Preview") + (view.stale && view.phase !== "stale" ? " · previous image is out of date" : "") + (view.catalogStale ? " · catalog out of date" : "");
         element("diagnostic").textContent = view.diagnostic;
         const scenario = element("scenario");
@@ -218,13 +265,28 @@ function webviewMain() {
         }
         scenario.value = view.selection.scenarioId || "";
         scenario.disabled = !view.scenarios.length;
+        element("pickScenario").textContent = view.scenarios.find(item => item.id === view.selection.scenarioId)?.title || "Choose scenario";
+        element("pickScenario").disabled = !view.scenarios.length || view.phase === "stopping" || view.phase === "blocked";
+        element("start").hidden = view.running || view.phase === "stopping" || view.phase === "blocked"; element("stop").hidden = !view.running && view.phase !== "stopping";
+        element("start").disabled = view.phase === "stopping" || view.phase === "blocked";
+        element("stop").disabled = view.phase === "stopping"; element("stop").textContent = view.phase === "stopping" ? "Stopping…" : "Stop";
+        element("reset").disabled = !view.running || view.phase === "stopping";
         const chosen = view.selection.presentation;
-        element("controls").disabled = !chosen;
+        requested = chosen;
+        element("appearance").textContent = chosen?.colorScheme === "dark" ? "Dark" : "Light";
+        element("appearance").disabled = !chosen || element("presentation").hidden === false || view.phase === "stopping" || view.phase === "blocked";
+        element("settings").disabled = !chosen || view.phase === "stopping" || view.phase === "blocked";
+        element("apply").textContent = view.running ? "Apply & restart" : "Apply for next start";
+        element("apply").disabled = !chosen || view.phase === "stopping" || view.phase === "blocked";
+        element("defaults").disabled = !chosen || view.phase === "stopping" || view.phase === "blocked";
+        element("settings").textContent = view.frame ? `${view.frame.logicalWidth} × ${view.frame.logicalHeight}` : "Presentation";
+        element("controls").disabled = !chosen || view.phase === "stopping" || view.phase === "blocked";
         const identity = JSON.stringify([view.selection.scenarioId, chosen]);
         if (identity !== presentationIdentity) {
             presentationIdentity = identity;
-            for (const key of ["logicalWidth", "logicalHeight", "scale", "colorScheme", "contrast", "density"]) element(key).value = chosen?.[key] ?? "";
+            if (!draftDirty || element("presentation").hidden !== false || draftScenario !== view.selection.scenarioId) fillDraft(chosen);
         }
+        draftScenario = view.selection.scenarioId;
         element("zoom").value = view.zoom;
         const diagnostics = element("diagnostics"); diagnostics.replaceChildren();
         for (const item of view.diagnostics) {
@@ -237,7 +299,7 @@ function webviewMain() {
             image.onload = ack;
             image.onerror = () => { element("diagnostic").textContent = "The accepted image could not be displayed."; };
             image.hidden = false; element("empty").hidden = true;
-            image.style.width = `${view.frame.logicalWidth * view.zoom}px`; image.style.height = `${view.frame.logicalHeight * view.zoom}px`;
+            sizeImage();
             image.style.opacity = view.stale ? "0.6" : "1";
             image.alt = view.stale ? "Previous compiled component preview, out of date" : "Compiled component preview";
             const source = "data:image/png;base64," + view.frame.png;
@@ -245,7 +307,8 @@ function webviewMain() {
                 image.onload = null;
                 ack();
             } else image.src = source;
-        } else { image.onload = null; image.onerror = null; image.removeAttribute("src"); image.hidden = true; element("empty").hidden = false; ack(); }
+        } else { image.onload = null; image.onerror = null; image.removeAttribute("src"); image.hidden = true; element("empty").hidden = false;
+            element("caption").textContent = "Images are noninteractive. Display zoom does not change renderer scale."; ack(); }
     });
     document.addEventListener("visibilitychange", () => { if (!document.hidden) ready(); });
     ready();

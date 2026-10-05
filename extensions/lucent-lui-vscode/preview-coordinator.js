@@ -97,7 +97,7 @@ function createPreviewCoordinator({ isTrusted, isSupported, build, verify, disco
             if (!frame.effectivePresentation || Object.entries(expectedPresentation)
                 .some(([key, value]) => frame.effectivePresentation[key] !== value))
                 throw new Error("The preview frame does not match its effective presentation.");
-            accepted = frame;
+            accepted = Object.freeze({ ...frame, scenarioTitle: scenario.title });
         } catch (error) {
             failure = error;
         } finally {
@@ -166,8 +166,10 @@ function createPreviewCoordinator({ isTrusted, isSupported, build, verify, disco
         ++epoch;
         diagnostics = Object.freeze([]);
         active?.abort();
-        if (!blocked) publish("stopped", String(epoch));
+        const ticket = epoch;
+        if (!blocked) publish("stopping", String(ticket));
         await tail;
+        if (!blocked && epoch === ticket) publish("stopped", String(ticket));
         return state;
     }
 

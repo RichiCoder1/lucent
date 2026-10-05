@@ -261,3 +261,48 @@ test("status and zoom updates retain presentation drafts while actual scenario o
     assert.equal(browser.nodes.get("logicalWidth").value, 800);
     f.transport.dispose();
 });
+
+
+test("settings sheet cancels drafts, defaults require Apply, and invalid physical bounds remain local", () => {
+    const f = fixture(); const browser = page(f.panel.webview.html);
+    f.receive(browser.messages.shift());
+    f.transport.update(view()); browser.deliver(f.messages[0]); f.receive(browser.messages.shift());
+    const get = id => browser.nodes.get(id);
+    const click = id => get(id).handlers.get("click")();
+    click("settings");
+    get("logicalWidth").value = "900"; get("logicalWidth").handlers.get("input")();
+    const replacement = view("2", { phase: "building", catalog: { scenarios: [{ id: "card/empty", title: "New label", ...presentation, logicalWidth: 700 }] } });
+    f.transport.update(replacement); browser.deliver(f.messages[1]); f.receive(browser.messages.shift());
+    assert.equal(get("logicalWidth").value, "900", "New catalog defaults must not overwrite a dirty open draft.");
+    click("cancel"); assert.equal(get("logicalWidth").value, 700);
+    assert.equal(get("presentation").hidden, true); assert.equal(f.actions.length, 0);
+    click("settings"); get("logicalWidth").value = "99"; click("defaults");
+    assert.equal(get("logicalWidth").value, 700); assert.equal(f.actions.length, 0);
+    get("logicalWidth").value = "8192"; get("logicalHeight").value = "8192";
+    get("presentation").handlers.get("submit")({ preventDefault() {} });
+    assert.equal(browser.messages.length, 0); assert.match(get("draftError").textContent, /16,777,216/);
+    click("defaults"); get("presentation").handlers.get("submit")({ preventDefault() {} });
+    f.receive(browser.messages.shift()); assert.equal(f.actions.length, 1);
+    assert.equal(f.actions[0].presentation.logicalWidth, 700); assert.equal(get("presentation").hidden, true);
+    f.transport.dispose();
+});
+
+test("Fit shrinks accepted pixels below numeric zoom bounds without enlargement or host rebuild actions", () => {
+    const f = fixture(); const browser = page(f.panel.webview.html);
+    f.receive(browser.messages.shift());
+    const input = view("1", { stale: true, frame: { png, logicalWidth: 160, logicalHeight: 120, scale: 1.1, width: 176, height: 132,
+        scenarioId: "card/old", scenarioTitle: "Old accepted scenario", generation: "accepted1", effectivePresentation: { ...presentation, colorScheme: "dark" } } });
+    input.zoom = "fit";
+    browser.nodes.set("canvas", { clientWidth: 16, clientHeight: 12 });
+    f.transport.update(input); browser.deliver(f.messages[0]);
+    assert.equal(browser.nodes.get("image").style.width, "16px");
+    assert.match(browser.nodes.get("caption").textContent, /Old accepted scenario.*dark.*accepted1.*display 10%/);
+    browser.nodes.get("image").onload(); f.receive(browser.messages.shift());
+    browser.nodes.get("canvas").clientWidth = 800; browser.nodes.get("canvas").clientHeight = 600;
+    f.transport.update({ ...input, state: { ...input.state, generation: "2" } }); browser.deliver(f.messages[1]);
+    assert.equal(browser.nodes.get("image").style.width, "160px", "Fit must never enlarge.");
+    assert.equal(f.actions.length, 0);
+    browser.nodes.get("zoom").value = "2"; browser.nodes.get("zoom").handlers.get("change")();
+    f.receive(browser.messages.at(-1)); assert.deepEqual(f.actions.at(-1), { kind: "zoom", zoom: 2 });
+    f.transport.dispose();
+});

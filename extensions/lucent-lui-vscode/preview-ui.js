@@ -15,7 +15,7 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
     let selection;
     let lastState = { phase: "idle", generation: "0", stale: false };
     let running = false;
-    let zoom = 1;
+    let zoom = "fit";
     let output;
     let selectedFolder;
     let settingsIdentity;
@@ -100,7 +100,7 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
     function updateView() {
         const state = running && panel?.visible === false && lastState.phase !== "blocked"
             ? { ...lastState, phase: "suspended", stale: !!lastState.frame } : lastState;
-        view?.update({ state, selection, zoom });
+        view?.update({ state, selection, zoom, running });
     }
 
     async function launch(chosen = selection) {
@@ -138,15 +138,27 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
         if (disposed || !panel || panel.visible === false) return;
         if (message.kind === "zoom") { zoom = message.zoom; updateView(); return; }
         if (message.kind === "stop") { await stop(); return; }
+        if (message.kind === "start") { await start(); return; }
+        if (message.kind === "output") { output ??= vscode.window.createOutputChannel("Lucent Preview"); output.show(true); return; }
         if (message.kind === "diagnostic") { await openDiagnostic(message.index); return; }
         if (!selection || !coordinator || retiring || !vscode.workspace.isTrusted) return;
+        if (message.kind === "pickScenario") {
+            const catalog = lastState.catalog;
+            const owner = coordinator;
+            const selected = await vscode.window.showQuickPick((catalog?.scenarios ?? []).map(item => ({
+                label: item.title, description: item.id, scenarioId: item.id
+            })), { placeHolder: "Choose a registered preview scenario", matchOnDescription: true });
+            if (disposed || coordinator !== owner || lastState.catalog !== catalog || !vscode.workspace.isTrusted || !selected) return;
+            await configure({ ...selection, scenarioId: selected.scenarioId, presentation: undefined });
+            return;
+        }
         if (message.kind === "select") {
             if (!lastState.catalog?.scenarios.some(item => item.id === message.scenarioId)) return;
             await configure({ ...selection, scenarioId: message.scenarioId, presentation: undefined });
         } else if (message.kind === "presentation") {
             if (!lastState.catalog?.scenarios.some(item => item.id === selection.scenarioId)) return;
             await configure({ ...selection, presentation: message.presentation });
-        } else if (message.kind === "reset" || message.kind === "refresh") await launch();
+        } else if (message.kind === "reset" || message.kind === "refresh") { if (running) await launch(); }
     }
 
     function visibility(visible) {
@@ -218,6 +230,7 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
             vscode.window.showErrorMessage("Select a preview .csproj inside its trusted workspace folder."); return;
         }
         const identity = JSON.stringify({ folder: folder.uri.fsPath, settings });
+        const pendingSelection = selection && settingsIdentity === identity && selection.projectPath === projectPath ? selection : undefined;
         if (retiring || coordinator && identity !== settingsIdentity) {
             await retireCoordinator();
             if (!current()) return;
@@ -256,7 +269,7 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
             running = false;
             panel.reveal?.(vscode.ViewColumn.Beside);
         }
-        await launch({ projectPath, scenarioId: settings.scenarioId, targetFramework: settings.targetFramework,
+        await launch(pendingSelection ?? { projectPath, scenarioId: settings.scenarioId, targetFramework: settings.targetFramework,
             configuration: settings.configuration ?? "Debug", extraInputs: (settings.extraInputs ?? []).map(file => path.resolve(folder.uri.fsPath, file)) });
     }
 

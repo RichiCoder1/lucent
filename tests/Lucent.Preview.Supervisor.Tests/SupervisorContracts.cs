@@ -72,20 +72,45 @@ public sealed class SupervisorContracts
             records.Add,
             cancel.Token
         );
-        await WaitForFile(ready, task);
-        await Task.Delay(30);
-        Assert.IsFalse(task.IsCompleted, "A healthy live worker has no capture lifetime deadline.");
-        Assert.AreEqual(1, records.Count);
-        Assert.AreEqual(
-            new SupervisorStarted(2, "preview-supervisor-started", "supervisor-contract"),
-            records[0]
-        );
-        await cancel.CancelAsync();
-        var result = await task;
-        Assert.AreEqual("cancelled", result.Status);
-        Assert.AreEqual("cooperative", result.Termination);
-        Assert.IsTrue(result.TreeReaped);
-        Assert.AreEqual("disposed", await File.ReadAllTextAsync(disposed));
+        Exception? failure = null;
+        try
+        {
+            await WaitForFile(ready, task);
+            await Task.Delay(30);
+            Assert.IsFalse(
+                task.IsCompleted,
+                "A healthy live worker has no capture lifetime deadline."
+            );
+            Assert.AreEqual(1, records.Count);
+            Assert.AreEqual(
+                new SupervisorStarted(2, "preview-supervisor-started", "supervisor-contract"),
+                records[0]
+            );
+            await cancel.CancelAsync();
+            var result = await task;
+            Assert.AreEqual("cancelled", result.Status);
+            Assert.AreEqual("cooperative", result.Termination);
+            Assert.IsTrue(result.TreeReaped);
+            Assert.AreEqual("disposed", await File.ReadAllTextAsync(disposed));
+        }
+        catch (Exception error)
+        {
+            failure = error;
+            fixture.Retain();
+            throw;
+        }
+        finally
+        {
+            await cancel.CancelAsync();
+            try
+            {
+                await task;
+            }
+            catch (Exception cleanupFailure) when (failure is not null)
+            {
+                failure.Data["SupervisorCleanupFailure"] = cleanupFailure;
+            }
+        }
     }
 
     [TestMethod]
