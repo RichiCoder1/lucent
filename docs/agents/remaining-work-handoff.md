@@ -17,8 +17,10 @@ CI and issue state before continuing from this snapshot.
    run are recorded under `artifacts/preview116-alias-location.json`. Keep that
    local evidence separate from the subsequently successful CI publication.
 2. The saved-source [#232](https://github.com/RichiCoder1/lucent/issues/232)
-   implementation is verified and ready for issue closeout: retained host,
-   supervised live pipe and editor input. The
+   implementation is committed and pushed in `e40414da`; the issue is closed
+   and Project 4 marks it Done. It joins the retained host, supervised live pipe
+   and editor input. Publication of this source is not yet confirmed; 119.1 above
+   remains the preceding confirmed release. The
    [interactive execution record](../plans/native-preview-interactive.md) records
    the failed original-path stock Csc substitution proof, successful retained
    paint-resource measurement, and supervisor v2 native/editor verification.

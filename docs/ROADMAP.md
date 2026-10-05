@@ -28,7 +28,7 @@ panel suspension, verified in the real development editor. Saved-source
 interactive preview #232 now adds the retained live worker, bounded input and
 actual-editor interaction. Its [execution record](plans/native-preview-interactive.md)
 separates automated, desktop and failed feasibility evidence. Component-first
-authoring #327–329 precedes external delivery #233. #227–231 are closed;
+authoring #327–329 precedes external delivery #233. #227–232 are closed;
 #232's October 4 feasibility work rejects
 physical staged-source substitution because it loses original compiler paths
 and nested analyzer settings. A public compiler-adapter experiment also fails
