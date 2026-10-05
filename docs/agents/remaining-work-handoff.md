@@ -24,8 +24,11 @@ CI and issue state before continuing from this snapshot.
    suppressions are lost at public Emit and generated source checksums differ.
    Unsaved preview remains disabled; the owner has been asked whether to deliver
    saved-source interaction first or invest in a maintained compiler frontend.
-   The internal live renderer passes 26 focused contracts and is under review.
-   Supervisor/panel refinements through `ef8a13a7` are pushed; CI is pending.
+   The internal live renderer passes 30 focused contracts after six adversarial
+   review corrections and a scoped source recheck. Integrate its transport next;
+   it does not yet provide a live worker pipe or editor input. Supervisor/panel
+   refinements through `ef8a13a7` are pushed; CI118 managed is green and package
+   verification remains pending. Design/roadmap changes are in `8b4f5770`.
    Use the four slices in the
    [roadmap](../ROADMAP.md#finish-232-in-reviewable-slices): original-path SDK
    overlays; a persistent preview host/renderer proof; supervised live-session

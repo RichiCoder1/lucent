@@ -33,8 +33,9 @@ stock emission parity: diagnostic suppressions and generated checksums differ.
 Unsaved preview remains disabled pending an explicit scope decision. Retained rendering reduces paint
 allocations in the measured fixture, while PNG encoding remains the larger cost.
 Supervisor v2 separates bounded/live ownership and passes its native/editor
-checks. The internal persistent host passes its focused suite and is undergoing
-adversarial review; the live protocol/editor integration remains in progress.
+checks. The internal persistent host passes 30 focused contracts after six
+adversarial corrections and a scoped source recheck; live protocol/editor
+integration remains in progress.
 This partial implementation does not close #232.
 
 The [native preview design](design/native-lui-preview/README.md) now prioritizes

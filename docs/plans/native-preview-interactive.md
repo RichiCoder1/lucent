@@ -169,14 +169,39 @@ and retained Skia surface/renderer. It has one in-flight frame plus dirty state,
 exact frame/input identities, autonomous async/timer/motion wakeups and explicit
 input-loss cleanup. Existing one-shot `PreviewWorker` behavior is unchanged.
 
-The warning-clean Hosting build and all 26 contracts pass, including 11 new live
+The initial warning-clean Hosting build and all 26 contracts passed, including 11 new live
 contracts covering attributable input/timer pixels, acknowledgments, backpressure,
 startup cancellation, queue overflow and sticky cleanup failure. Idle owner-turn
 and frame counters remain unchanged over the sampled interval. Whole-process
 CPU observations range from 0 to 15.62 ms over approximately 155–157 ms and are
 diagnostics, not a general low-CPU guarantee. The implementation report and TRX
 are under the renderer locator's `LIVE-IMPLEMENTATION-REPORT.md` and
-`live-results-final` directories. Adversarial review precedes transport wiring.
+`live-results-final` directories. These original measurements retain their source
+and timing limitations after the review corrections below.
+
+Adversarial review identified six focused gaps: shutdown callbacks lost their
+application context, cancellation could arrive before setup yet still invoke
+author code, failing tests could abandon owners, cleanup could authorize an old
+frame against newly projected geometry, one synthetic key release could stale the
+next, and the initial theme factory could receive Light for a dark request.
+
+Corrections keep shutdown under the application context, fence startup before
+author callbacks, own test cancellation/barriers/drain from launch, revoke input
+independently of transport acknowledgments, reconcile synthetic releases with
+bounded explicit failure, and bind the theme factory before setup. Independent
+pre-fix failures demonstrated null cleanup context, cancelled setup invocation,
+wrong factory appearance, activation of unseen geometry and the missing second
+key release. The layout repro uses public composition operations; no Core
+behavior was changed to satisfy a test.
+
+After correction the warning-clean Hosting build and all 30 contracts pass
+(15 live and 15 existing), with six-file pinned formatting and whitespace checks.
+The renderer evidence directory contains `LIVE-REVIEW-CORRECTIONS.md`, source and
+binary identities, retained intermediate fixture mistakes, and
+`live-review-after-second-results/review-after-second.trx`. The scoped source
+recheck resolves all six findings against the frozen hashes; it does not claim
+new execution or transport verification. It is recorded separately in the
+[review record](../../advisor-plans/reviews/2026-10-04-live-preview-host-review.md).
 
 This host does not yet provide the live worker protocol, editor input forwarding,
 active-file discovery or unsaved compilation. It is an independently checked
