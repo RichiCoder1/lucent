@@ -39,12 +39,19 @@ current image immediately and coalesces the next build. A failed build or scenar
 leaves the previous image visibly marked out of date. Unsaved buffers are not
 compiled by this slice.
 
-The panel lists the executable's registered scenarios. Selecting a scenario uses
-its defaults; **Apply presentation** changes logical width/height, device scale,
-light/dark appearance, contrast and fixture density for this preview only.
+The scenario button opens VS Code's Quick Pick for the executable's registered
+scenarios. Selecting one uses its defaults. Open the presentation settings using
+the size button, edit logical width/height, device scale, light/dark appearance,
+contrast and fixture density, then apply the draft. Cancel discards that draft;
+Scenario defaults fills the draft with the selected scenario's authored defaults.
+While stopped, **Apply for next start** stages settings without executing work;
+**Start preview** uses them. While running, **Apply & restart** creates fresh state.
 The authored theme factory receives the selected appearance. Density remains
 explicit fixture data, so its visual effect depends on the fixture using it.
 **Display zoom** changes editor magnification without rebuilding or changing DPI.
+The default **Fit** shrinks the accepted image to the available canvas without
+enlarging it. Its caption identifies the actual displayed image's presentation
+and generation, including when newer requested settings have not produced a frame.
 **Reset** rebuilds with a fresh fixture and clock, retaining the current controls.
 No setting or application source is rewritten by these controls.
 

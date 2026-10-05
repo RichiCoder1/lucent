@@ -28,26 +28,41 @@ panel suspension, verified in the real development editor. Next is unsaved and
 interactive preview #232, followed by external delivery #233. #227–231 are closed;
 #232's [October 4 feasibility work](plans/native-preview-interactive.md) rejects
 physical staged-source substitution because it loses original compiler paths
-and nested analyzer settings. A supported compiler-adapter experiment is under
-review; unsaved preview remains disabled. Retained rendering reduces paint
+and nested analyzer settings. A public compiler-adapter experiment also fails
+stock emission parity: diagnostic suppressions and generated checksums differ.
+Unsaved preview remains disabled pending an explicit scope decision. Retained rendering reduces paint
 allocations in the measured fixture, while PNG encoding remains the larger cost.
 Supervisor v2 separates bounded/live ownership and passes its native/editor
-checks. The persistent live host and integrated unsaved/interactive path remain
-in progress; this partial implementation does not close #232.
+checks. The internal persistent host passes its focused suite and is undergoing
+adversarial review; the live protocol/editor integration remains in progress.
+This partial implementation does not close #232.
+
+The [native preview design](design/native-lui-preview/README.md) now prioritizes
+the active `.lui` component: Follow editor by default, explicit Pin, automatic
+activation for defaultable components and optional component-scoped data/variants.
+The catalog remains execution infrastructure. Its
+[authoring contract](design/native-lui-preview/component-preview-authoring.md)
+separates verified file association [#327](https://github.com/RichiCoder1/lucent/issues/327)
+from generated default activation [#328](https://github.com/RichiCoder1/lucent/issues/328)
+and proposed development-only `.lui` declarations
+[#329](https://github.com/RichiCoder1/lucent/issues/329). #329 follows #328 and retains
+grammar planning review. #233 integrates all three alongside #232; these are not
+capabilities implied by the current scenario picker.
 Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
 distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit
 `3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
 At this October 4 checkpoint, the latest confirmed release is
-`0.3.0-dev.112.1`, from `d834ac78` after
-[CI112](https://github.com/RichiCoder1/lucent/actions/runs/36808337607) passed managed,
+`0.3.0-dev.117.1`, from `c6b6482e` after
+[CI117](https://github.com/RichiCoder1/lucent/actions/runs/37254418694) passed managed,
 package/native and publication jobs. The preceding 110.1 complete artifact was
 independently authenticated for onboarding. Supported distribution uses authenticated GitHub Packages and
 verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is
 not claimed. #231 is implemented at `77f1c69d`; its failed CI116 did not publish.
-The test-only Windows path-alias correction is `c6b6482e`, with CI117 pending.
-The handoff separates its local regression evidence from publication.
+The test-only Windows path-alias correction is `c6b6482e`; CI117 confirms its
+managed, package and publication jobs. The handoff preserves the failed CI116
+and local reproduction evidence separately.
 
 | Delivered work | Evidence and supported boundary |
 | --- | --- |
@@ -86,7 +101,7 @@ streams or interrupt the preview work already in flight.
 
 | Order | Bounded outcome | Technical sequence |
 | --- | --- | --- |
-| 1. [Native preview #224](https://github.com/RichiCoder1/lucent/issues/224) | Consistent unsaved C#/.lui, interactive compiled frames, owned cleanup, then documented package-only consumption | #232 after completed #231; #233 after #232 |
+| 1. [Native preview #224](https://github.com/RichiCoder1/lucent/issues/224) | Component-first activation and optional authored variants, consistent unsaved C#/.lui, interactive compiled frames, owned cleanup, then documented package-only consumption | #232 after completed #231; #327 association and #328 typed activation can proceed independently; #329 follows #328; #233 integrates #232/#327–329. Unsaved sequencing remains an owner decision after failed compiler probes |
 | 2. [Developer diagnostics #243](https://github.com/RichiCoder1/lucent/issues/243) | Read-only committed snapshots, redaction, provenance/source origins, inspector and bounded frame diagnostics | #250 first; #251 and #252 can follow independently; #253 needs both; #254 needs #252; #255 integrates #253/#254 with preview |
 | 3. [Transfer #244](https://github.com/RichiCoder1/lucent/issues/244) | Typed clipboard/drag transactions, Windows copy/link interoperability, bounded rich import and the two app consumers | #256 proves the native seam before #257; #258/#259/#261 follow #257; #260 follows drag routing, #262 follows clipboard and parser proof; #263 verifies the integrated framework |
 | Conditional follow-ons | Hot Reload acceleration and a narrow browser preview target | #234 and #238 each follow #233; their reports decide whether #235–237 and #239–241 proceed. WASM has no Hot Reload prerequisite |

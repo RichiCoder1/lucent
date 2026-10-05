@@ -327,3 +327,10 @@ The panel follows VS Code's [webview lifecycle and security guidance](https://co
 explicit message validation, nonce-scoped scripts, no local resource roots and
 no retained hidden page. Frame acknowledgments account for the documented
 distinction between posting a message and the page receiving it.
+
+The native-preview panel refinement follows VS Code's
+[webview UX guidance](https://code.visualstudio.com/api/ux-guidelines/webviews),
+consulted October 4, 2026: inherit editor theme tokens and compact controls, use
+the host Quick Pick for selection, and disclose presentation settings without
+duplicating the workbench. This is design guidance; no source or new dependency
+is copied.

@@ -116,6 +116,72 @@ integrated proof located by
 configuration and child-process permission failures are retained; the authorized
 run succeeds without changing user settings.
 
+Adversarial review exposed an open protocol pipe after its writer had already
+ended: a live supervisor could emit started and then close stdout without a
+final reaping record, leaving the client waiting indefinitely. EOF now rejects
+immediately as cleanup-uncertain; late process exit cannot manufacture reaping
+proof. A regression first reproduced the failure. The process suite now passes
+12 contracts, and the complete editor suite passes 189. The native cancellation
+test also drains its owned process in a finally block while retaining the primary
+assertion failure. Its warning-clean build and all 13 native contracts pass.
+Scoped formatting passes. Logs are under
+`artifacts/preview232-supervisor-{eof,review}-*.log` and the existing C: evidence
+directory's `review-test-results`.
+
+## Public compiler adapter: zero-overlay parity fails
+
+A second disposable experiment used the actual SDK Csc task's `CscToolPath` and
+`CscToolExe`, with shared compilation disabled. It captured the authoritative
+argument vector, response-file bytes, working directory and compiler identity.
+Delegating that invocation unchanged to stock Csc succeeded, including an output
+assertion inside `TargetsTriggeredByCompilation`. Public parser/configuration
+APIs also preserved original source paths and nested analyzer settings.
+
+Final compilation still failed the prerequisite comparison with saved source:
+
+- The ordinary SDK analyzer set already contains diagnostic suppressors. An
+  independent warning-as-error sentinel succeeds with its suppressor under stock
+  Csc. `GetAllDiagnosticsAsync` marks that warning suppressed, but a separate
+  public `Emit` returns the same warning unsuppressed as an error and fails.
+- The stock PDB records a generated document with SHA256; the public driver
+  retains the generator's default SHA1. The stock override is internal. No
+  generated-source rewriting was used to hide the difference.
+- A separate missing dynamic-binder fixture produces CS0656 only during emit,
+  confirming that successful analysis alone cannot gate final output.
+
+The experiment stops before frozen-vector emission. No actual Lucent preparation,
+emitter, graph/resource/cancellation or final-output parity claim follows from
+the successful binding observations. Original source/configuration hashes and
+membership are preserved. The harness completed its expected probes, but its
+`ZeroParityPassed` result is false; this is failed feasibility, not a delivered
+compiler adapter. The exact report and retained logs are located by
+`artifacts/preview232-adapter-experiment.md` and the existing overlay locator.
+
+Do not integrate the adapter, disable SDK analyzers or globally lower warning
+severity. The recommendation is to continue saved-source interactive preview
+while deciding whether unsaved support warrants a maintained compiler frontend.
+The owner has been asked to choose that scope; #232 remains open meanwhile.
+
+## Internal live host implementation
+
+An internal `PreviewRenderSession` now owns a continuously pumped Core session
+and retained Skia surface/renderer. It has one in-flight frame plus dirty state,
+exact frame/input identities, autonomous async/timer/motion wakeups and explicit
+input-loss cleanup. Existing one-shot `PreviewWorker` behavior is unchanged.
+
+The warning-clean Hosting build and all 26 contracts pass, including 11 new live
+contracts covering attributable input/timer pixels, acknowledgments, backpressure,
+startup cancellation, queue overflow and sticky cleanup failure. Idle owner-turn
+and frame counters remain unchanged over the sampled interval. Whole-process
+CPU observations range from 0 to 15.62 ms over approximately 155–157 ms and are
+diagnostics, not a general low-CPU guarantee. The implementation report and TRX
+are under the renderer locator's `LIVE-IMPLEMENTATION-REPORT.md` and
+`live-results-final` directories. Adversarial review precedes transport wiring.
+
+This host does not yet provide the live worker protocol, editor input forwarding,
+active-file discovery or unsaved compilation. It is an independently checked
+building block, not completion of #232.
+
 ## Design review correction
 
 The preview design review found that changing scenario or presentation after
