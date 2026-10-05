@@ -7,9 +7,10 @@ CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. [CI117](https://github.com/RichiCoder1/lucent/actions/runs/37254418694)
-   passed managed, package verification and publication for source `c6b6482e`,
-   publishing `0.3.0-dev.117.1`. This commit only
+1. [CI118](https://github.com/RichiCoder1/lucent/actions/runs/37257901829)
+   passed managed, package verification and publication for source `ef8a13a7`,
+   publishing `0.3.0-dev.118.1` with supervisor v2 and panel refinements.
+   Earlier CI117 published `c6b6482e`, which only
    corrects the diagnostic-navigation test's Windows canonical-path expectation.
    CI116 failed that assertion in both lanes and skipped publication; the
    faithfully reproduced short-path failure and the corrected 176/176 editor
@@ -27,8 +28,9 @@ CI and issue state before continuing from this snapshot.
    The internal live renderer passes 30 focused contracts after six adversarial
    review corrections and a scoped source recheck. Integrate its transport next;
    it does not yet provide a live worker pipe or editor input. Supervisor/panel
-   refinements through `ef8a13a7` are pushed; CI118 managed is green and package
-   verification remains pending. Design/roadmap changes are in `8b4f5770`.
+   refinements through `ef8a13a7` are published in official 118.1.
+   Design/roadmap changes are in `8b4f5770`; the reviewed internal host is in
+   `a4ce09e1`. CI118 does not cover those subsequent commits.
    Use the four slices in the
    [roadmap](../ROADMAP.md#finish-232-in-reviewable-slices): original-path SDK
    overlays; a persistent preview host/renderer proof; supervised live-session
@@ -72,6 +74,8 @@ grammar/profile work is #329, blocked by #328 and labeled needs-triage. They are
 linked under #224 and added to Project 4. #233's native dependency edges include
 all three as well as #232. The compiler source-strategy decision remains pending;
 none of these tickets claims unsaved fidelity is solved.
+Code Review independently rechecked the design, roadmap, handoff and live issue
+relationships at `a4ce09e1`: no sequencing or ownership correction was needed.
 
 ## Roadmap reconciliation
 
@@ -115,8 +119,8 @@ folder. No account sign-in or security setting was automated.
 | Fresh-consumer onboarding #249 / #242 | Verified authenticated/local-package fallback, mapped debugging, managed/native interaction and final official 110.1 installed-editor semantics; [execution](../plans/onboarding-execution.md) distinguishes artifact versions |
 | Performance #313–319 | Delivered through 89.1, including physical resize proof; [performance execution](../plans/performance-execution.md) preserves characterization and failures separately |
 
-The latest confirmed Lucent release is `0.3.0-dev.117.1`, source `c6b6482e`.
-[CI117](https://github.com/RichiCoder1/lucent/actions/runs/37254418694) passed all jobs.
+The latest confirmed Lucent release is `0.3.0-dev.118.1`, source `ef8a13a7`.
+[CI118](https://github.com/RichiCoder1/lucent/actions/runs/37257901829) passed all jobs.
 CI113–116 did not produce a newer release. CI116 at `77f1c69d` failed the same
 canonical-versus-8.3-path assertion in both lanes, with publication skipped.
 The test-only correction `c6b6482e` has a passing local short-path regression

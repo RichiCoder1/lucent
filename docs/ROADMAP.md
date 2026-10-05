@@ -55,9 +55,11 @@ installed-editor completion, hover and unsaved diagnostic recovery. Commit
 `3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
 At this October 4 checkpoint, the latest confirmed release is
-`0.3.0-dev.117.1`, from `c6b6482e` after
-[CI117](https://github.com/RichiCoder1/lucent/actions/runs/37254418694) passed managed,
-package/native and publication jobs. The preceding 110.1 complete artifact was
+`0.3.0-dev.118.1`, from `ef8a13a7` after
+[CI118](https://github.com/RichiCoder1/lucent/actions/runs/37257901829) passed managed,
+package/native and publication jobs. This includes supervisor v2 and panel
+refinements; the subsequent internal live host has focused local verification
+and adversarial review but is not part of that release. The preceding 110.1 complete artifact was
 independently authenticated for onboarding. Supported distribution uses authenticated GitHub Packages and
 verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is
 not claimed. #231 is implemented at `77f1c69d`; its failed CI116 did not publish.
