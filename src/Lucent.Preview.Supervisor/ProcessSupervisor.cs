@@ -10,11 +10,24 @@ public static class ProcessSupervisor
     public static Task<SupervisorResult> RunAsync(
         SupervisorRequest request,
         CancellationToken stop = default
-    ) => RunAsync(request, canObserveJob: null, stop);
+    ) => RunAsync(request, canObserveJob: null, onStarted: null, stop);
 
-    internal static async Task<SupervisorResult> RunAsync(
+    public static Task<SupervisorResult> RunAsync(
+        SupervisorRequest request,
+        Action<SupervisorStarted> onStarted,
+        CancellationToken stop = default
+    ) => RunAsync(request, canObserveJob: null, onStarted, stop);
+
+    internal static Task<SupervisorResult> RunAsync(
         SupervisorRequest request,
         Func<bool>? canObserveJob,
+        CancellationToken stop
+    ) => RunAsync(request, canObserveJob, onStarted: null, stop);
+
+    private static async Task<SupervisorResult> RunAsync(
+        SupervisorRequest request,
+        Func<bool>? canObserveJob,
+        Action<SupervisorStarted>? onStarted,
         CancellationToken stop
     )
     {
@@ -32,6 +45,8 @@ public static class ProcessSupervisor
             output = NewLog(request.LogDirectory, "stdout.log");
             error = NewLog(request.LogDirectory, "stderr.log");
             job = OwnedProcessJob.Start(request, stop, canObserveJob);
+            // This confirms process ownership, not the worker protocol's readiness handshake.
+            onStarted?.Invoke(SupervisorStarted.For(request));
             var limit = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously
             );
@@ -51,7 +66,7 @@ public static class ProcessSupervisor
             var started = Stopwatch.StartNew();
             var status = "completed";
             var termination = "natural";
-            while (!job.HasExited)
+            while (true)
             {
                 if (stop.IsCancellationRequested)
                 {
@@ -68,7 +83,9 @@ public static class ProcessSupervisor
                     status = "launch-failed";
                     break;
                 }
-                if (started.ElapsedMilliseconds >= request.TimeoutMs)
+                if (job.HasExited)
+                    break;
+                if (request.Mode == "bounded" && started.ElapsedMilliseconds >= request.TimeoutMs)
                 {
                     status = "timeout";
                     break;
@@ -103,7 +120,7 @@ public static class ProcessSupervisor
             }
             if (!reaped)
                 return new(
-                    1,
+                    2,
                     "preview-supervisor-result",
                     request.RequestId,
                     "termination-failed",
@@ -120,7 +137,7 @@ public static class ProcessSupervisor
                 if (limit.Task.IsCompleted)
                     status = "output-limit";
                 return new(
-                    1,
+                    2,
                     "preview-supervisor-result",
                     request.RequestId,
                     status,
@@ -135,7 +152,7 @@ public static class ProcessSupervisor
             {
                 // A pipe held outside the owned job makes complete output cleanup uncertain.
                 return new(
-                    1,
+                    2,
                     "preview-supervisor-result",
                     request.RequestId,
                     "termination-failed",

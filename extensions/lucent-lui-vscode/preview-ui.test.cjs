@@ -223,10 +223,21 @@ test("hidden preview stops work, ignores old watchers, and resumes only if the u
     oldWatcher.callbacks[1]({ scheme: "file", fsPath: path.join(f.folder.uri.fsPath, "preview", "Card.lui") });
     assert.equal(f.timers.size, 0);
     await f.action({ kind: "stop" });
+    await f.action({ kind: "select", scenarioId: "card/changed" });
+    const pendingPresentation = { logicalWidth: 480, logicalHeight: 320, scale: 1.5,
+        colorScheme: "dark", contrast: "normal", density: 0.75 };
+    await f.action({ kind: "presentation", presentation: pendingPresentation });
+    assert.equal(f.builds.length, 2, "changing settings must not undo an explicit Stop");
+    assert.equal(f.view.selection.scenarioId, "card/changed");
+    assert.deepEqual(f.view.selection.presentation, pendingPresentation);
     await f.visible(false);
     await f.visible(true);
     assert.equal(f.builds.length, 2);
     assert.equal(f.view.state.phase, "stopped");
+    await f.commands.get("lucentLui.refreshPreview")();
+    assert.equal(f.builds.length, 3);
+    assert.equal(f.builds.at(-1).selection.scenarioId, "card/changed");
+    assert.deepEqual(f.builds.at(-1).selection.presentation, pendingPresentation);
     f.close();
 });
 

@@ -115,6 +115,12 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
         await coordinator.start(selection);
     }
 
+    async function configure(chosen) {
+        selection = { ...chosen, presentation: chosen.presentation ? { ...chosen.presentation } : undefined };
+        if (running) await launch();
+        else updateView();
+    }
+
     async function openDiagnostic(index) {
         const state = lastState;
         const diagnostic = state.diagnostics?.[index];
@@ -136,10 +142,10 @@ function createPreviewCommands(vscode, context, { runtimeFactory = createPreview
         if (!selection || !coordinator || retiring || !vscode.workspace.isTrusted) return;
         if (message.kind === "select") {
             if (!lastState.catalog?.scenarios.some(item => item.id === message.scenarioId)) return;
-            await launch({ ...selection, scenarioId: message.scenarioId, presentation: undefined });
+            await configure({ ...selection, scenarioId: message.scenarioId, presentation: undefined });
         } else if (message.kind === "presentation") {
             if (!lastState.catalog?.scenarios.some(item => item.id === selection.scenarioId)) return;
-            await launch({ ...selection, presentation: message.presentation });
+            await configure({ ...selection, presentation: message.presentation });
         } else if (message.kind === "reset" || message.kind === "refresh") await launch();
     }
 

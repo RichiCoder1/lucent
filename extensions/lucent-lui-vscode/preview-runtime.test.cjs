@@ -24,6 +24,9 @@ async function fixture(t, { uncertain = false, failBuild = false, failWorker = f
     const workerRequests = [];
     let buildDirectory;
     async function supervise(_supervisor, request, { signal } = {}) {
+        assert.equal(request.protocolVersion, 2);
+        assert.equal(request.kind, "preview-supervisor-request");
+        assert.equal(request.mode, "bounded");
         calls.push(request.args[0]);
         const ok = { status: "completed", exitCode: 0, treeReaped: true };
         if (request.args[0] === "build") {

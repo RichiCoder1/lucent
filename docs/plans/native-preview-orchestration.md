@@ -186,6 +186,7 @@ Evidence is under the onboarding folder's
 `vscode-data/User/globalStorage/lucent.lucent-lui/preview/diagnostics/failure-we74mf`.
 
 Presentation controls and mapped diagnostics are recorded separately in
-[panel #231](native-preview-panel.md). Continuous preview, inspection and
-authenticated external delivery remain #232–233. This work establishes no
+[panel #231](native-preview-panel.md). Continuous interaction and unsaved builds
+remain #232; authenticated external delivery remains #233. Runtime inspection
+and source origins belong to #243/#251–255. This work establishes no
 incremental-build latency target.

@@ -1,40 +1,79 @@
 # Current work and handoff
 
-Updated October 1, 2026. The owner authorized the remaining review corrections,
-then the broader roadmap, with completed chunks committed and pushed as needed.
+Updated October 4, 2026. The owner resumed native preview and requested roadmap
+reconciliation, with completed chunks committed and pushed as needed.
 GitHub acceptance and the [roadmap](../ROADMAP.md) govern scope. Recheck live source,
 CI and issue state before continuing from this snapshot.
 
 ## Resume here
 
-1. Continue unsaved and interactive preview
-   [#232](https://github.com/RichiCoder1/lucent/issues/232). The bounded panel
-   #231 passes 176 editor checks, 15 compiled worker contracts, 18 existing
-   scenario contracts, the integrated v2 SDK/Skia pipeline and actual editor
-   controls/diagnostic navigation. Its [execution record](../plans/native-preview-panel.md)
-   retains exact artifacts and review corrections. Trusted build and worker
-   orchestration #230 also passed 12 Windows supervisor contracts and the actual
-   SDK build fixture. Its
-   [implementation record](../plans/native-preview-orchestration.md) separates
-   the integrated Skia pipeline, source-lock preservation, adversarial fixes and
-   actual editor walkthrough. Scenario #229 and design-mode #228 remain their
-   prerequisite owners. Serialize shared checkout builds and keep new outputs
-   on C: while D: is constrained. No new owner decision is pending.
-2. Native preview [#227](https://github.com/RichiCoder1/lucent/issues/227) feasibility
-   passed on official 108.1: three fresh workers, attributable real Skia text/SVG/icon
-   output, and failed builds rejected before launch. The retained
-   [report](../../tests/Probes/Preview/NativeFeasibility/REPORT.md) records a 3.016-second
-   edit-to-frame observation and bounded allocation/memory/idle measurements. It
-   supports the existing headless seam, not continuous-preview performance claims.
-3. Onboarding [#249](https://github.com/RichiCoder1/lucent/issues/249) is verified.
-   The [execution record](../plans/onboarding-execution.md) distinguishes the fresh
-   107.1 app/debug/native proof from the final coherent official 110.1 editor
-   completion, hover and unsaved-diagnostic recovery. CI110 passed all jobs;
-   CI109 was superseded, not accepted. Continue [preview #224](https://github.com/RichiCoder1/lucent/issues/224),
-   then diagnostics #243 and transfer #244 according to their technical dependencies.
+1. Check [CI117](https://github.com/RichiCoder1/lucent/actions/runs/37254418694)
+   for source `c6b6482e`; it was running at this reconciliation. This commit only
+   corrects the diagnostic-navigation test's Windows canonical-path expectation.
+   CI116 failed that assertion in both lanes and skipped publication; the
+   faithfully reproduced short-path failure and the corrected 176/176 editor
+   run are recorded under `artifacts/preview116-alias-location.json`. Local green
+   evidence is not a newer published release. Implementation owns CI closeout.
+2. Continue [#232](https://github.com/RichiCoder1/lucent/issues/232). Source
+   `c6b6482e` precedes unsaved/interactive support. The
+   [interactive execution record](../plans/native-preview-interactive.md) records
+   the failed original-path stock Csc substitution proof, successful retained
+   paint-resource measurement, and supervisor v2 native/editor verification.
+   Unsaved preview remains disabled pending the compiler-adapter design and proof.
+   The production live renderer is in progress. Use the four slices in the
+   [roadmap](../ROADMAP.md#finish-232-in-reviewable-slices): original-path SDK
+   overlays; a persistent preview host/renderer proof; supervised live-session
+   integration; then current-generation input and actual-editor acceptance.
+   The first two can proceed independently. Both preparation and final compilation
+   must consume the same unsaved contents without changing source/configuration
+   identity or saving buffers. A path-mapping workaround is not that proof.
+   If no supported compiler hook preserves the contract, record the result and
+   settle the compiler-adapter design or scope before expanding implementation.
+   No new product decision blocks these proofs.
+3. Keep live readiness and cleanup separate: a verified build/vector plus the
+   started/ready records permit live frames; confirmed tree reaping permits
+   replacement and directory deletion. Stop must survive frame backpressure,
+   and owned input release/cancel must survive a newer displayed frame. Measure
+   the small persistent preview before extracting a general offscreen host.
+   `artifacts/preview232-preparation.md` is an earlier read-only proposal; its
+   generic Offscreen project and staged-source substitution are not proven or
+   accepted prerequisites. Scenario updates still rebuild/restart and reset state.
+   The proposed bounded/live supervisor modes fit this split: build/catalog keep
+   operation deadlines; live mode needs a bounded worker handshake and shutdown,
+   without periodically expiring a healthy session. Supervisor-started is emitted
+   only after job ownership; worker-ready arrives separately through its channel.
+4. Complete package/consumer delivery [#233](https://github.com/RichiCoder1/lucent/issues/233)
+   after #232, then diagnostics #243 and transfer #244. The
+   [roadmap sequence](../ROADMAP.md#remaining-road-to-10) records actual child
+   prerequisites and Notes #10 adoption. Hot Reload #234 and WASM #238 are
+   separate feasibility investigations after #233; neither implementation nor
+   inclusion in 1.0 is implied by a ready-for-agent label. No new dates or broad
+   verification gates are introduced.
+
+## Roadmap reconciliation
+
+Code Review and Astra reviewed the remaining sequence on October 4. The changes
+are applied and read back from GitHub:
+
+- #223 now orders preview → diagnostics → transfer, preserves completed
+  foundations as history and keeps Hot Reload/WASM conditional. Absent local
+  plan links point to the retained parent designs and research instead.
+- #224 checks off closed #227–231, leaving #232/#233 open. #232 now carries its
+  four implementation slices without duplicate acceptance tickets.
+- #255's description and native blocked-by edges now name #232, #253 and #254.
+  Inspection reuses the live session without adding a reverse dependency.
+- Scenario/orchestration prose now assigns mapped diagnostics to #231 and runtime
+  inspection/source origins to #243/#251–255.
+
+Before release, #223 needs a bounded owner decision on API/language/tool and
+schema compatibility, the supported globalization/accessibility/IME matrix,
+distribution, and whether Hot Reload/WASM belongs in 1.0. The recommendation is
+to keep those two accelerators/targets optional for the native release. This is
+not a prerequisite for continuing the accepted preview work.
 
 The onboarding fixture is located by `artifacts/onboarding249-current.txt`.
-The isolated editor and test apps are closed; Computer Use has ended. UI/focus
+At the prior walkthrough checkpoint the isolated editor/test apps were closed
+and Computer Use had ended; recheck live sessions before resuming. UI/focus
 checks remain authorized. The owner manually trusted only the generated app
 folder. No account sign-in or security setting was automated.
 
@@ -42,6 +81,8 @@ folder. No account sign-in or security setting was automated.
 
 | Work | Current boundary and evidence owner |
 | --- | --- |
+| Preview feasibility #227 | Closed; [report](../../tests/Probes/Preview/NativeFeasibility/REPORT.md) proves three fresh workers, real Skia text/SVG/icon output and rejected failed builds on official 108.1; its 3.016-second observation is not continuous-preview performance evidence |
+| Design mode/scenarios/orchestration/panel #228–231 | Closed; [design mode](../plans/design-mode-execution.md), [scenarios](../plans/native-preview-scenarios.md), [orchestration](../plans/native-preview-orchestration.md) and [panel](../plans/native-preview-panel.md) own source-bound contracts and actual-editor evidence; #231 source is `77f1c69d`, with publication still pending |
 | Review corrections #320–326 and Notes #11/#12 | Delivered and closed; [review execution](../plans/comprehensive-review-execution.md) retains exact-source evidence and measured deferrals |
 | Navigation restoration #221 and activation #222 / #205 | Delivered; [restoration/activation plan](../plans/navigation-restoration-activation.md) and [journal design](../plans/navigation-journal-implementation.md) describe the contracts |
 | Release identity #245 | Closed after authenticated CI101 publication; [release contract](../RELEASE-SETS.md) owns exact identities |
@@ -53,10 +94,12 @@ folder. No account sign-in or security setting was automated.
 
 The latest confirmed Lucent release is `0.3.0-dev.112.1`, source `d834ac78`.
 [CI112](https://github.com/RichiCoder1/lucent/actions/runs/36808337607) passed all jobs.
-CI113's package lane passed but an editor-test startup watchdog failed, so it
-did not publish. The corrected harness preserves the actual timeout contract;
-fault-injection evidence is recorded with #230. New source is not yet a claim
-of a newer published release.
+CI113–116 did not produce a newer release. CI116 at `77f1c69d` failed the same
+canonical-versus-8.3-path assertion in both lanes, with publication skipped.
+The test-only correction `c6b6482e` has a passing local short-path regression
+and editor suite; CI117 is pending. Do not relabel those results as package
+delivery. The earlier startup-watchdog and source-lock corrections remain in
+#230's evidence.
 The preceding 110.1 complete artifact and descriptor were independently
 authenticated for onboarding:
 
@@ -70,7 +113,8 @@ restores, 102 managed tests, formatting and NativeAOT publication pass;
 The unchanged 520-pixel regression and actual 480-by-520 native editor check pass;
 typed content survives reopening the isolated database. The consumed Lucent
 packages match official-feed bytes. Evidence: `artifacts/notes101-adoption`.
-No pending Notes package-adoption work remains in this batch.
+No pending Notes package-adoption work remains from that batch. Future transfer
+adoption is tracked separately in [Notes #10](https://github.com/RichiCoder1/light-notes/issues/10).
 
 ## Evidence to retain
 
@@ -116,7 +160,8 @@ unrelated changes:
   a nonzero expected case count. Follow [verification policy](verification.md)
   and [test scope](../TESTING.md); measurements on an active machine are
   characterization, not native frame-budget or manual interaction proof.
-- D: has limited space. The owner approved removal of only the failed repository
+- At the prior checkpoint D: had limited space; recheck capacity before large
+  builds. The owner approved removal of only the failed repository
   `.nuget/packages` cache, reclaiming 710 MB. That cleanup is complete. Keep the
   normal C: package cache and failed logs; place substantial new artifacts on C:.
 - If D: disappears, inspect `C:/DevDrive/Dev.vhdx` attachment before changing

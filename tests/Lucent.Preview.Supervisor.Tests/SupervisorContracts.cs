@@ -36,7 +36,12 @@ public sealed class SupervisorContracts
     {
         using var fixture = new Fixture();
         var pid = Path.Combine(fixture.Root, "descendant.pid");
-        var result = await ProcessSupervisor.RunAsync(fixture.Request(["descendant", pid]));
+        var result = await ProcessSupervisor.RunAsync(
+            fixture.Request(["descendant", pid]) with
+            {
+                Mode = "live",
+            }
+        );
         Assert.AreEqual("completed", result.Status);
         Assert.AreEqual("forced", result.Termination);
         Assert.IsTrue(result.TreeReaped);
@@ -57,17 +62,51 @@ public sealed class SupervisorContracts
         using var cancel = new CancellationTokenSource();
         var ready = Path.Combine(fixture.Root, "ready.pid");
         var disposed = Path.Combine(fixture.Root, "disposed.txt");
+        var records = new List<SupervisorStarted>();
         var task = ProcessSupervisor.RunAsync(
-            fixture.Request(["cooperative", ready, disposed]),
+            fixture.Request(["cooperative", ready, disposed]) with
+            {
+                Mode = "live",
+                TimeoutMs = 1,
+            },
+            records.Add,
             cancel.Token
         );
         await WaitForFile(ready, task);
+        await Task.Delay(30);
+        Assert.IsFalse(task.IsCompleted, "A healthy live worker has no capture lifetime deadline.");
+        Assert.AreEqual(1, records.Count);
+        Assert.AreEqual(
+            new SupervisorStarted(2, "preview-supervisor-started", "supervisor-contract"),
+            records[0]
+        );
         await cancel.CancelAsync();
         var result = await task;
         Assert.AreEqual("cancelled", result.Status);
         Assert.AreEqual("cooperative", result.Termination);
         Assert.IsTrue(result.TreeReaped);
         Assert.AreEqual("disposed", await File.ReadAllTextAsync(disposed));
+    }
+
+    [TestMethod]
+    public async Task StartedChannelFailureStillReapsTheOwnedChild()
+    {
+        using var fixture = new Fixture();
+        var records = 0;
+        var result = await ProcessSupervisor.RunAsync(
+            fixture.Request(["hang"]) with
+            {
+                Mode = "live",
+            },
+            onStarted: _ =>
+            {
+                records++;
+                throw new IOException("Started channel closed.");
+            }
+        );
+        Assert.AreEqual(1, records);
+        Assert.AreEqual("launch-failed", result.Status);
+        Assert.IsTrue(result.TreeReaped);
     }
 
     [TestMethod]
@@ -145,8 +184,14 @@ public sealed class SupervisorContracts
         using var fixture = new Fixture();
         using var stop = new CancellationTokenSource();
         await stop.CancelAsync();
-        var result = await ProcessSupervisor.RunAsync(fixture.Request(["crash"]), stop.Token);
+        var records = 0;
+        var result = await ProcessSupervisor.RunAsync(
+            fixture.Request(["crash"]),
+            _ => records++,
+            stop.Token
+        );
         Assert.AreEqual("cancelled", result.Status);
+        Assert.AreEqual(0, records);
         Assert.IsTrue(result.TreeReaped);
         Assert.IsFalse(File.Exists(Path.Combine(fixture.Logs, "stdout.log")));
     }
@@ -158,6 +203,8 @@ public sealed class SupervisorContracts
         var result = await ProcessSupervisor.RunAsync(
             fixture.Request(["output"]) with
             {
+                Mode = "live",
+                TimeoutMs = 1,
                 MaxOutputBytes = 4096,
             }
         );
@@ -188,7 +235,7 @@ public sealed class SupervisorContracts
     {
         using var fixture = new Fixture();
         var ready = Path.Combine(fixture.Root, "ready.pid");
-        var request = fixture.Request(["hang", ready]);
+        var request = fixture.Request(["hang", ready]) with { Mode = "live", TimeoutMs = 1 };
         var host = Path.Combine(
             Path.GetFullPath(
                 Path.Combine(
@@ -218,7 +265,16 @@ public sealed class SupervisorContracts
                 JsonSerializer.Serialize(request, JsonOptions)
             );
             await process.StandardInput.FlushAsync();
+            var started = JsonSerializer.Deserialize<SupervisorStarted>(
+                (await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)))!,
+                JsonOptions
+            );
+            Assert.AreEqual(
+                new SupervisorStarted(2, "preview-supervisor-started", request.RequestId),
+                started
+            );
             await WaitForFile(ready, process.WaitForExitAsync());
+            Assert.IsFalse(process.HasExited);
             process.StandardInput.Close();
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             var json = await process.StandardOutput.ReadToEndAsync();
@@ -292,6 +348,12 @@ public sealed class SupervisorContracts
             (fixture.Request(["crash"]) with { GraceMs = 10_001 }).Validate()
         );
         Assert.ThrowsExactly<ArgumentException>(() =>
+            (fixture.Request(["crash"]) with { ProtocolVersion = 1 }).Validate()
+        );
+        Assert.ThrowsExactly<ArgumentException>(() =>
+            (fixture.Request(["crash"]) with { Mode = "interactive" }).Validate()
+        );
+        Assert.ThrowsExactly<ArgumentException>(() =>
             (fixture.Request(["crash"]) with { Program = "relative.exe" }).Validate()
         );
         Assert.ThrowsExactly<ArgumentException>(() =>
@@ -340,8 +402,9 @@ public sealed class SupervisorContracts
 
         internal SupervisorRequest Request(string[] args) =>
             new(
-                1,
+                2,
                 "preview-supervisor-request",
+                "bounded",
                 "supervisor-contract",
                 Path.Combine(
                     AppContext.BaseDirectory,

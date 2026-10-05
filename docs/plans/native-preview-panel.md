@@ -51,7 +51,11 @@ Logical extents are 1–8192, scale and density are 0.25–4, physical dimension
 are at most 8192 each, and their product is at most 16,777,216 pixels. PNG output
 is capped at 32 MiB. Physical extents use the renderer's binary32 arithmetic.
 Unsupported descriptor defaults produce a bounded failure before capture.
-Build and supervisor protocols retain their independent version 1 contracts.
+The build protocol remains at version 1. The supervisor advances independently
+to version 2 for #232: these one-shot build, catalog and capture operations use
+its bounded mode. A supervisor-started record establishes process ownership;
+only the final reaping record permits cleanup or replacement. Worker protocol
+v2 remains the saved-file capture boundary described here.
 
 ## Panel lifecycle and message boundary
 

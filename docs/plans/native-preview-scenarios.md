@@ -100,7 +100,8 @@ preview latency, or native input behavior.
 - #230 owns worker generations, build cancellation, bounded failure reporting
   and process supervision.
 - #231 owns the opt-in editor panel and source-bound scenario selection.
-- #232 owns inspection overlays and diagnostic presentation.
+- #231 owns mapped compiler diagnostics; #232 owns unsaved builds and interactive
+  frames. Runtime inspection and source origins belong to #243/#251–255.
 - #233 owns integrated consumer proof and distribution.
 
 No additional owner decision is required for this bounded scenario slice.

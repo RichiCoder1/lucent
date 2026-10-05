@@ -6,6 +6,7 @@ namespace Lucent.Preview.Supervisor;
 public sealed record SupervisorRequest(
     int ProtocolVersion,
     string Kind,
+    string Mode,
     string RequestId,
     string Program,
     string[] Args,
@@ -22,7 +23,11 @@ public sealed record SupervisorRequest(
 
     public void Validate()
     {
-        if (ProtocolVersion != 1 || Kind != "preview-supervisor-request")
+        if (
+            ProtocolVersion != 2
+            || Kind != "preview-supervisor-request"
+            || Mode is not ("bounded" or "live")
+        )
             throw new ArgumentException("Unsupported supervisor protocol.");
         if (!ValidText(RequestId, 128) || RequestId.Any(char.IsControl))
             throw new ArgumentException("A bounded request identity is required.");
@@ -82,6 +87,12 @@ public sealed record SupervisorRequest(
         && (empty || value.Length > 0);
 }
 
+public sealed record SupervisorStarted(int ProtocolVersion, string Kind, string RequestId)
+{
+    internal static SupervisorStarted For(SupervisorRequest request) =>
+        new(2, "preview-supervisor-started", request.RequestId);
+}
+
 public sealed record SupervisorResult(
     int ProtocolVersion,
     string Kind,
@@ -96,7 +107,7 @@ public sealed record SupervisorResult(
 {
     internal static SupervisorResult Failure(string requestId, string status, bool treeReaped) =>
         new(
-            1,
+            2,
             "preview-supervisor-result",
             requestId,
             status,

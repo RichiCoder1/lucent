@@ -2,9 +2,13 @@
 
 ## Current direction
 
-The owner authorized the remaining review corrections followed by the broader
-roadmap. The [handoff](agents/remaining-work-handoff.md) holds the current resume
-point and environment constraints. GitHub issue acceptance remains authoritative.
+The owner resumed native preview on October 4, 2026. Continue **native preview
+#224, then developer diagnostics #243, then transfer #244**. Hot Reload #225 and
+browser/WASM #226 remain conditional follow-ons with separate feasibility work.
+The [handoff](agents/remaining-work-handoff.md) holds the source, CI, publication
+and environment checkpoint. GitHub issue acceptance remains authoritative;
+[Road to 1.0 #223](https://github.com/RichiCoder1/lucent/issues/223) is reconciled
+with this resumed direction.
 
 Composition-scoped `Design.IsDesignMode`
 [#228](https://github.com/RichiCoder1/lucent/issues/228) is implemented and passes
@@ -21,20 +25,29 @@ automated and actual editor evidence, including the source-lock isolation fixes.
 The bounded [preview panel #231](plans/native-preview-panel.md) adds scenario and
 presentation controls, mapped diagnostics, acknowledged frame delivery and hidden
 panel suspension, verified in the real development editor. Next is unsaved and
-interactive preview #232, followed by external delivery #233. Its first steps
-must preserve original source/configuration semantics in SDK overlays and separate
-live renderer ownership from confirmed process cleanup.
+interactive preview #232, followed by external delivery #233. #227–231 are closed;
+#232's [October 4 feasibility work](plans/native-preview-interactive.md) rejects
+physical staged-source substitution because it loses original compiler paths
+and nested analyzer settings. A supported compiler-adapter experiment is under
+review; unsaved preview remains disabled. Retained rendering reduces paint
+allocations in the measured fixture, while PNG encoding remains the larger cost.
+Supervisor v2 separates bounded/live ownership and passes its native/editor
+checks. The persistent live host and integrated unsaved/interactive path remain
+in progress; this partial implementation does not close #232.
 Fresh-consumer onboarding #249 is verified: the [execution record](plans/onboarding-execution.md)
 distinguishes actual template/debug/native proof from final official 110.1
 installed-editor completion, hover and unsaved diagnostic recovery. Commit
 `3205cbbd` fixes the Windows path-casing defect exposed by that journey.
 
-The latest confirmed release is `0.3.0-dev.112.1`, from `d834ac78` after
+At this October 4 checkpoint, the latest confirmed release is
+`0.3.0-dev.112.1`, from `d834ac78` after
 [CI112](https://github.com/RichiCoder1/lucent/actions/runs/36808337607) passed managed,
 package/native and publication jobs. The preceding 110.1 complete artifact was
 independently authenticated for onboarding. Supported distribution uses authenticated GitHub Packages and
 verified CI/local packages and VSIX; public NuGet.org/Marketplace publication is
-not claimed.
+not claimed. #231 is implemented at `77f1c69d`; its failed CI116 did not publish.
+The test-only Windows path-alias correction is `c6b6482e`, with CI117 pending.
+The handoff separates its local regression evidence from publication.
 
 | Delivered work | Evidence and supported boundary |
 | --- | --- |
@@ -54,10 +67,8 @@ minimum-window editor and save/reopen check passes. Computer Use walkthroughs ar
 authorized and their sessions end after use. Injected keypad navigation is
 verified separately; physical main-arrow delivery is not claimed.
 
-Next, [native preview #224](https://github.com/RichiCoder1/lucent/issues/224) builds
-on #227's completed disposable-worker feasibility proof. Follow with diagnostics
-#243 and transfer #244 according to their technical dependencies. Design plans
-are not delivery or performance evidence. Historical CI failures and the previous
+Design plans are not delivery or performance evidence. Historical CI failures and
+the previous
 chronological summary remain in the [earlier roadmap](https://github.com/RichiCoder1/lucent/blob/3205cbbd521f8171ffe751b924166d4826076b0d/docs/ROADMAP.md)
 and their linked execution records; they are not current blockers.
 
@@ -65,9 +76,105 @@ Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Brow
 
 Production follows the decisions and contracts validated by the archived Native spike. The old implementation remains on [archive/avalonia-final](https://github.com/RichiCoder1/lucent/tree/archive/avalonia-final), and the complete spike record remains in the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). They are historical evidence, not active execution instructions.
 
-Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acceptance is authoritative. Issue #61 records repository cleanup and testing modernization, while issue #62 tracks pinned independent setup for the first links-and-notes application. This page records the supported boundary, agreed development direction, and deferred work. The next-development section is planning guidance, not a claim of implemented support.
+Execution work lives in GitHub Issues and [Lucent Native Project 4](https://github.com/users/RichiCoder1/projects/4/views/1). This page records the supported boundary, remaining delivery order and deferred work. Completed foundations below are historical context, not instructions to restart them.
 
-## Current execution
+## Remaining Road to 1.0
+
+Priority determines where to spend effort; issue dependencies determine what can
+be implemented safely. Do not invent parent-level blockers between independent
+streams or interrupt the preview work already in flight.
+
+| Order | Bounded outcome | Technical sequence |
+| --- | --- | --- |
+| 1. [Native preview #224](https://github.com/RichiCoder1/lucent/issues/224) | Consistent unsaved C#/.lui, interactive compiled frames, owned cleanup, then documented package-only consumption | #232 after completed #231; #233 after #232 |
+| 2. [Developer diagnostics #243](https://github.com/RichiCoder1/lucent/issues/243) | Read-only committed snapshots, redaction, provenance/source origins, inspector and bounded frame diagnostics | #250 first; #251 and #252 can follow independently; #253 needs both; #254 needs #252; #255 integrates #253/#254 with preview |
+| 3. [Transfer #244](https://github.com/RichiCoder1/lucent/issues/244) | Typed clipboard/drag transactions, Windows copy/link interoperability, bounded rich import and the two app consumers | #256 proves the native seam before #257; #258/#259/#261 follow #257; #260 follows drag routing, #262 follows clipboard and parser proof; #263 verifies the integrated framework |
+| Conditional follow-ons | Hot Reload acceleration and a narrow browser preview target | #234 and #238 each follow #233; their reports decide whether #235–237 and #239–241 proceed. WASM has no Hot Reload prerequisite |
+
+Diagnostics foundations #250–252 do not technically require preview. Final
+integration #255 depends on #232's live-session owner, alongside #253/#254.
+It reuses that session without making #232 depend on the inspector.
+Transfer feasibility #256 has no new technical prerequisite. These facts permit
+independent preparation; they do not change the selected priority order.
+
+Transfer includes [Issue Browser #264](https://github.com/RichiCoder1/lucent/issues/264)
+after #258/#260, and [Light Notes #10](https://github.com/RichiCoder1/light-notes/issues/10)
+after #258/#260/#262 and the completed native picker #166. The framework gallery
+can prove its own contracts independently; #244 remains open until its linked
+app work is delivered or explicitly rescoped. Notes keeps plain-text storage,
+safe HTML/RTF-to-text import and bounded text-file import; image attachments and
+a rich-text editor are not implicit requirements.
+
+### Finish #232 in reviewable slices
+
+Keep one acceptance owner, with four implementation slices rather than another
+broad framework refactor:
+
+1. **Authoritative unsaved builds.** Prove original-path C#/.lui content overlays
+   in both SDK preparation and final compilation. Preserve nested configuration,
+   analyzer/generator path observations, linked project items and diagnostics.
+   Track actual consumed overlay bytes separately from saved-disk freshness.
+   A frozen two-document vector must compile together without saving buffers;
+   failed or superseded builds never execute. Path mapping or `#line` alone is
+   insufficient. If no supported compiler integration preserves this contract,
+   record the failed proof and choose an explicit compiler-adapter design or
+   scope change before expanding implementation.
+2. **Persistent host and renderer.** Prove a small preview host and persistent Skia
+   surface using the existing application lifecycle. Measure the retained
+   resources before extracting any shared offscreen abstraction. Prove both
+   input and application invalidation cause frames in the same worker, with
+   explicit clock/idle behavior; keeping the testing host alive alone does not
+   establish a continuously pumped preview.
+3. **Supervised live session.** Join the frozen document vector to the persistent
+   host through a bounded session protocol. A verified build/vector, supervisor
+   started record and matching worker readiness permit live frames; only
+   confirmed process-tree termination permits replacement or directory deletion.
+   Keep stop independent of frame traffic, tie bounded production to display
+   acknowledgment and reject obsolete builds or input. Uncertain cleanup retains
+   quarantine. Do not enable unsaved refresh before the compiler proof passes.
+4. **Editor interaction and integration.** Map pointer/wheel/key/committed text
+   to the displayed frame,
+   account for zoom/letterboxing/scale, and release owned input on focus loss or
+   restart. Coalesce replaceable work without losing input edges. Rebuild/restart
+   resets state. Prove representative actual-editor behavior and resource limits;
+   keep detailed behavior matrices with their existing test owners.
+
+The first two proofs can proceed independently; the third consumes both and the
+fourth establishes the complete interactive contract. #233
+then owns tool/worker distribution, representative package consumers, recovery
+and measured support limits. Explicitly list supported workspace/host placements;
+remote support must be demonstrated or excluded, not inferred from a webview.
+Native chrome, popups, UIA and IME parity, runtime inspection, Hot Reload and
+browser execution remain outside #232.
+
+### 1.0 scope and remaining owner decisions
+
+The recommended release cut is the existing Windows-first, .NET 10/NativeAOT,
+`.lui`-first framework plus the accepted preview, diagnostics and transfer
+program. Preserve attractive stock controls and the independent Notes consumer;
+do not add another control catalogue or platform port merely to close 1.0.
+This is a proposed release boundary, not a claim that the owner has frozen 1.0.
+
+No new product decision blocks the current #232 proofs. Before declaring 1.0,
+record the remaining release choices under #223:
+
+- Which public C#/.lui, SDK/tooling and persisted-schema contracts become stable,
+  and how version support and breaking changes will be handled.
+- Which globalization, accessibility and real-language IME scenarios are in the
+  supported release matrix, and which limitations are explicitly accepted.
+- Whether the existing authenticated GitHub Packages/verified VSIX distribution
+  is sufficient, or public NuGet.org/Marketplace delivery is part of 1.0.
+- Whether successful Hot Reload/WASM feasibility justifies including either in
+  1.0. Recommend that neither block the native release; a failed feasibility
+  report requires an explicit defer/rescope decision, not fictitious completion.
+
+Closing feature tickets does not make the release decision. Continue focused,
+risk-based verification under [repository policy](agents/verification.md); reuse
+unaffected evidence and reserve broader checks for concrete release risks.
+Historic person-week estimates in parent designs require re-estimation against
+current source and feasibility results; this roadmap sets no delivery dates.
+
+## Delivered authoring and navigation
 
 The approved [application roots, routing and component authoring design](plans/application-routing-component-authoring.md)
 is delivered under [#301](https://github.com/RichiCoder1/lucent/issues/301) and #302–309.
@@ -125,19 +232,19 @@ Metadata-only Find References [#276](https://github.com/RichiCoder1/lucent/issue
 
 The [layout and paragraph decision](adr/0004-layout-and-paragraphs.md) selects the managed extension now used for the bounded Grid/Flex, responsive constraints, constrained virtualization, and wrapped-text contracts.
 
-## Next development: Light Notes
+## Light Notes direction and delivered foundations
 
-The independent application lives in [RichiCoder1/light-notes](https://github.com/RichiCoder1/light-notes). Its independent package consumption and first durable workflow are established; the sections below describe the remaining product and framework direction.
+The independent application lives in [RichiCoder1/light-notes](https://github.com/RichiCoder1/light-notes). Its package consumption and durable daily-use workflow are established. The next accepted application feature is transfer adoption in #10 after the framework work above; further product refinements should follow observed use.
 
-The [draft application and framework plan](plans/links-and-notes-draft.md) captures the agreed direction, proposed implementation sequence, and open technical choices. The [experience design](design/links-and-notes/README.md) and [responsive visual board](design/links-and-notes/VISUAL.md) provide proposed application flows and authoring examples. Execution specifications and status belong in GitHub Issues and Project 4.
+The original [application and framework plan](plans/links-and-notes-draft.md), [experience design](design/links-and-notes/README.md) and [responsive visual board](design/links-and-notes/VISUAL.md) retain the design rationale and authoring examples. Their original sequence is historical; current execution specifications and status belong in GitHub Issues and Project 4.
 
 Build a polished, local, single-user link inbox that also supports standalone notes. The owner and coding agents on the owner's Windows machine are the primary audience, with reproducible setup for other contributors. The application should make capture, editing, retrieval, opening, and archiving comfortable across wide, medium, and compact window arrangements.
 
-The first effort includes Grid, a coherent Flex-style Row/Column surface, responsive composition, and strong reusable layout, text, presentation, keyboard, and accessibility capabilities. Establish DI/hosting and local persistence through ecosystem components, with NativeAOT and the existing portable Core boundary intact. The managed layout evaluation selected Lucent-owned Core code; Taffy remains a credited historical alternative rather than an adopted dependency. Light Notes uses Microsoft.Data.Sqlite behind an app-owned serialized worker, schema and close policy; Lucent does not own application storage.
+The delivered foundations include Grid, Flex-style Row/Column, responsive composition, reusable layout/text/presentation, keyboard and accessibility capabilities, DI/hosting and local persistence. The managed layout evaluation selected Lucent-owned Core code; Taffy remains a credited historical alternative rather than an adopted dependency. Light Notes uses Microsoft.Data.Sqlite behind an app-owned serialized worker, schema and close policy; Lucent does not own application storage.
 
-Develop design quality alongside complete application slices. Deliver required `.lui` content composition, live-data, command, and editor-session contracts with those slices; prioritize additional authoring conveniences from observed friction afterward. Higher-level source-owned component recipes can build on the foundations later. Continue using the current risk-based verification policy.
+Continue developing design quality alongside complete application slices and prioritize authoring conveniences from observed friction. Higher-level source-owned component recipes can build on the delivered composition, live-data, command and editor-session contracts later.
 
-## Current execution
+## Delivered Light Notes refinements
 
 The independent September 8 review is implemented through [#119](https://github.com/RichiCoder1/lucent/issues/119): reactive ownership, compiler binding, text rendering, input, popup placement and desktop editing fixes, together with measured reactive, paragraph-cache, accessibility-navigation and tooling improvements. [#143](https://github.com/RichiCoder1/lucent/issues/143) organizes the stock component families and adds the `.lui`-authored ErrorNotice used by Issue Browser; [#152](https://github.com/RichiCoder1/lucent/issues/152) delivers public `.lui` XML documentation. CI covers managed and NativeAOT contracts plus package-only consumption. Issue comments record publication, Light Notes integration, source-bound checks and remaining limitations. Physical mixed-DPI popup/input and UIA geometry checks are complete in #153; real-language IME certification remains separate.
 
@@ -147,30 +254,20 @@ Owner interaction review exposed a new refinement batch: [#91 long-note freeze a
 
 The [daily-use execution](plans/daily-use-execution.md) is delivered: #80–#90 cover the responsive shell, 750 ms autosave, complete workflow, safe restoration, presentation, explicit async resources, optional R3 integration and CI/review improvements. Published native interaction and targeted accessibility checks are complete. Use the [Light Notes review guide](https://github.com/RichiCoder1/light-notes/blob/main/docs/MANUAL-REVIEW.md) to collect concrete product, framework and .lui feedback before selecting the next chunk. Records, expression-bodied markup and a component registry remain deferred.
 
-## Original foundation sequence
-
-The [architecture/code review](../plans/architecture-review.md) informs this sequence; it is a historical audit, not an acceptance gate. GitHub records implementation status.
-
-1. Correct parser/tooling, empty-field, wake-delivery, and UIA defects; design the responsive experience in parallel.
-2. Establish retained current-item updates, `.lui` content composition, host shutdown/service ownership, editor sessions, and explicit responsive participation.
-3. Resolve constrained paragraph measurement and the layout engine; prove pinned independent startup and ordered local persistence; reduce per-event input work.
-4. Implement shared Grid/Flex/wrapped text, constrained virtualization, multiline editing, wheel/trackpad routing, and application commands.
-5. Compose the responsive `.lui` inbox/editor (#80), then review the app and framework/authoring experience with the owner before completing the durable capture/edit/find/open/archive/reopen loop (#81).
-6. Refine daily-use design, recovery and accessibility, then select further authoring QoL from observed friction.
-
-GitHub blocker relationships determine what must finish first. Independent fixes and the hosting/storage and layout tracks need not be serialized. Keep focused verification, NativeAOT/trimming correctness, and source-map/freshness guarantees; no new milestone gates or routine full-release runs.
-
-Track execution in [#63](https://github.com/RichiCoder1/lucent/issues/63), its 21 sub-issues, and [Project 4](https://github.com/users/RichiCoder1/projects/4). Start with independent fixes [#64–#68](https://github.com/RichiCoder1/lucent/issues/63) and design [#69](https://github.com/RichiCoder1/lucent/issues/69). The [plan ticket index](plans/links-and-notes-draft.md#ordered-implementation-sequence) records the full order and blockers; GitHub owns live status.
+The original [architecture/code review](../plans/architecture-review.md) and
+[#63 foundation plan](https://github.com/RichiCoder1/lucent/issues/63) retain the
+completed implementation sequence. They do not reopen #64–81 or add acceptance
+gates to the current work.
 
 ## Deferred directions
 
 - Broader platform styles and native controls. Opt-in standard Windows menus and retained scrollbar presets are delivered in [#101](https://github.com/RichiCoder1/lucent/issues/101); nested menus and bounded safe-triangle pointer intent are implemented in [#104](https://github.com/RichiCoder1/lucent/issues/104).
 
 - Additional substantial samples and maintained ports after the first useful links-and-notes application.
-- Stable API and package compatibility, a 1.0 contract, and a broader control catalog.
+- A broader control catalog beyond the delivered component program. The 1.0 compatibility policy is an explicit release decision above, not an indefinitely deferred feature.
 - Runtime CSS/selectors, general templates, runtime token/theme import, and Linux desktop theme integration.
 - Sync, automatic page extraction, rich-text editing, and elaborate organization for the links-and-notes application.
-- Exhaustive IME or accessibility certification, drag/drop, editable tables, broader menu capabilities, and plugin loading until a selected application flow justifies their scope. Password input, read-only tables, trees, tabs and dialogs are delivered in the component program.
+- Exhaustive IME or accessibility certification, editable tables, broader menu capabilities and plugin loading. Bounded drag/drop and rich import are accepted in #244; external Move, virtual-file streams and full rich editing need separate application demand and native proof. Password input, read-only tables, trees, tabs and dialogs are delivered in the component program.
 - Production GPU presentation, win-arm64, macOS, and Wayland until measured demand and new platform evidence justify them.
 - .NET 11 experiments after GA only when dependency support, warning-clean NativeAOT publication, reproducible tooling, and measured benefit are established.
 

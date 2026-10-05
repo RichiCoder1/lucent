@@ -46,7 +46,7 @@ function createPreviewRuntime({ supervisorPath, buildToolPath, storageDirectory,
         pending.add(root);
         try {
             result = await supervise(supervisorPath, {
-                protocolVersion: 1, kind: "preview-supervisor-request", requestId: randomUUID(),
+                protocolVersion: 2, kind: "preview-supervisor-request", mode: "bounded", requestId: randomUUID(),
                 program, args, workingDirectory: path.dirname(program), logDirectory,
                 timeoutMs: phase === "build" ? 600000 : 60000, graceMs: 1500,
                 maxOutputBytes: 1024 * 1024,

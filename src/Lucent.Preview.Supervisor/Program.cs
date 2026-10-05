@@ -65,7 +65,17 @@ public static class Program
                     }
                 });
                 result = await ProcessSupervisor
-                    .RunAsync(request, stop.Token)
+                    .RunAsync(
+                        request,
+                        started =>
+                        {
+                            Console.Out.WriteLine(
+                                JsonSerializer.Serialize(started, SupervisorProtocol.JsonOptions)
+                            );
+                            Console.Out.Flush();
+                        },
+                        stop.Token
+                    )
                     .ConfigureAwait(false);
             }
             catch (Exception error)
